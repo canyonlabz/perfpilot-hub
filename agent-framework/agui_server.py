@@ -1148,6 +1148,16 @@ def main() -> None:
     except ImportError:
         log.debug("python-dotenv not installed; relying on shell env only")
 
+    # Use the OS certificate store (Windows/macOS) instead of certifi's bundle.
+    # This is required when Norton 360 / Zscaler / corporate TLS inspection
+    # injects a custom root CA that httpx (via certifi) doesn't know about.
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+        log.info("truststore: injected OS certificate store into ssl module")
+    except ImportError:
+        log.debug("truststore not installed; using certifi CA bundle")
+
     import uvicorn
     uvicorn.run(
         "agui_server:app",

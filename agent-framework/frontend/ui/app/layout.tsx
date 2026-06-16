@@ -18,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <CopilotKit runtimeUrl="/copilotkit">
+        <CopilotKit runtimeUrl="/api/copilotkit" agent="perfpilot-orchestrator">
           {children}
         </CopilotKit>
       </body>

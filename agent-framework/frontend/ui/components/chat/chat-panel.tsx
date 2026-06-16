@@ -8,6 +8,7 @@ export function ChatPanel() {
     <div className="flex-1 flex flex-col h-full">
       <CopilotChat
         className="h-full"
+        agent="perfpilot-orchestrator"
         labels={{
           title: "PerfPilot",
           initial: "Hi! I'm PerfPilot, your AI performance testing assistant. How can I help you today?",
