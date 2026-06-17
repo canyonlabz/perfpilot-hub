@@ -52,6 +52,7 @@ work without per-call `.rebuild()` shenanigans.
 """
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -202,7 +203,7 @@ def _register_tools(agent: Any) -> None:
 # Tool 1 (PBI 3.7.3): list_available_specialists
 # =============================================================================
 
-def list_available_specialists() -> list[dict]:
+def list_available_specialists() -> str:
     """Return the catalog of currently-enabled PerfPilot specialist agents.
 
     Each entry is a dict shaped roughly like an A2A AgentCard plus a few
@@ -235,7 +236,8 @@ def list_available_specialists() -> list[dict]:
         `agents.yaml` may list an agent ahead of its scaffold).
 
     Returns:
-        A list[dict]. Empty list when no specialists are enabled.
+        A JSON string encoding the list of specialist dicts.
+        Empty JSON array when no specialists are enabled.
     """
     from utils import agents_config
 
@@ -272,7 +274,7 @@ def list_available_specialists() -> list[dict]:
                 "mcp_namespaces": mcp_namespaces,
             }
         )
-    return specialists
+    return json.dumps(specialists, indent=2)
 
 
 def _safe_read_agent_card(agent_folder: Path) -> dict:
@@ -320,7 +322,7 @@ def delegate_to_specialist(
         Optional[str],
         "Optional test_run_id for correlation across the PTLC pipeline.",
     ] = None,
-) -> dict:
+) -> str:
     """POST a task to the local A2A surface and return the new task_id.
 
     Returns immediately (the work runs asynchronously on the A2A server).
@@ -358,20 +360,20 @@ def delegate_to_specialist(
             response = client.post(url, json=body, headers=headers)
     except Exception as exc:
         log.warning("delegate_to_specialist HTTP error: %s", exc)
-        return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
     if response.status_code >= 400:
-        return {
+        return json.dumps({
             "ok": False,
             "error": {
                 "type": "HTTPError",
                 "status_code": response.status_code,
                 "message": response.text[:500],
             },
-        }
+        })
     body_out = response.json() if response.content else {}
     body_out["ok"] = True
-    return body_out
+    return json.dumps(body_out)
 
 
 # =============================================================================
@@ -381,7 +383,7 @@ def delegate_to_specialist(
 def check_task_status(
     agent_name: Annotated[str, "Specialist agent that owns the task."],
     task_id: Annotated[str, "UUID of a previously-delegated task."],
-) -> dict:
+) -> str:
     """GET the current status of a previously-delegated task.
 
     Returns the task_store row in dict form (status, result, error,
@@ -409,29 +411,29 @@ def check_task_status(
             response = client.get(url, headers=headers)
     except Exception as exc:
         log.warning("check_task_status HTTP error: %s", exc)
-        return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
     if response.status_code == 404:
-        return {
+        return json.dumps({
             "ok": False,
             "error": {
                 "type": "NotFound",
                 "status_code": 404,
                 "message": f"Task {task_id} not found for agent {agent_name}.",
             },
-        }
+        })
     if response.status_code >= 400:
-        return {
+        return json.dumps({
             "ok": False,
             "error": {
                 "type": "HTTPError",
                 "status_code": response.status_code,
                 "message": response.text[:500],
             },
-        }
+        })
     body = response.json() if response.content else {}
     body["ok"] = True
-    return body
+    return json.dumps(body)
 
 
 # =============================================================================
@@ -455,7 +457,7 @@ async def request_human_approval(
         float,
         "Maximum seconds to wait for a decision. Default 300.0 (5 min).",
     ] = DEFAULT_HITL_TIMEOUT_SECONDS,
-) -> dict:
+) -> str:
     """Open a HITL approval prompt and block until the human decides.
 
     Inserts a row in `hitl_approvals` via `utils.hitl_store.create_prompt`,
@@ -481,19 +483,19 @@ async def request_human_approval(
     try:
         task_uuid = UUID(task_id)
     except (TypeError, ValueError) as exc:
-        return {
+        return json.dumps({
             "ok": False,
             "error": {
                 "type": "ValueError",
                 "message": f"task_id is not a valid UUID: {exc}",
             },
-        }
+        })
 
     try:
         approval = await hitl_store.create_prompt(task_uuid, dict(prompt_payload or {}))
     except Exception as exc:
         log.exception("request_human_approval: create_prompt failed")
-        return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
     deadline = asyncio.get_event_loop().time() + max(0.0, timeout_seconds)
     poll_interval = max(0.1, float(poll_interval_seconds))
@@ -508,42 +510,40 @@ async def request_human_approval(
             current = await hitl_store.get_approval(approval.id)
         except Exception as exc:
             log.exception("request_human_approval: get_approval failed")
-            return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+            return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
         if current is None:
-            # Row went missing while we were polling (very unusual --
-            # external cleanup or row delete). Surface honestly.
-            return {
+            return json.dumps({
                 "ok": False,
                 "error": {
                     "type": "RowMissing",
                     "message": f"hitl_approvals row {approval.id} disappeared during poll.",
                 },
-            }
+            })
 
         if current.decision in ("approved", "rejected"):
-            return {
+            return json.dumps({
                 "ok": True,
                 "approval_id": current.id,
                 "decision": current.decision,
                 "feedback": current.feedback,
                 "decided_by": current.decided_by,
                 "timed_out": False,
-            }
+            })
 
         if asyncio.get_event_loop().time() >= deadline:
             log.warning(
                 "request_human_approval: timed out waiting on approval_id=%d after %.1fs",
                 approval.id, timeout_seconds,
             )
-            return {
+            return json.dumps({
                 "ok": True,
                 "approval_id": current.id,
                 "decision": "timeout",
                 "feedback": None,
                 "decided_by": None,
                 "timed_out": True,
-            }
+            })
 
         await asyncio.sleep(poll_interval)
 
