@@ -8,6 +8,8 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { listThreads, createThread } from "@/lib/api";
 import type { Thread } from "@/lib/types";
 
+const STORAGE_KEY = "perfpilot_active_thread_id";
+
 export default function HomePage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -16,7 +18,11 @@ export default function HomePage() {
     async function init() {
       try {
         const data = await listThreads();
-        if (data.threads.length > 0) {
+        const storedId = localStorage.getItem(STORAGE_KEY);
+
+        if (storedId && data.threads.some((t) => t.thread_id === storedId)) {
+          setActiveThreadId(storedId);
+        } else if (data.threads.length > 0) {
           setActiveThreadId(data.threads[0].thread_id);
         } else {
           const newThread = await createThread("New Conversation");
@@ -30,6 +36,12 @@ export default function HomePage() {
     }
     init();
   }, []);
+
+  useEffect(() => {
+    if (activeThreadId) {
+      localStorage.setItem(STORAGE_KEY, activeThreadId);
+    }
+  }, [activeThreadId]);
 
   const handleSelectThread = useCallback((threadId: string) => {
     setActiveThreadId(threadId);
@@ -51,22 +63,29 @@ export default function HomePage() {
   }
 
   return (
-    <CopilotKit
-      runtimeUrl="/api/copilotkit"
-      agent="perfpilot-orchestrator"
-      threadId={activeThreadId || undefined}
-    >
-      <div className="flex flex-col h-screen">
-        <Header />
-        <div className="flex flex-1 overflow-hidden">
-          <ThreadSidebar
-            activeThreadId={activeThreadId}
-            onSelectThread={handleSelectThread}
-            onNewThread={handleNewThread}
-          />
-          <ChatPanel threadId={activeThreadId} />
-        </div>
+    <div className="flex flex-col h-screen">
+      <Header />
+      <div className="flex flex-1 overflow-hidden">
+        <ThreadSidebar
+          activeThreadId={activeThreadId}
+          onSelectThread={handleSelectThread}
+          onNewThread={handleNewThread}
+        />
+        {activeThreadId ? (
+          <CopilotKit
+            key={activeThreadId}
+            runtimeUrl="/api/copilotkit"
+            agent="perfpilot-orchestrator"
+            threadId={activeThreadId}
+          >
+            <ChatPanel threadId={activeThreadId} />
+          </CopilotKit>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <p className="text-sm">Select a thread to start chatting.</p>
+          </div>
+        )}
       </div>
-    </CopilotKit>
+    </div>
   );
 }

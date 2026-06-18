@@ -332,6 +332,7 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
 
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []
+
                 # AG2's dispatch yields SSE-encoded strings already (one
                 # `event: ...\ndata: ...\n\n` block per chunk). We pass each
                 # through to the client AND parse the data line to capture
@@ -343,6 +344,16 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                     if isinstance(chunk, bytes):
                         chunk = chunk.decode("utf-8", errors="ignore")
                     yield chunk
+                    # DEBUG: log event types from AG2 stream
+                    for _dbg_line in chunk.splitlines():
+                        _dbg_stripped = _dbg_line.strip()
+                        if _dbg_stripped.startswith("data:"):
+                            try:
+                                _dbg_data = json.loads(_dbg_stripped[5:].strip())
+                                if isinstance(_dbg_data, dict) and "type" in _dbg_data:
+                                    log.debug("AG2 SSE event type: %s", _dbg_data["type"])
+                            except Exception:
+                                pass
                     _capture_assistant_text_from_sse_chunk(chunk, accumulated_text)
 
                 if existing_thread is not None and accumulated_text:
@@ -440,6 +451,9 @@ def _capture_assistant_text_from_sse_chunk(chunk: str, accumulator: list) -> Non
 
         data: {"type": "TEXT_MESSAGE_CONTENT", "delta": "...", ...}
 
+    AG2 may also emit content via TEXT_MESSAGE_CHUNK or carry completed
+    text in TEXT_MESSAGE_END. We capture all known patterns.
+
     Anything that fails to parse is silently ignored -- the chunk is
     still passed through to the client; only our local accumulator
     misses a delta.
@@ -457,14 +471,22 @@ def _capture_assistant_text_from_sse_chunk(chunk: str, accumulator: list) -> Non
             continue
         if not isinstance(data, dict):
             continue
-        # AG-UI events use ALLCAPS_SNAKE for `type` (e.g.
-        # TEXT_MESSAGE_CONTENT). Be tolerant of either casing in case
-        # a future AG-UI version changes.
         event_type = str(data.get("type", "")).upper()
+
         if event_type == "TEXT_MESSAGE_CONTENT":
             delta = data.get("delta")
             if isinstance(delta, str):
                 accumulator.append(delta)
+
+        elif event_type == "TEXT_MESSAGE_CHUNK":
+            delta = data.get("delta") or data.get("content") or data.get("text")
+            if isinstance(delta, str):
+                accumulator.append(delta)
+
+        elif event_type == "TEXT_MESSAGE_END":
+            content = data.get("content") or data.get("text") or data.get("delta")
+            if isinstance(content, str) and content:
+                accumulator.append(content)
 
 
 # =============================================================================
