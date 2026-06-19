@@ -81,6 +81,16 @@ FRAMEWORK_DIR = Path(__file__).resolve().parent
 SERVER_VERSION = "0.1.0"
 SERVER_TITLE = "PerfPilot Agents - AG-UI Bridge"
 
+# Load .env at module scope so environment variables (LLM credentials, ports,
+# TLS paths) are available when create_app() → build_orchestrator() runs at
+# import time — before main() has a chance to call load_dotenv().
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(FRAMEWORK_DIR / ".env", override=False)
+    del _load_dotenv
+except ImportError:
+    pass
+
 
 # =============================================================================
 # App lifespan

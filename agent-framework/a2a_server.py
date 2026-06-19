@@ -64,6 +64,16 @@ AGENTS_DIR = FRAMEWORK_DIR / "agents"
 SERVER_VERSION = "0.1.0"
 SERVER_TITLE = "PerfPilot Agents - A2A Surface"
 
+# Load .env at module scope so environment variables (LLM credentials, ports,
+# TLS paths) are available when create_app() runs at import time — before
+# main() has a chance to call load_dotenv().
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(FRAMEWORK_DIR / ".env", override=False)
+    del _load_dotenv
+except ImportError:
+    pass
+
 # PBI 3.7.8 / Decision 17: when an A2A caller omits `X-External-Thread-Id`,
 # auto-mint one per (external_session_id) and cache it so all requests in
 # the same upstream session share the same thread. Bounded LRU-ish dict
