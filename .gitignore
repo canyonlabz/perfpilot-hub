@@ -374,6 +374,11 @@ agent-framework/.env
 agent-framework/config/agents.yaml
 agent-framework/agents/*/config.yaml
 
+# Re-include the Next.js frontend lib/ directory (excluded by the bare `lib/`
+# rule in the Python packaging section which matches recursively)
+!agent-framework/frontend/ui/lib/
+!agent-framework/frontend/ui/lib/**
+
 # Dev-only destructive helper for re-DDL'ing perfagent_state during the
 # architecture-build phase. Kept out of the published repo because it can
 # wipe a developer's local database with a single `--yes` flag and is not
