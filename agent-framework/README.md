@@ -314,6 +314,8 @@ function call that specialists invoke when they need a green light.
 ### Prerequisites
 
 - Python 3.12+
+- Node.js 25.x and npm 11.x (for the Web UI)
+- Docker Desktop (for the database and MCP gateway containers)
 - PostgreSQL 18 with pgvector + Apache AGE (existing
   `Dockerfile.pgvector-age.example` image works as-is — Epic 3 adds the
   `perfagent_state` database additively on the same instance)
@@ -321,6 +323,11 @@ function call that specialists invoke when they need a green light.
   Ollama instance
 
 ### Sanity-check the current build
+
+> **Note:** The `scripts/` folder and all smoke test scripts referenced below
+> are **gitignored** and not committed to the repository. They are local
+> development utilities used by the project maintainer during active
+> development. If you are cloning this branch, you will not see them.
 
 From the repo root:
 
@@ -355,6 +362,100 @@ real MCP wiring + the execution-agent end-to-end.
 > load-generator initialization phase. This is expected vendor
 > behavior; the smoke's 300-second `wait_for_completion` timeout is
 > sized for it.
+
+### Running the Web UI
+
+The PerfPilot Web UI is a Next.js chat interface that connects to the AG-UI
+backend. Services must be started **in order** — each depends on the previous:
+
+#### Step 1 — Start the database and MCP gateway (Docker)
+
+```bash
+# Windows:
+docker compose -f docker/docker-compose-full-windows.yaml up -d
+
+# macOS:
+docker compose -f docker/docker-compose-full-mac.yaml up -d
+```
+
+The "FULL" compose variant starts both the **PerfMemory PostgreSQL** database
+(which includes the `perfagent_state` database for threads, sessions, and
+conversation history) and the **Gateway MCP** (the unified MCP endpoint that
+agents route tool calls through).
+
+Wait until all containers are healthy before proceeding.
+
+> **First time only:** If the `perfagent_state` database has not been
+> provisioned yet, run: `python agent-framework/sql/provision.py`
+
+#### Step 2 — Start the AG-UI backend (Python)
+
+```bash
+cd agent-framework
+python agui_server.py
+```
+
+Starts the AG-UI bridge on **port 8002**. Wait for:
+```
+INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+```
+
+#### Step 3 — Start the Web UI frontend (Node.js)
+
+```bash
+cd agent-framework/frontend/ui
+npm install    # first time only
+npm run dev
+```
+
+Starts the Next.js dev server on **port 3000**. Wait for:
+```
+✓ Ready in Xs
+```
+
+Open `http://localhost:3000` in your browser. You should see the PerfPilot
+chat interface with a green "Connected" badge in the header.
+
+#### Stopping (reverse order)
+
+1. Stop the frontend: `Ctrl+C` in the frontend terminal
+2. Stop the backend: `Ctrl+C` in the backend terminal
+3. Stop Docker: `docker compose -f docker/docker-compose-full-windows.yaml down`
+
+#### Quick reference
+
+| Service | Port | Start command | Started from |
+|---------|------|---------------|--------------|
+| PerfMemory DB + Gateway MCP | 5432, varies | `docker compose -f docker/docker-compose-full-*.yaml up -d` | repo root |
+| AG-UI backend | 8002 | `python agui_server.py` | `agent-framework/` |
+| Web UI frontend | 3000 | `npm run dev` | `agent-framework/frontend/ui/` |
+| A2A server (optional) | 8001 | `python a2a_server.py` | `agent-framework/` |
+
+> The A2A server (port 8001) is only needed for agent-to-agent
+> communication and the upcoming Agent Catalog panel. The chat interface
+> works without it.
+
+For more details on the Web UI, see
+[`frontend/ui/README.md`](./frontend/ui/README.md).
+
+#### Changing ports (avoiding conflicts)
+
+The default ports may already be in use (e.g., by another AI Agent framework on
+the same machine). All ports are configurable via environment variables —
+hardcoded fallbacks exist only as defaults when the env var is unset.
+
+| Service | Default port | Env var | Additional files to update |
+|---------|-------------|---------|---------------------------|
+| Frontend dev server | 3000 | CLI: `npm run dev -- --port 3001` | Update `AGUI_CORS_ORIGINS` in `.env` to include the new origin |
+| AG-UI backend | 8002 | `AGUI_PORT` | `frontend/ui/next.config.js` (2 proxy destinations), `frontend/ui/app/api/copilotkit/route.ts` (HttpAgent URL) |
+| A2A server | 8001 | `A2A_PORT` | Set `PERFPILOT_A2A_BASE_URL` in `.env` for the orchestrator's delegation calls |
+| Gateway MCP | 8000 | `GATEWAY_MCP_URL` | — (fully env-driven) |
+| PostgreSQL | 5432 | `PERFAGENT_STATE_PORT` | — (fully env-driven) |
+| CORS origins | localhost:3000 | `AGUI_CORS_ORIGINS` | — (comma-separated list of allowed origins) |
+
+See `.env.example` for the complete environment template, and
+[`frontend/ui/README.md` — Changing Ports](./frontend/ui/README.md#changing-ports)
+for step-by-step instructions.
 
 ### How to follow along
 
@@ -391,7 +492,7 @@ as each milestone group stabilizes.
 | 🔍 Analysis agent | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; multi-source correlation (BlazeMeter + Datadog), bottleneck identification, SLA verdict |
 | 📄 Reporting agent (with multi-round HITL revision) | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; drafts → human reviews → revises → publishes to Confluence |
 | 📣 Notifications agent (vendor-neutral events) | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; emits `TestRunCompleted` events; Teams / SharePoint / Slack adapters wired in Epic 4 |
-| CopilotKit React frontend (Next.js 14 + AG-UI) | ⏭ Planned | Talks to the real orchestrator that already runs on `/copilotkit/` today |
+| CopilotKit React frontend (Next.js 15 + AG-UI) | 🟡 In progress | Chat interface, thread management, persistent history, and streaming all working (PBI 3.6.7.1–3.6.7.3 + BUG-02 complete); agent catalog, task streaming, HITL UI, and results display coming next. See [`frontend/ui/README.md`](./frontend/ui/README.md) |
 | Docker compose for the agent stack (`docker-compose-a2a-local-*.yaml`) | ⏭ Planned | Four services: gateway, agents, db, Playwright MCP. Today the agent runtime is exercised via Python smokes that boot servers in-process |
 | Auth + OpenTelemetry hooks (default-off, Epic 4-ready) | 🟡 Hooks reserved | Placeholders in place; activation deferred to cloud deployment |
 | Azure Container Apps / EntraID / Key Vault deployment | 🔮 Epic 4 | Vendor-agnostic by design — other clouds and auth providers are first-class targets |
