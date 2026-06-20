@@ -33,3 +33,25 @@ export interface MessagesResponse {
   limit: number;
   offset: number;
 }
+
+// --- Agent Catalog ---
+
+export interface Skill {
+  name: string;
+  description: string;
+}
+
+export interface Agent {
+  name: string;
+  display_name: string;
+  description: string;
+  version: string;
+  status: "available" | "in_development";
+  skills: Skill[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentCatalogResponse {
+  enabled_agents: string[];
+  known_agents: string[];
+}

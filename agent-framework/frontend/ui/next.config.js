@@ -10,6 +10,10 @@ const nextConfig = {
         source: "/health",
         destination: "http://localhost:8002/health",
       },
+      {
+        source: "/a2a/:path*",
+        destination: "http://localhost:8001/:path*",
+      },
     ];
   },
   webpack: (config) => {

@@ -5,6 +5,7 @@ import { CopilotKit } from "@copilotkit/react-core";
 import { Header } from "@/components/layout/header";
 import { ThreadSidebar } from "@/components/sidebar/thread-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { CatalogPanel } from "@/components/catalog/catalog-panel";
 import { listThreads, createThread } from "@/lib/api";
 import type { Thread } from "@/lib/types";
 
@@ -13,6 +14,7 @@ const STORAGE_KEY = "perfpilot_active_thread_id";
 export default function HomePage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -51,6 +53,10 @@ export default function HomePage() {
     setActiveThreadId(thread.thread_id);
   }, []);
 
+  const handleToggleCatalog = useCallback(() => {
+    setShowCatalog((prev) => !prev);
+  }, []);
+
   if (!initialized) {
     return (
       <div className="flex flex-col h-screen">
@@ -64,7 +70,7 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col h-screen">
-      <Header />
+      <Header showCatalog={showCatalog} onToggleCatalog={handleToggleCatalog} />
       <div className="flex flex-1 overflow-hidden">
         <ThreadSidebar
           activeThreadId={activeThreadId}
@@ -84,6 +90,11 @@ export default function HomePage() {
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <p className="text-sm">Select a thread to start chatting.</p>
           </div>
+        )}
+        {showCatalog && (
+          <aside className="w-80 border-l bg-card flex-shrink-0">
+            <CatalogPanel />
+          </aside>
         )}
       </div>
     </div>

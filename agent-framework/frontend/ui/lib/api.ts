@@ -1,4 +1,10 @@
-import type { Thread, ThreadsResponse, MessagesResponse } from "./types";
+import type {
+  Thread,
+  ThreadsResponse,
+  MessagesResponse,
+  Agent,
+  AgentCatalogResponse,
+} from "./types";
 
 export interface HealthResponse {
   service: string;
@@ -69,5 +75,22 @@ export async function fetchMessages(
 ): Promise<MessagesResponse> {
   const res = await fetch(`/api/threads/${threadId}/messages`);
   if (!res.ok) throw new Error(`Failed to fetch messages: ${res.status}`);
+  return res.json();
+}
+
+// --- Agent Catalog API (A2A server, proxied via /a2a/*) ---
+
+export async function fetchAgentCatalog(): Promise<AgentCatalogResponse> {
+  const res = await fetch("/a2a/agents");
+  if (!res.ok) throw new Error(`Failed to fetch agent catalog: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAgentCard(agentName: string): Promise<Agent> {
+  const res = await fetch(
+    `/a2a/agents/${agentName}/.well-known/agent.json`
+  );
+  if (!res.ok)
+    throw new Error(`Failed to fetch agent card for ${agentName}: ${res.status}`);
   return res.json();
 }

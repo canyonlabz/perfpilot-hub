@@ -1,13 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, CheckCircle2, XCircle } from "lucide-react";
+import { Activity, CheckCircle2, XCircle, BookOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fetchHealth } from "@/lib/api";
 
 type HealthStatus = "loading" | "healthy" | "unavailable";
 
-export function Header() {
+interface HeaderProps {
+  showCatalog?: boolean;
+  onToggleCatalog?: () => void;
+}
+
+export function Header({ showCatalog, onToggleCatalog }: HeaderProps) {
   const [status, setStatus] = useState<HealthStatus>("loading");
 
   useEffect(() => {
@@ -36,7 +41,23 @@ export function Header() {
         <Activity className="h-5 w-5 text-primary" />
         <span className="font-semibold text-lg">PerfPilot</span>
       </div>
-      <HealthIndicator status={status} />
+      <div className="flex items-center gap-3">
+        {onToggleCatalog && (
+          <button
+            onClick={onToggleCatalog}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              showCatalog
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+            title="Agent Catalog"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Agents
+          </button>
+        )}
+        <HealthIndicator status={status} />
+      </div>
     </header>
   );
 }
