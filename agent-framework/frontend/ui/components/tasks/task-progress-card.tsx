@@ -74,6 +74,80 @@ function formatAgentName(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function formatToolName(tool: string): string {
+  return tool.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatResultSummary(result: Record<string, unknown>): React.ReactNode {
+  // Stub agent result
+  if (result.stub === true) {
+    const agent = (result.agent as string) ?? "unknown";
+    return (
+      <>
+        <span className="font-medium">{formatAgentName(agent)}</span>
+        {" — stub placeholder (no real work performed)"}
+      </>
+    );
+  }
+
+  const toolResult = result.tool_result as Record<string, unknown> | undefined;
+  const tool = result.tool as string | undefined;
+
+  // Execution-agent envelope with tool_result
+  if (toolResult && tool) {
+    const ok = toolResult.ok as boolean;
+    const toolLabel = formatToolName(tool);
+
+    if (!ok) {
+      const err = toolResult.error as Record<string, unknown> | undefined;
+      const message = (err?.message as string) ?? "Unknown error";
+      return (
+        <>
+          <span className="font-medium">{toolLabel}</span>
+          {" failed — "}{message}
+        </>
+      );
+    }
+
+    // Success — build a context-specific summary
+    const parts: string[] = [];
+
+    if (toolResult.run_id) parts.push(`Run ID: ${toolResult.run_id}`);
+    if (toolResult.vendor) parts.push(`${toolResult.vendor}`);
+    if (toolResult.status) parts.push(`status: ${toolResult.status}`);
+    if (toolResult.elapsed_seconds) {
+      const secs = Number(toolResult.elapsed_seconds);
+      parts.push(secs >= 60 ? `${(secs / 60).toFixed(1)} min` : `${secs.toFixed(0)}s`);
+    }
+    if (toolResult.polls) parts.push(`${toolResult.polls} polls`);
+
+    return (
+      <>
+        <span className="font-medium">{toolLabel}</span>
+        {" completed"}
+        {parts.length > 0 && <> — {parts.join(", ")}</>}
+      </>
+    );
+  }
+
+  // Generic fallback: try common fields, then truncated JSON
+  const summary = (result.summary as string) ?? (result.message as string);
+  if (summary) return summary;
+
+  const json = JSON.stringify(result);
+  return json.length > 120 ? json.slice(0, 120) + "…" : json;
+}
+
+function formatErrorSummary(error: Record<string, unknown>): React.ReactNode {
+  const message = (error.message as string)
+    ?? (error.detail as string)
+    ?? (error.reason as string);
+  if (message) return message;
+
+  const json = JSON.stringify(error);
+  return json.length > 120 ? json.slice(0, 120) + "…" : json;
+}
+
 export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardProps) {
   const [agentName, setAgentName] = useState(initialSnapshot?.agent_name ?? "");
   const [currentStatus, setCurrentStatus] = useState<TaskStatus>(
@@ -209,28 +283,20 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
           <div ref={stepsEndRef} />
 
           {/* Terminal result/error summary */}
-          {isTerminal && (result || error) && (
+          {isTerminal && error && (
+            <div className="mx-2 mt-1 mb-1 p-2 rounded text-xs bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300">
+              <p>{formatErrorSummary(error)}</p>
+            </div>
+          )}
+          {isTerminal && result && !error && (
             <div
               className={`mx-2 mt-1 mb-1 p-2 rounded text-xs ${
-                currentStatus === "completed"
-                  ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300"
-                  : "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300"
+                (result.tool_result as Record<string, unknown>)?.ok === false
+                  ? "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300"
+                  : "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300"
               }`}
             >
-              {error && (
-                <p>
-                  <span className="font-medium">Error:</span>{" "}
-                  {(error.message as string) ?? JSON.stringify(error)}
-                </p>
-              )}
-              {result && !error && (
-                <p>
-                  <span className="font-medium">Result:</span>{" "}
-                  {(result.summary as string) ??
-                    (result.message as string) ??
-                    JSON.stringify(result)}
-                </p>
-              )}
+              <p>{formatResultSummary(result)}</p>
             </div>
           )}
         </div>
