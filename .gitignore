@@ -359,6 +359,9 @@ docker/config/jmeter/jmeter-overrides.properties
 docker/config/perfmemory/config.yaml
 docker/config/perfmemory/taxonomy.yaml
 docker/certs/jmeter/*.jks
+!docker/certs/jmeter/.gitkeep
+docker/certs/corporate/*
+!docker/certs/corporate/.gitkeep
 docker/.env.gateway
 
 # Ignore the following AG2 Agent Framework local configuration files (operators

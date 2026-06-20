@@ -171,7 +171,8 @@ docker/
 │   ├── jmeter/                          # JMeter paths, correlation config
 │   └── perfmemory/                      # Embedding settings, taxonomy
 ├── certs/                               # Client certificates (optional)
-│   └── jmeter/                          # Place .jks files here
+│   ├── corporate/                       # Place CA PEM bundles here (gitignored)
+│   └── jmeter/                          # Place .jks files here (gitignored)
 ├── data/                                # PostgreSQL data volume (auto-created)
 ├── Dockerfile.pgvector-age              # PostgreSQL image (existing)
 ├── docker-compose-windows.yaml          # DB standalone (existing)
@@ -230,6 +231,64 @@ docker build -f docker/Dockerfile.gateway \
   --build-arg JMETER_PLUGINS="jpgc-casutg,bzm-parallel,bzm-http2,websocket-samplers" \
   -t perf-gateway .
 ```
+
+---
+
+## 🔐 Corporate CA / HTTPS-Intercepting Proxy
+
+If your environment uses an HTTPS-intercepting proxy (common in corporate networks)
+or security tools that re-sign TLS certificates (Norton 360, Zscaler, etc.), the
+Docker build will fail when downloading JMeter, plugins, or Python packages because
+the container cannot verify the proxy's certificates.
+
+The `Dockerfile.gateway` supports an optional `ENABLE_CORP_CA` build arg that
+installs your CA certificate bundle into the image at build time.
+
+### Setup
+
+1. **Place your CA PEM bundle** in `docker/certs/corporate/`:
+
+   ```bash
+   # Copy your corporate CA bundle (PEM format)
+   cp /path/to/your/ca-bundle.pem docker/certs/corporate/ca-bundle.pem
+   ```
+
+   The `docker/certs/corporate/` directory is gitignored — your certificates
+   will not be committed to the repository.
+
+2. **Set `ENABLE_CORP_CA=true` in your `.env.gateway`:**
+
+   ```env
+   ENABLE_CORP_CA=true
+   ```
+
+3. **Rebuild:**
+
+   ```bash
+   docker compose -f docker-compose-full-mac.yaml up --build    # or your compose variant
+   ```
+
+   The docker-compose files automatically pass `ENABLE_CORP_CA` as a build arg
+   to the Dockerfile — no compose file edits needed.
+
+### What it does
+
+When `ENABLE_CORP_CA=true` and PEM files exist in `docker/certs/corporate/`:
+
+| Stage | Action |
+|-------|--------|
+| `jmeter-layer` (build) | Installs CA into the OS trust store (`update-ca-certificates`) so `wget` can download JMeter and plugins. Also imports into Java's `cacerts` keystore so the JMeter Plugin Manager CLI works. |
+| `final` (runtime) | Copies the CA bundle to `/etc/ssl/certs/corporate-ca.pem` and sets `SSL_CERT_FILE` so Python/httpx can make HTTPS calls through the proxy at runtime. |
+
+When `ENABLE_CORP_CA` is not set or `false` (the default), no CA processing occurs
+and the build behaves identically to a standard environment.
+
+### Troubleshooting
+
+For detailed solutions to corporate proxy issues (wget SSL failures, Java PKIX
+errors, Python `SSL_CERT_FILE` not found, architecture mismatches), see:
+
+[`docs/troubleshooting/docker-gateway-macos-build-and-runtime.md`](../docs/troubleshooting/docker-gateway-macos-build-and-runtime.md)
 
 ---
 

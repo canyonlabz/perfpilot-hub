@@ -12,6 +12,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.gateway
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
     image: perfpilot-hub-standalone:latest
     container_name: perf-gateway
     ports:

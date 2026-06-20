@@ -6,8 +6,13 @@
 #   Stage 2 (jmeter-layer): JMeter 5.6.3 + OpenJDK 21 + plugins
 #   Stage 3 (final): Combines everything + MCP server source + Python deps
 #
-# Build:
+# Build (standard):
 #   docker build -f docker/Dockerfile.gateway -t perf-gateway .
+#
+# Build (corporate CA / HTTPS-intercepting proxy):
+#   1. Place your CA PEM bundle in docker/certs/corporate/ca-bundle.pem
+#   2. Set ENABLE_CORP_CA=true in docker/.env.gateway
+#   3. Rebuild via docker-compose (the compose files pass it as a build arg)
 #
 # Custom JMeter plugins (override default set):
 #   docker build -f docker/Dockerfile.gateway \
@@ -28,10 +33,36 @@ WORKDIR /app
 # =============================================================================
 FROM base AS jmeter-layer
 
+# Corporate CA support (default: disabled)
+ARG ENABLE_CORP_CA=false
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-21-jre-headless \
     wget \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy corporate certs directory (succeeds even if empty)
+COPY docker/certs/corporate/ /tmp/corporate-certs/
+
+# If ENABLE_CORP_CA=true and PEM files exist, install into the OS trust store
+# and import into Java's cacerts keystore (Java uses its own store, not the OS one)
+RUN if [ "$ENABLE_CORP_CA" = "true" ] && ls /tmp/corporate-certs/*.pem 1>/dev/null 2>&1; then \
+        cat /tmp/corporate-certs/*.pem > /usr/local/share/ca-certificates/corporate-ca.crt && \
+        update-ca-certificates && \
+        JAVA_CACERTS=$(find /usr/lib/jvm -name cacerts -path "*/security/*" | head -1) && \
+        awk 'BEGIN {c=0} /-----BEGIN CERTIFICATE-----/{c++} {print > "/tmp/cert-" c ".pem"}' \
+            /usr/local/share/ca-certificates/corporate-ca.crt && \
+        for cert in /tmp/cert-*.pem; do \
+            keytool -importcert -trustcacerts -keystore "$JAVA_CACERTS" \
+                -storepass changeit -noprompt -alias "corporate-$(basename $cert .pem)" \
+                -file "$cert" 2>/dev/null || true; \
+        done && \
+        rm -f /tmp/cert-*.pem && \
+        echo "Corporate CA installed into OS + Java trust stores"; \
+    else \
+        echo "Corporate CA: skipped (ENABLE_CORP_CA=$ENABLE_CORP_CA)"; \
+    fi && rm -rf /tmp/corporate-certs
 
 ENV JMETER_VERSION=5.6.3
 ENV JMETER_HOME=/opt/jmeter/apache-jmeter-${JMETER_VERSION}
@@ -61,13 +92,30 @@ RUN ${JMETER_HOME}/bin/PluginsManagerCMD.sh install ${JMETER_PLUGINS}
 # =============================================================================
 FROM base AS final
 
+# Declare build platform arg (provided automatically by BuildKit)
+ARG TARGETARCH
+
+# Corporate CA support (default: disabled)
+ARG ENABLE_CORP_CA=false
+
+# Copy corporate certs directory (succeeds even if empty)
+COPY docker/certs/corporate/ /tmp/corporate-certs/
+
+# If ENABLE_CORP_CA=true and PEM files exist, install for Python/httpx runtime use
+RUN if [ "$ENABLE_CORP_CA" = "true" ] && ls /tmp/corporate-certs/*.pem 1>/dev/null 2>&1; then \
+        cat /tmp/corporate-certs/*.pem > /etc/ssl/certs/corporate-ca.pem && \
+        echo "Corporate CA installed for runtime SSL"; \
+    fi && rm -rf /tmp/corporate-certs
+
+ENV SSL_CERT_FILE=${ENABLE_CORP_CA:+/etc/ssl/certs/corporate-ca.pem}
+
 # Copy JMeter + Java from builder stage
 COPY --from=jmeter-layer /opt/jmeter /opt/jmeter
 COPY --from=jmeter-layer /usr/lib/jvm /usr/lib/jvm
 COPY --from=jmeter-layer /etc/java-21-openjdk /etc/java-21-openjdk
 
 ENV JMETER_HOME=/opt/jmeter/apache-jmeter-5.6.3
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}
 ENV PATH="${JMETER_HOME}/bin:${JAVA_HOME}/bin:${PATH}"
 
 # Copy MCP server source directories (7 Docker-eligible servers + gateway)
