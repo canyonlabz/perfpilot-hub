@@ -4,6 +4,8 @@ import type {
   MessagesResponse,
   Agent,
   AgentCatalogResponse,
+  RunSummary,
+  RunDetail,
 } from "./types";
 
 export interface HealthResponse {
@@ -92,5 +94,48 @@ export async function fetchAgentCard(agentName: string): Promise<Agent> {
   );
   if (!res.ok)
     throw new Error(`Failed to fetch agent card for ${agentName}: ${res.status}`);
+  return res.json();
+}
+
+// --- Runs / Tasks API ---
+
+export interface RunsResponse {
+  runs: RunSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function fetchRuns(
+  limit = 20,
+  offset = 0
+): Promise<RunsResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const res = await fetch(`/api/runs?${params}`);
+  if (!res.ok) throw new Error(`Failed to fetch runs: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRunDetail(testRunId: string): Promise<RunDetail> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(testRunId)}`);
+  if (!res.ok)
+    throw new Error(`Failed to fetch run detail: ${res.status}`);
+  return res.json();
+}
+
+export interface SessionInfo {
+  session_id: string;
+  user_id: string | null;
+  source: string | null;
+  started_at: string | null;
+}
+
+export async function fetchCurrentSession(): Promise<SessionInfo> {
+  const res = await fetch("/api/sessions/me");
+  if (!res.ok)
+    throw new Error(`Failed to fetch current session: ${res.status}`);
   return res.json();
 }

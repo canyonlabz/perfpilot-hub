@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, CheckCircle2, XCircle, BookOpen } from "lucide-react";
+import { Activity, CheckCircle2, XCircle, BookOpen, ListChecks } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fetchHealth } from "@/lib/api";
 
@@ -10,9 +10,11 @@ type HealthStatus = "loading" | "healthy" | "unavailable";
 interface HeaderProps {
   showCatalog?: boolean;
   onToggleCatalog?: () => void;
+  showTasks?: boolean;
+  onToggleTasks?: () => void;
 }
 
-export function Header({ showCatalog, onToggleCatalog }: HeaderProps) {
+export function Header({ showCatalog, onToggleCatalog, showTasks, onToggleTasks }: HeaderProps) {
   const [status, setStatus] = useState<HealthStatus>("loading");
 
   useEffect(() => {
@@ -54,6 +56,20 @@ export function Header({ showCatalog, onToggleCatalog }: HeaderProps) {
           >
             <BookOpen className="h-3.5 w-3.5" />
             Agents
+          </button>
+        )}
+        {onToggleTasks && (
+          <button
+            onClick={onToggleTasks}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              showTasks
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+            title="Task Progress"
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+            Tasks
           </button>
         )}
         <HealthIndicator status={status} />

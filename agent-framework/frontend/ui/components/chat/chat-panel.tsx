@@ -67,7 +67,28 @@ function MessageBubble({
   );
 }
 
-function ToolCallBubble({ name }: { name: string }) {
+function ToolCallBubble({ name, args }: { name: string; args?: Record<string, unknown> }) {
+  const isDelegation = name === "delegate_to_specialist";
+  const targetAgent = isDelegation && args?.agent_name
+    ? String(args.agent_name).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    : null;
+
+  if (isDelegation) {
+    return (
+      <div className="flex justify-start mb-3">
+        <div className="max-w-[80%] rounded-lg px-3 py-2 text-xs bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+          <span className="font-medium">Task delegated</span>
+          {targetAgent && (
+            <span> to {targetAgent}</span>
+          )}
+          <span className="text-blue-500 dark:text-blue-400 ml-1">
+            — check Tasks panel for progress
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex justify-start mb-3">
       <div className="max-w-[80%] rounded-lg px-3 py-1.5 text-xs bg-muted/50 text-muted-foreground border border-dashed">
@@ -218,7 +239,13 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
             );
           }
           if (msg.isActionExecutionMessage()) {
-            return <ToolCallBubble key={msg.id} name={msg.name} />;
+            return (
+              <ToolCallBubble
+                key={msg.id}
+                name={msg.name}
+                args={msg.arguments as Record<string, unknown> | undefined}
+              />
+            );
           }
           return null;
         })}

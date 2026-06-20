@@ -55,3 +55,59 @@ export interface AgentCatalogResponse {
   enabled_agents: string[];
   known_agents: string[];
 }
+
+// --- Task Streaming ---
+
+export type TaskStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export interface TaskSnapshot {
+  task_id: string;
+  session_id: string | null;
+  external_session_id: string | null;
+  agent_name: string;
+  status: TaskStatus;
+  test_run_id: string | null;
+  result: Record<string, unknown> | null;
+  error: Record<string, unknown> | null;
+  submitted_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface TaskEvent {
+  task_id: string;
+  session_id: string | null;
+  external_session_id: string | null;
+  agent_name: string;
+  status: TaskStatus;
+  progress: string | null;
+  result: Record<string, unknown> | null;
+  error: Record<string, unknown> | null;
+  timestamp: string;
+}
+
+export interface RunSummary {
+  test_run_id: string;
+  task_count: number;
+  statuses: Record<string, number>;
+  agents: string[];
+  earliest_submitted: string | null;
+  latest_completed: string | null;
+}
+
+export interface RunDetail {
+  test_run_id: string;
+  task_count: number;
+  tasks: TaskSnapshot[];
+}

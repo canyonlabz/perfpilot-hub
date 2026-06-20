@@ -6,6 +6,7 @@ import { Header } from "@/components/layout/header";
 import { ThreadSidebar } from "@/components/sidebar/thread-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { CatalogPanel } from "@/components/catalog/catalog-panel";
+import { TaskProgressPanel } from "@/components/tasks/task-progress-panel";
 import { listThreads, createThread } from "@/lib/api";
 import type { Thread } from "@/lib/types";
 
@@ -15,6 +16,7 @@ export default function HomePage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -54,7 +56,17 @@ export default function HomePage() {
   }, []);
 
   const handleToggleCatalog = useCallback(() => {
-    setShowCatalog((prev) => !prev);
+    setShowCatalog((prev) => {
+      if (!prev) setShowTasks(false);
+      return !prev;
+    });
+  }, []);
+
+  const handleToggleTasks = useCallback(() => {
+    setShowTasks((prev) => {
+      if (!prev) setShowCatalog(false);
+      return !prev;
+    });
   }, []);
 
   if (!initialized) {
@@ -70,7 +82,12 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col h-screen">
-      <Header showCatalog={showCatalog} onToggleCatalog={handleToggleCatalog} />
+      <Header
+        showCatalog={showCatalog}
+        onToggleCatalog={handleToggleCatalog}
+        showTasks={showTasks}
+        onToggleTasks={handleToggleTasks}
+      />
       <div className="flex flex-1 overflow-hidden">
         <ThreadSidebar
           activeThreadId={activeThreadId}
@@ -94,6 +111,11 @@ export default function HomePage() {
         {showCatalog && (
           <aside className="w-80 border-l bg-card flex-shrink-0">
             <CatalogPanel />
+          </aside>
+        )}
+        {showTasks && (
+          <aside className="w-80 border-l bg-card flex-shrink-0">
+            <TaskProgressPanel />
           </aside>
         )}
       </div>
