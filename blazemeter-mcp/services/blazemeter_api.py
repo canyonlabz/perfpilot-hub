@@ -26,6 +26,11 @@ config = load_config()
 bz_config = config.get('blazemeter', {})
 artifacts_base = config['artifacts']['artifacts_path']
 
+# Default HTTP timeout for BlazeMeter API calls (seconds). Configurable via
+# config.yaml -> blazemeter.http_timeout_seconds. Applies to all httpx calls
+# that don't have their own explicit timeout (e.g. artifact downloads use 600s).
+HTTP_TIMEOUT_SECONDS: float = float(bz_config.get('http_timeout_seconds', 60))
+
 BLAZEMETER_API_KEY = os.getenv("BLAZEMETER_API_KEY")
 BLAZEMETER_API_SECRET = os.getenv("BLAZEMETER_API_SECRET")
 BLAZEMETER_ACCOUNT_ID = os.getenv("BLAZEMETER_ACCOUNT_ID")
@@ -97,7 +102,7 @@ def write_test_config_json(run_id: str, summary_fields: dict) -> str:
 async def list_workspaces() -> str:
     """List BlazeMeter workspaces for the configured account."""
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         resp = await client.get(f"{BLAZEMETER_API_BASE}/workspaces?accountId={BLAZEMETER_ACCOUNT_ID}", headers=get_headers())
         resp.raise_for_status()
         workspaces = resp.json()["result"]
@@ -122,7 +127,7 @@ async def list_projects(workspace_id: str | None = None, project_name: str | Non
     pagination_limit = bz_config.get('pagination_limit', 100)
 
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/projects?workspaceId={workspace_id}&limit={pagination_limit}"
         if project_name:
             url += f"&name={project_name}"
@@ -138,7 +143,7 @@ async def list_projects(workspace_id: str | None = None, project_name: str | Non
 async def list_tests(project_id: str) -> str:
     """List BlazeMeter tests for a given project ID."""
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/tests?projectId={project_id}"
         resp = await client.get(url, headers=get_headers({"Content-Type": "application/json"}))
         resp.raise_for_status()
@@ -155,7 +160,7 @@ async def run_test(test_id: str, ctx: Context) -> str:
         String with created run ID and status.
     """
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/tests/{test_id}/start?delayedStart=false"
         resp = await client.post(url, headers=get_headers({"Content-Type": "application/json"}))
         resp.raise_for_status()
@@ -186,7 +191,7 @@ async def get_test_status(run_id: str, ctx: Context) -> dict:
     url = f"{BLAZEMETER_API_BASE}/masters/{run_id}/status"
     try:
         verify_ssl = get_ssl_verify_setting()
-        async with httpx.AsyncClient(verify=verify_ssl) as client:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.get(url, headers=get_headers())
             resp.raise_for_status()
             data = resp.json()
@@ -244,7 +249,7 @@ async def get_results_summary(run_id: str, ctx: Context) -> str:
 
     try:
         verify_ssl = get_ssl_verify_setting()
-        async with httpx.AsyncClient(verify=verify_ssl) as client:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
             # 1. Fetch main test run (master) info
             master_url = f"{BLAZEMETER_API_BASE}/masters/{run_id}"
             master_resp = await client.get(master_url, headers=get_headers(), timeout=30.0)
@@ -389,7 +394,7 @@ async def list_test_runs(test_id: str, start_time: str, end_time: str, ctx: Cont
     url = f"{BLAZEMETER_API_BASE}/masters?testId={test_id}&from={start_epoch}&to={end_epoch}"
 
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         try:
             resp = await client.get(url, headers=get_headers())
             resp.raise_for_status()
@@ -437,7 +442,7 @@ async def get_session_artifacts(session_id: str, ctx: Context) -> dict:
     """
     url = f"{BLAZEMETER_API_BASE}/sessions/{session_id}/reports/logs"
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         resp = await client.get(url, headers=get_headers())
         resp.raise_for_status()
         result = resp.json().get("result", {})
@@ -473,7 +478,7 @@ async def download_artifact_zip_file(artifact_zip_url: str, run_id: str, ctx: Co
     local_zip_path = os.path.join(dest_folder, "artifacts.zip")
     try:
         verify_ssl = get_ssl_verify_setting()
-        async with httpx.AsyncClient(verify=verify_ssl) as client:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
             # Try with minimal headers first (like Postman might send)
             minimal_headers = {"Accept": "*/*", "User-Agent": "Mozilla/5.0 (compatible; BlazeMeter-MCP/1.0)"}
             try:
@@ -845,7 +850,7 @@ async def get_public_report_url(run_id: str, ctx: Context) -> dict:
     url = f"{BLAZEMETER_API_BASE}/masters/{run_id}/public-token"
     try:
         verify_ssl = get_ssl_verify_setting()
-        async with httpx.AsyncClient(verify=verify_ssl) as client:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
             resp = await client.post(url, headers=get_headers({"Content-Type": "application/json"}))
             resp.raise_for_status()
             data = resp.json()
@@ -913,7 +918,7 @@ async def fetch_aggregate_report(run_id: str, ctx: Context) -> Dict[str, Any]:
         url = f"{BLAZEMETER_API_BASE}/masters/{run_id}/reports/aggregatereport/data"
         
         verify_ssl = get_ssl_verify_setting()
-        async with httpx.AsyncClient(verify=verify_ssl) as client:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
             response = await client.get(url, headers=get_headers(), timeout=30.0)
             response.raise_for_status()
             
@@ -1067,7 +1072,7 @@ async def list_shared_folders(workspace_id: str = None) -> list:
     skip = 0
     page_size = 50
 
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         while True:
             url = (
                 f"{BLAZEMETER_API_BASE}/folders"
@@ -1113,7 +1118,7 @@ async def get_shared_folder_files(folder_id: str) -> dict:
               ``size_mb``, and ``last_modified``.
     """
     verify_ssl = get_ssl_verify_setting()
-    async with httpx.AsyncClient(verify=verify_ssl) as client:
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/folders/{folder_id}/files"
         resp = await client.get(url, headers=get_headers())
         resp.raise_for_status()
@@ -1270,7 +1275,7 @@ async def upload_to_shared_folder(
 
         try:
             # Step 1: Obtain signed upload URL from BlazeMeter
-            async with httpx.AsyncClient(verify=verify_ssl) as client:
+            async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
                 sign_url = (
                     f"{BLAZEMETER_API_BASE}/folders/{folder_id}"
                     f"/s3/sign?fileName={encoded_name}"

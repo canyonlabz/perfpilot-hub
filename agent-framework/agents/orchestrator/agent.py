@@ -55,6 +55,7 @@ import asyncio
 import json
 import logging
 import os
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, Optional
 from uuid import UUID
@@ -80,6 +81,17 @@ A2A_BASE_URL_ENV = "PERFPILOT_A2A_BASE_URL"
 # workflows.
 DEFAULT_HITL_TIMEOUT_SECONDS = 300.0
 DEFAULT_HITL_POLL_INTERVAL_SECONDS = 2.0
+
+# Contextvars are per-asyncio-Task, so concurrent requests don't interfere. The AG-UI layer
+# and A2A task executor set these before invoking the orchestrator; the
+# tool functions read them via `_agent_outbound_headers()`. Env vars remain
+# as the fallback for headless/CLI scenarios where no caller sets the
+# contextvars.
+agent_user_id_var: ContextVar[Optional[str]] = ContextVar("perfpilot_agent_user_id", default=None)
+agent_thread_id_var: ContextVar[Optional[str]] = ContextVar("perfpilot_agent_thread_id", default=None)
+agent_external_session_id_var: ContextVar[Optional[str]] = ContextVar(
+    "perfpilot_agent_external_session_id", default=None
+)
 
 
 # =============================================================================
@@ -629,18 +641,25 @@ def _a2a_base_url() -> str:
 
 
 def _agent_outbound_headers() -> dict:
-    """Propagate orchestrator-as-caller identity headers when set.
+    """Propagate orchestrator-as-caller identity headers when available.
 
-    These env-driven values let the orchestrator stamp the outbound
-    request with the originating user and thread so downstream tasks
-    inherit the right owner. When unset the request runs without these
-    headers and the receiving server falls back to its default
+    Resolution order (per-field):
+      1. ContextVar (set per-request by the AG-UI layer or task executor)
+      2. Environment variable (set globally for headless / CLI scenarios)
+
+    These values let the orchestrator stamp the outbound request with the
+    originating user and thread so downstream tasks inherit the right
+    owner. When neither source provides a value, the request runs without
+    the header and the receiving server falls back to its default
     identity-resolution chain (Decision 19).
     """
     headers: dict = {}
-    user_id = os.environ.get("PERFPILOT_AGENT_USER_ID")
-    thread_id = os.environ.get("PERFPILOT_AGENT_THREAD_ID")
-    external_session_id = os.environ.get("PERFPILOT_AGENT_EXTERNAL_SESSION_ID")
+    user_id = agent_user_id_var.get() or os.environ.get("PERFPILOT_AGENT_USER_ID")
+    thread_id = agent_thread_id_var.get() or os.environ.get("PERFPILOT_AGENT_THREAD_ID")
+    external_session_id = (
+        agent_external_session_id_var.get()
+        or os.environ.get("PERFPILOT_AGENT_EXTERNAL_SESSION_ID")
+    )
     if user_id:
         headers["X-User-Id"] = user_id
     if thread_id:

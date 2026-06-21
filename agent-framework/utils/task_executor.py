@@ -268,6 +268,23 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
+    # Propagate the task owner's user_id into the orchestrator's
+    # tool execution context so `delegate_to_specialist` stamps outbound A2A
+    # requests with X-User-Id. This makes delegated tasks visible to the
+    # originating user through owner-filtered endpoints.
+    from agents.orchestrator.agent import agent_user_id_var, agent_thread_id_var
+
+    if task.session_id:
+        try:
+            from . import session_store as _ss
+            _session = await _ss.get_session(task.session_id)
+            if _session and _session.user_id:
+                agent_user_id_var.set(_session.user_id)
+        except Exception:
+            log.debug("_run_orchestrator: could not resolve user_id from session; continuing")
+    if thread_id:
+        agent_thread_id_var.set(thread_id)
+
     try:
         assistant_text, raw_reply = await asyncio.to_thread(
             _invoke_orchestrator_sync, messages_for_llm,

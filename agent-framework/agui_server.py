@@ -340,6 +340,19 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             combined_messages = prior_history_ag_ui + list(incoming.messages or [])
             modified = incoming.model_copy(update={"messages": combined_messages})
 
+            # Propagate the browser user's identity into the
+            # orchestrator's tool execution context. When `delegate_to_specialist`
+            # runs, it reads these contextvars to stamp outbound A2A requests
+            # with X-User-Id, making delegated tasks visible to the browser
+            # user through owner-filtered endpoints.
+            from agents.orchestrator.agent import (
+                agent_user_id_var,
+                agent_thread_id_var,
+            )
+            agent_user_id_var.set(requesting_user)
+            if thread_id:
+                agent_thread_id_var.set(thread_id)
+
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []
 
