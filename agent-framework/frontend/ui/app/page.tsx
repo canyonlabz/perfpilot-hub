@@ -100,6 +100,7 @@ export default function HomePage() {
             runtimeUrl="/api/copilotkit"
             agent="perfpilot-orchestrator"
             threadId={activeThreadId}
+            showDevConsole={false}
           >
             <ChatPanel threadId={activeThreadId} />
           </CopilotKit>
