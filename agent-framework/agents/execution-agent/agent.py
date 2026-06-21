@@ -562,6 +562,7 @@ async def wait_for_completion(
         "minutes) -- appropriate for short smoke tests; production "
         "callers should raise this for longer real workloads.",
     ] = 300.0,
+    on_progress: Optional[Any] = None,
 ) -> dict:
     """Block until `run_id` reaches a terminal state, polling at intervals.
 
@@ -644,6 +645,7 @@ async def wait_for_completion(
                 client,
                 poll_interval_seconds=poll,
                 timeout_seconds=timeout,
+                on_progress=on_progress,
             )
     except Exception as e:
         return {
@@ -664,6 +666,7 @@ async def _wait_for_completion_with_client(
     *,
     poll_interval_seconds: float = 60.0,
     timeout_seconds: float = 300.0,
+    on_progress: Optional[Any] = None,
 ) -> dict:
     """Inner implementation: status polling loop over a caller-provided client.
 
@@ -678,6 +681,10 @@ async def _wait_for_completion_with_client(
             or a test fake. The caller owns the lifecycle.
         poll_interval_seconds: Already clamped to >= 0.05s.
         timeout_seconds: Already clamped to >= 0.0s.
+        on_progress: Optional async callable(str) invoked on each poll
+            iteration with a human-readable progress message. Used by
+            the task executor to broadcast SSE events. When None, no
+            progress callbacks are issued.
 
     Returns:
         The same `{ok, ...}` dict shape documented on `wait_for_completion`.
@@ -763,6 +770,18 @@ async def _wait_for_completion_with_client(
         # Not terminal yet. Check timeout before sleeping so we never
         # over-sleep the deadline. A single-shot mode (timeout_seconds=0)
         # falls through here on the first iteration and returns timed_out.
+        max_polls = int(timeout_seconds / poll_interval_seconds) if poll_interval_seconds > 0 else polls
+        if on_progress:
+            status_label = last_status or "unknown"
+            elapsed = round(time.monotonic() - start, 1)
+            try:
+                await on_progress(
+                    f"Polling Test Run... status: {status_label} "
+                    f"(poll {polls}/{max_polls}, elapsed: {elapsed}s)"
+                )
+            except Exception:
+                pass  # progress callback failure must not break the poll loop
+
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return {
@@ -833,6 +852,7 @@ async def extract_test_run_artifacts(
         "JSON's `notes` field for downstream context; not part of the "
         "canonical schema and may be None.",
     ] = None,
+    on_progress: Optional[Any] = None,
 ) -> dict:
     """Execute the 6-step BlazeMeter extractor recipe over MCP tools.
 
@@ -897,7 +917,7 @@ async def extract_test_run_artifacts(
     try:
         async with MCPClient(config) as client:
             return await _extract_test_run_artifacts_with_client(
-                test_run_id, test_name, client
+                test_run_id, test_name, client, on_progress=on_progress
             )
     except Exception as e:
         result = _new_extraction_result(test_run_id)
@@ -916,6 +936,7 @@ async def _extract_test_run_artifacts_with_client(
     client: Any,
     *,
     _retry_delay_seconds: float = _BLAZEMETER_STEP_RETRY_DELAY_SECONDS,
+    on_progress: Optional[Any] = None,
 ) -> dict:
     """Inner implementation: 6-step recipe over a caller-provided MCP client.
 
@@ -931,6 +952,9 @@ async def _extract_test_run_artifacts_with_client(
         _retry_delay_seconds: Sleep between BlazeMeter MCP retries.
             Defaults to 5s per project rule; smoke tests override to 0
             for sub-second wall budgets.
+        on_progress: Optional async callable(str) invoked before each
+            recipe step with a human-readable progress message. Used by
+            the task executor to broadcast SSE events.
 
     Returns:
         The canonical Return Format JSON dict (see INSTRUCTIONS.md §6).
@@ -940,7 +964,15 @@ async def _extract_test_run_artifacts_with_client(
     if test_name:
         notes.append(f"test_name={test_name!r}")
 
+    async def _emit(msg: str) -> None:
+        if on_progress:
+            try:
+                await on_progress(msg)
+            except Exception:
+                pass
+
     # ---- Step 1 (CRITICAL): get_run_results -----------------------------
+    await _emit("Step 1/6: get_run_results (CRITICAL)")
     step1 = await _call_blazemeter_with_retries(
         client,
         "blazemeter_get_run_results",
@@ -976,6 +1008,7 @@ async def _extract_test_run_artifacts_with_client(
     result["steps"]["get_run_results"] = {"status": "success", "error": None}
 
     # ---- Step 2 (CRITICAL): get_artifacts_path --------------------------
+    await _emit("Step 2/6: get_artifacts_path (CRITICAL)")
     step2 = await _call_blazemeter_with_retries(
         client,
         "blazemeter_get_artifacts_path",
@@ -1010,6 +1043,7 @@ async def _extract_test_run_artifacts_with_client(
     # NOTE: status="partial" from the MCP is a SOFT success at this layer
     # -- the spec (INSTRUCTIONS.md line 377) allows the step to surface as
     # "partial" while still gating CRITICAL pass-through.
+    await _emit("Step 3/6: process_session_artifacts (CRITICAL)")
     step3 = await _call_blazemeter_with_retries(
         client,
         "blazemeter_process_session_artifacts",
@@ -1071,6 +1105,7 @@ async def _extract_test_run_artifacts_with_client(
     # ---- Step 4 (IMPORTANT): get_public_report --------------------------
     important_failures = 0
 
+    await _emit("Step 4/6: get_public_report (IMPORTANT)")
     step4 = await _call_blazemeter_with_retries(
         client,
         "blazemeter_get_public_report",
@@ -1107,6 +1142,7 @@ async def _extract_test_run_artifacts_with_client(
         important_failures += 1
 
     # ---- Step 5 (IMPORTANT): get_aggregate_report -----------------------
+    await _emit("Step 5/6: get_aggregate_report (IMPORTANT)")
     step5 = await _call_blazemeter_with_retries(
         client,
         "blazemeter_get_aggregate_report",
@@ -1138,6 +1174,7 @@ async def _extract_test_run_artifacts_with_client(
     # ---- Step 6 (IMPORTANT, NO RETRY): analyze_jmeter_log ---------------
     # Code-based MCP tool. Per project `mcp-error-handling` rule: do NOT
     # retry on failure; a retry will not change a deterministic outcome.
+    await _emit("Step 6/6: analyze_jmeter_log (IMPORTANT, no retry)")
     step6 = await _call_mcp_once(
         client,
         "jmeter_analyze_jmeter_log",

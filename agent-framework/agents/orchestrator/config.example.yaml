@@ -88,3 +88,27 @@ a2a:
     - orchestrator
     - routing
     - hitl
+
+# =============================================================================
+# 6. HITL gates
+# =============================================================================
+# Controls which actions require Human-in-the-Loop approval before proceeding.
+# When a gate is disabled (false), the orchestrator delegates immediately
+# without seeking confirmation. When enabled (true), the orchestrator must
+# call `request_human_approval` with a valid task_id AFTER delegation.
+#
+# Requests from upstream A2A agent frameworks are treated the same as human
+# requests — HITL gates apply uniformly regardless of caller surface.
+hitl:
+  require_approval_before_test_start: false   # Set true to require HITL before launching load tests
+  require_approval_before_publish: true       # Reserved for Epic 4 (Confluence publish gate)
+
+# =============================================================================
+# 7. Pipeline defaults
+# =============================================================================
+# Default values the orchestrator passes to specialist agents when delegating
+# pipeline steps. These can be overridden per-request in the delegation
+# payload, but provide sensible defaults for most use cases.
+pipeline:
+  poll_interval_seconds: 60    # Default polling interval for wait_for_completion (seconds)
+  poll_timeout_seconds: 600    # Max wait time before timeout (seconds)

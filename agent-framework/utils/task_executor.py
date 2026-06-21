@@ -616,6 +616,25 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         task.task_id,
         TaskEvent(status="running", progress=f"dispatching_tool:{tool}", **common),
     )
+
+    # BUG-05 fix: Create a progress callback that broadcasts intermediate
+    # SSE events during long-running tools (wait_for_completion polls,
+    # extract_test_run_artifacts steps).
+    async def _on_progress(message: str) -> None:
+        await _broadcast(
+            task.task_id,
+            TaskEvent(status="running", progress=message, **common),
+        )
+
+    # Inject the callback for tools that accept it. The `on_progress`
+    # kwarg is Optional[Any] with a default of None, so tools that don't
+    # declare it (e.g. start_performance_test) won't break — we only
+    # inject when the tool's signature accepts it.
+    import inspect
+    sig = inspect.signature(fn)
+    if "on_progress" in sig.parameters:
+        args["on_progress"] = _on_progress
+
     try:
         tool_result = await fn(**args)
     except TypeError as exc:

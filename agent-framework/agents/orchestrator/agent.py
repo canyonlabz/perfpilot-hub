@@ -189,11 +189,13 @@ def _register_tools(agent: Any) -> None:
         description=(
             "Open a Human-in-the-Loop approval prompt and BLOCK until the human "
             "decides (approves / rejects-with-feedback / timeout). Returns "
-            "{decision, feedback, decided_by, timed_out}. MUST be called before any "
-            "consequential action: launching a load test, publishing a report to "
-            "Confluence, emitting downstream notifications, or escalating after "
-            "repeated specialist failures. The prompt payload should be a structured "
-            "dict the UI can render: title, summary, artifact under review."
+            "{decision, feedback, decided_by, timed_out}. Use ONLY when HITL is "
+            "required per the orchestrator config (§4.1 of INSTRUCTIONS.md). "
+            "CRITICAL: task_id MUST be a valid UUID from a PRIOR "
+            "delegate_to_specialist call — it is the internal task identifier. "
+            "Do NOT pass a BlazeMeter test_id, an integer, or any non-UUID value "
+            "as task_id. You must delegate first to obtain a task_id before "
+            "calling this tool."
         ),
     )(request_human_approval)
     agent.register_for_execution()(request_human_approval)
