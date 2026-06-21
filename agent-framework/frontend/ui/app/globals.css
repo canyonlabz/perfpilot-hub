@@ -53,3 +53,9 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide CopilotKit Web Inspector — not needed alongside our custom Tasks panel */
+cpk-web-inspector {
+  display: none !important;
+  pointer-events: none !important;
+}
