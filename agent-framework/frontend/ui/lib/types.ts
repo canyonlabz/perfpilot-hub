@@ -97,6 +97,13 @@ export interface TaskEvent {
   timestamp: string;
 }
 
+export interface TasksResponse {
+  tasks: TaskSnapshot[];
+  thread_id: string | null;
+  limit: number;
+  offset: number;
+}
+
 export interface RunSummary {
   test_run_id: string;
   task_count: number;

@@ -6,6 +6,7 @@ import type {
   AgentCatalogResponse,
   RunSummary,
   RunDetail,
+  TasksResponse,
 } from "./types";
 
 export interface HealthResponse {
@@ -94,6 +95,23 @@ export async function fetchAgentCard(agentName: string): Promise<Agent> {
   );
   if (!res.ok)
     throw new Error(`Failed to fetch agent card for ${agentName}: ${res.status}`);
+  return res.json();
+}
+
+// --- Thread-scoped Tasks API (BUG-09) ---
+
+export async function fetchTasksForThread(
+  threadId: string,
+  limit = 20,
+  offset = 0
+): Promise<TasksResponse> {
+  const params = new URLSearchParams({
+    thread_id: threadId,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const res = await fetch(`/api/tasks?${params}`);
+  if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
   return res.json();
 }
 

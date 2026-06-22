@@ -268,11 +268,18 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
-    # Propagate the task owner's user_id into the orchestrator's
-    # tool execution context so `delegate_to_specialist` stamps outbound A2A
-    # requests with X-User-Id. This makes delegated tasks visible to the
-    # originating user through owner-filtered endpoints.
-    from agents.orchestrator.agent import agent_user_id_var, agent_thread_id_var
+    # Propagate the task owner's user_id and request source into the
+    # orchestrator's tool execution context so `delegate_to_specialist`
+    # stamps outbound requests correctly. Setting source to "a2a"
+    # tells the orchestrator to delegate via the A2A surface (existing
+    # behaviour) and use X-External-Thread-Id / X-External-Session-Id
+    # headers for OpenTelemetry traceability.
+    from agents.orchestrator.agent import (
+        agent_user_id_var,
+        agent_thread_id_var,
+        agent_request_source_var,
+    )
+    agent_request_source_var.set("a2a")
 
     if task.session_id:
         try:

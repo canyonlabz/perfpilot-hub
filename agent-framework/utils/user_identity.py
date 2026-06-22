@@ -1,7 +1,15 @@
-"""User identity resolution for PerfPilot Agents (Epic 3 PBI 3.7.0b).
+"""PerfPilot token resolution for user identity (Epic 3 PBI 3.7.0b).
 
-Implements the four-step resolver chain from Decision 19 in
-`docs/plans/Epic-3-Implementation-Status.md` Section 4.5:
+The ``perfpilot_token`` is a persistent, opaque, server-minted identifier
+carried as an HttpOnly cookie (browsers) or as the ``X-PerfPilot-Token``
+header (CLI / IDE / CopilotKit route handler). It is **not** a true user
+identity -- it is a pre-auth fingerprint that uniquely tags a client until
+a real Identity Provider (EntraID, Okta, Auth0, etc.) is wired in at
+Epic 4. Once an IdP is active, Step 1 of the resolver chain provides
+the verified identity and this token becomes irrelevant for authenticated
+users.
+
+Four-step resolver chain (Decision 19):
 
     1. request.state.authenticated_user  -- Upstream-auth middleware slot
                                             (Epic 4). Always None in Epic 3.
@@ -16,13 +24,14 @@ Implements the four-step resolver chain from Decision 19 in
                                             + EntraID, AWS ALB + Cognito,
                                             GCP IAP, oauth2-proxy in front
                                             of any cluster.
-    2. X-User-Id header                  -- Trusted by convention in Epic 3
-                                            (IDE / CLI clients). In Epic 4
-                                            this is treated as one input
-                                            the verifying middleware can
+    2. X-PerfPilot-Token header          -- Trusted by convention in Epic 3
+                                            (IDE / CLI clients, CopilotKit
+                                            route handler). In Epic 4 this
+                                            is treated as one input the
+                                            verifying middleware can
                                             cross-check (or ignore) when
                                             an upstream identity is present.
-    3. perfpilot_user_id cookie          -- Server-issued opaque token,
+    3. perfpilot_token cookie            -- Server-issued opaque token,
                                             HttpOnly + SameSite=Lax + (in
                                             production) Secure. The
                                             canonical Epic 3 identity for
@@ -31,19 +40,20 @@ Implements the four-step resolver chain from Decision 19 in
                                             present, the middleware mints a
                                             new token and sets the cookie on
                                             the outgoing response. The token
-                                            becomes the user's identity from
-                                            then on.
+                                            becomes the client's identity
+                                            from then on.
 
 The Epic 3 trust model is "trusted by convention" -- callers that set
-X-User-Id are believed. Epic 4 hardens Step 1 by adding a verifying
-middleware that writes `request.state.authenticated_user` from whatever
-upstream auth the operator has chosen. No schema or downstream-code
-changes are needed for that swap; ownership records on every other table
-key off the resulting `user_id` string regardless of provenance.
+X-PerfPilot-Token are believed. Epic 4 hardens Step 1 by adding a
+verifying middleware that writes ``request.state.authenticated_user``
+from whatever upstream auth the operator has chosen. No schema or
+downstream-code changes are needed for that swap; ownership records on
+every other table key off the resulting ``user_id`` string regardless of
+provenance.
 
 This module is import-light on purpose: nothing here hits the database or
-any LLM. The middleware that calls `resolve_user_id` owns the side effect
-of setting the cookie on the response.
+any LLM. The middleware that calls ``resolve_user_id`` owns the side
+effect of setting the cookie on the response.
 """
 
 from __future__ import annotations
@@ -61,24 +71,28 @@ log = logging.getLogger(__name__)
 
 # --- Header / cookie / source vocabulary -------------------------------------
 
-#: Inbound header advertising the caller's user identity.
-#: Trusted by convention in Epic 3; treated as one input among several by
-#: the Epic 4 EntraID middleware. Matches the column name on
-#: `agent_sessions.user_id` and `agent_threads.user_id` (Decision 18).
-HEADER_USER_ID = "X-User-Id"
+#: Inbound header carrying the PerfPilot token.
+#: Trusted by convention in Epic 3 (IDE / CLI clients, CopilotKit route
+#: handler). In Epic 4, treated as one input the verifying middleware can
+#: cross-check when an upstream identity is present.
+HEADER_PERFPILOT_TOKEN = "X-PerfPilot-Token"
 
-#: Cookie key for the server-issued opaque user identifier. Lowercase
-#: snake_case (not the `X-`-prefixed name from the original Decision 19
-#: draft, which is a header convention rather than a cookie one). Updated
-#: by user choice on 2026-06-12.
-COOKIE_USER_ID = "perfpilot_user_id"
+#: Cookie key for the server-issued opaque token. The value stored here
+#: is used as `user_id` in `agent_sessions` and `agent_threads` until a
+#: real Identity Provider (Epic 4) supplies a verified subject identifier.
+COOKIE_TOKEN = "perfpilot_token"
+
+# Keep a backwards-compatible alias so existing imports that reference
+# HEADER_USER_ID (e.g. session_middleware.py re-export) continue to work
+# during the transition. New code should use HEADER_PERFPILOT_TOKEN.
+HEADER_USER_ID = HEADER_PERFPILOT_TOKEN
 
 #: Possible values for `ResolvedUser.source`. Logged on each resolve, useful
 #: when chasing down "why does this request have THIS user_id?" questions.
 IdentitySource = Literal[
     "upstream_auth",   # Step 1 - any OIDC/JWT-verifying upstream middleware set request.state.authenticated_user
-    "header",          # Step 2 - X-User-Id header was present
-    "cookie",          # Step 3 - perfpilot_user_id cookie was present
+    "header",          # Step 2 - X-PerfPilot-Token header was present
+    "cookie",          # Step 3 - perfpilot_token cookie was present
     "minted_cookie",   # Step 4 - no identity present; minted a fresh token (middleware will set cookie)
     "anonymous",       # Edge case - cookie set failed; deterministic per-session fallback
 ]
@@ -143,9 +157,9 @@ def resolve_user_id(
             needs_cookie_set=False,
         )
 
-    # Step 2 - X-User-Id header. Trusted by convention in Epic 3. The header
-    # value is stripped; empty / whitespace-only headers are ignored.
-    header_value = (request.headers.get(HEADER_USER_ID) or "").strip()
+    # Step 2 - X-PerfPilot-Token header. Trusted by convention in Epic 3.
+    # The header value is stripped; empty / whitespace-only headers are ignored.
+    header_value = (request.headers.get(HEADER_PERFPILOT_TOKEN) or "").strip()
     if header_value:
         return ResolvedUser(
             user_id=header_value,
@@ -155,7 +169,7 @@ def resolve_user_id(
 
     # Step 3 - Server-issued cookie carried by the browser. Set during a
     # previous "minted_cookie" turn.
-    cookie_value = (request.cookies.get(COOKIE_USER_ID) or "").strip()
+    cookie_value = (request.cookies.get(COOKIE_TOKEN) or "").strip()
     if cookie_value:
         return ResolvedUser(
             user_id=cookie_value,
@@ -218,7 +232,7 @@ def set_user_id_cookie(
     httponly: bool = DEFAULT_COOKIE_HTTPONLY,
     max_age_days: int = DEFAULT_COOKIE_MAX_AGE_DAYS,
 ) -> None:
-    """Set the `perfpilot_user_id` cookie on the outgoing response.
+    """Set the `perfpilot_token` cookie on the outgoing response.
 
     Called by `SessionMiddleware` only when `ResolvedUser.needs_cookie_set`
     is True. The middleware reads these tunables from
@@ -244,7 +258,7 @@ def set_user_id_cookie(
             stable for a long time without server-side bookkeeping.
     """
     response.set_cookie(
-        key=COOKIE_USER_ID,
+        key=COOKIE_TOKEN,
         value=user_id,
         max_age=max_age_days * 24 * 60 * 60,
         httponly=httponly,

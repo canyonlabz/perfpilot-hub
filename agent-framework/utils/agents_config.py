@@ -49,7 +49,7 @@ _VALID_SAMESITE = ("lax", "strict", "none")
 
 @dataclass(frozen=True)
 class SessionCookieConfig:
-    """Resolved AG-UI `perfpilot_user_id` cookie settings.
+    """Resolved AG-UI `perfpilot_token` cookie settings.
 
     All fields are guaranteed to be non-None and within validated ranges
     even if the YAML omits the entire `web_ui.session_cookie` block.
@@ -131,7 +131,7 @@ def list_enabled_agents(framework_dir: Optional[Path] = None) -> list[str]:
 
 
 def get_session_cookie_config(framework_dir: Optional[Path] = None) -> SessionCookieConfig:
-    """Resolve the AG-UI `perfpilot_user_id` cookie settings from `agents.yaml`.
+    """Resolve the AG-UI `perfpilot_token` cookie settings from `agents.yaml`.
 
     Reads `web_ui.session_cookie.{max_age_days,secure,samesite}`. Missing
     keys fall back to `_SESSION_COOKIE_DEFAULTS`. Invalid values
@@ -179,7 +179,7 @@ def get_session_cookie_config(framework_dir: Optional[Path] = None) -> SessionCo
         # nothing is being persisted.
         log.warning(
             "agents.yaml web_ui.session_cookie: samesite=none requires secure=true; "
-            "browsers will reject the perfpilot_user_id cookie until secure is enabled."
+            "browsers will reject the perfpilot_token cookie until secure is enabled."
         )
 
     return SessionCookieConfig(

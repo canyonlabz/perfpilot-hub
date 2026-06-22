@@ -260,8 +260,8 @@ and multiple concurrent AI frameworks calling the same backend safely:
   header). Naive callers just work; sophisticated callers get explicit
   control.
 - **Forward-compatible with cloud auth.** The identity resolver is a
-  four-step chain (upstream-auth placeholder → `X-User-Id` header →
-  server-issued cookie → freshly minted token). Epic 4 lights up the
+  four-step chain (upstream-auth placeholder → `X-PerfPilot-Token` header →
+  `perfpilot_token` cookie → freshly minted token). Epic 4 lights up the
   top step with any OIDC/JWT verifier without touching the resolver
   chain or the downstream owner-filtering logic.
 
@@ -483,7 +483,7 @@ as each milestone group stabilizes.
 | **AG-UI / CopilotKit bridge** (port 8002) — `/copilotkit/`, sessions, runs, events, HITL, thread CRUD | ✅ Working | Backend complete with real orchestrator at `/copilotkit/` and DB-loaded conversation history; Next.js + CopilotKit React frontend in progress |
 | Multi-user isolation (Alice cannot see Bob's data) | ✅ Working | Owner-filtering on every read endpoint; Bob-vs-Alice isolation blocks across all sessions / runs / events / HITL / thread endpoints |
 | Persistent threads (ChatGPT-style multi-day resumption) | ✅ Working | DB-loaded conversation history wired on BOTH the AG-UI `/copilotkit/` surface AND the A2A `tasks/send` surface; close your browser, come back tomorrow, the conversation continues |
-| Identity resolver (vendor-neutral, Epic 4-ready) | ✅ Working | Four-step chain: upstream-auth → `X-User-Id` → server cookie → freshly minted token |
+| Identity resolver (vendor-neutral, Epic 4-ready) | ✅ Working | Four-step chain: upstream-auth → `X-PerfPilot-Token` → `perfpilot_token` cookie → freshly minted token |
 | 🎯 Orchestrator agent | ✅ Working | Real AG2 `ConversableAgent` with all four delegation tools wired (`list_available_specialists`, `delegate_to_specialist`, `check_task_status`, `request_human_approval`); `agent_card.json status: available` (v0.2.0); HITL approval round-trip end-to-end proven |
 | **FastMCP `StreamableHttpTransport` client** (`utils/mcp_client.py`) | ✅ Working | Routes every agent's tool calls through PerfPilot Hub with per-agent namespace allowlist filtering (`PermissionError` raised before network round-trip for out-of-allowlist calls); `<ns>_` prefix matching defends against prefix-collision edge cases |
 | 🚀 Execution agent (BlazeMeter) — first vertical slice | ✅ Working | Three vendor-agnostic tools live (`start_performance_test` / `wait_for_completion` / `extract_test_run_artifacts`); `agent_card.json status: available` (v0.2.0); **first live BlazeMeter end-to-end run proven on 2026-06-14** (all 6 artifact-extraction steps succeeded); orchestrator-to-execution-agent A2A contract proven with **zero orchestrator code changes** |

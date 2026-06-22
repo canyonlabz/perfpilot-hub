@@ -11,7 +11,7 @@
 #   2. agents — per-agent enable/disable flags. Disabled agents are skipped
 #      by the orchestrator and return 404 on their A2A `agent_card.json`.
 #   3. web_ui — settings for the AG-UI bridge (port 8002): currently the
-#      `perfpilot_user_id` session-cookie tunables.
+#      `perfpilot_token` session-cookie tunables.
 
 # =============================================================================
 # Default LLM Provider (global fallback)
@@ -82,11 +82,11 @@ agents:
 # clients do not use cookies; they authenticate via header / proof-of-knowledge).
 web_ui:
 
-  # `perfpilot_user_id` session cookie. The cookie is the opaque,
-  # server-issued user identifier minted by `utils/user_identity.py` when
-  # no upstream identity is present on the request. See Decision 19 in
+  # `perfpilot_token` cookie. A persistent, opaque, server-minted token
+  # used as the pre-auth identity until a real Identity Provider is wired
+  # in (Epic 4). See Decision 19 in
   # `docs/plans/Epic-3-Implementation-Status.md` for the full resolver
-  # chain.
+  # chain. Also carried as the `X-PerfPilot-Token` header by CLI/IDE clients.
   #
   # All keys below are optional — sensible defaults are applied if a key
   # is missing or the entire `session_cookie:` block is absent.

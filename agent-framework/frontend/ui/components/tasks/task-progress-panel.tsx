@@ -2,35 +2,35 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, ListChecks, AlertCircle } from "lucide-react";
-import { fetchRuns, fetchRunDetail } from "@/lib/api";
+import { fetchTasksForThread } from "@/lib/api";
 import { TaskProgressCard } from "./task-progress-card";
 import type { TaskSnapshot } from "@/lib/types";
 import { TERMINAL_STATUSES } from "@/lib/types";
 
 const POLL_INTERVAL_MS = 15_000;
 
-export function TaskProgressPanel() {
+interface TaskProgressPanelProps {
+  threadId: string | null;
+}
+
+export function TaskProgressPanel({ threadId }: TaskProgressPanelProps) {
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadTasks = useCallback(async (showSpinner = false) => {
+    if (!threadId) {
+      setTasks([]);
+      setLoading(false);
+      return;
+    }
     if (showSpinner) setRefreshing(true);
     try {
-      const runsData = await fetchRuns(10);
-      const allTasks: TaskSnapshot[] = [];
-
-      for (const run of runsData.runs) {
-        try {
-          const detail = await fetchRunDetail(run.test_run_id);
-          allTasks.push(...detail.tasks);
-        } catch {
-          // Individual run detail fetch can fail if owner-filtered; skip
-        }
-      }
+      const data = await fetchTasksForThread(threadId, 50);
 
       // Sort: non-terminal first (active tasks at top), then by submitted_at desc
+      const allTasks = [...data.tasks];
       allTasks.sort((a, b) => {
         const aTerminal = TERMINAL_STATUSES.has(a.status) ? 1 : 0;
         const bTerminal = TERMINAL_STATUSES.has(b.status) ? 1 : 0;
@@ -50,7 +50,7 @@ export function TaskProgressPanel() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [threadId]);
 
   useEffect(() => {
     loadTasks();

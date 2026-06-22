@@ -10,8 +10,8 @@ For every inbound request to the A2A server (port 8001) and the AG-UI bridge
 (port 8002), this middleware:
 
   1. Resolves `user_id` via the four-step chain in `utils.user_identity`
-     (EntraID placeholder -> X-User-Id header -> perfpilot_user_id cookie
-     -> mint fresh). See Decision 19 in
+     (EntraID placeholder -> X-PerfPilot-Token header -> perfpilot_token
+     cookie -> mint fresh). See Decision 19 in
      `docs/plans/Epic-3-Implementation-Status.md`.
   2. Reads `X-Session-Id` and `X-External-Session-Id` headers if present.
   3. Resolves or creates the matching `agent_sessions` row, stamping the
@@ -21,7 +21,7 @@ For every inbound request to the A2A server (port 8001) and the AG-UI bridge
      the work.
   5. Bumps `last_activity_at` on existing sessions.
   6. If the user_id was freshly minted (Step 4 of the resolver chain),
-     sets the `perfpilot_user_id` cookie on the outgoing response.
+     sets the `perfpilot_token` cookie on the outgoing response.
 
 `task_id` is NOT created here. Tasks are minted when route handlers call
 `task_store.create_task()`. The middleware only owns the session and
@@ -102,7 +102,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.default_source = default_source
         self.echo_session_id_header = echo_session_id_header
-        # Cookie tunables for the `perfpilot_user_id` token minted by the
+        # Cookie tunables for the `perfpilot_token` minted by the
         # user-identity resolver. The AG-UI bridge wires these from
         # `agents.yaml -> web_ui.session_cookie:` via
         # `utils.agents_config.get_session_cookie_config()`. Defaults here

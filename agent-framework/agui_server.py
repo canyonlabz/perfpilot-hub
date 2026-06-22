@@ -340,18 +340,26 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             combined_messages = prior_history_ag_ui + list(incoming.messages or [])
             modified = incoming.model_copy(update={"messages": combined_messages})
 
-            # Propagate the browser user's identity into the
-            # orchestrator's tool execution context. When `delegate_to_specialist`
-            # runs, it reads these contextvars to stamp outbound A2A requests
-            # with X-User-Id, making delegated tasks visible to the browser
-            # user through owner-filtered endpoints.
+            # Propagate the browser user's identity and request source into
+            # the orchestrator's tool execution context. Setting
+            # ``agent_request_source_var = "web_ui"`` tells
+            # ``delegate_to_specialist`` to route delegation through the
+            # AG-UI ``/api/delegate`` endpoint (not A2A), and
+            # ``agent_session_id_var`` carries the browser session so the
+            # delegated task inherits the same owner.
             from agents.orchestrator.agent import (
                 agent_user_id_var,
                 agent_thread_id_var,
+                agent_request_source_var,
+                agent_session_id_var,
             )
             agent_user_id_var.set(requesting_user)
+            agent_request_source_var.set("web_ui")
             if thread_id:
                 agent_thread_id_var.set(thread_id)
+            session_id_val = getattr(request.state, "session_id", None)
+            if session_id_val:
+                agent_session_id_var.set(str(session_id_val))
 
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []
@@ -736,6 +744,139 @@ def _register_routes(app: FastAPI) -> None:
             "test_run_id": test_run_id,
             "task_count": len(tasks),
             "tasks": [_task_to_snapshot_payload(t) for t in tasks],
+        }
+
+    # -- Thread-scoped tasks -----------------------------------------
+    # Discovers tasks by conversation thread regardless of test_run_id.
+    # Complements /api/runs (historical, run-scoped) with real-time,
+    # conversation-scoped task discovery for the TaskProgressPanel.
+    @app.get("/api/tasks", tags=["tasks"])
+    async def list_tasks_route(
+        request: Request,
+        thread_id: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Return recent tasks for the current user, optionally scoped to a thread.
+
+        When thread_id is provided: returns only tasks from that conversation.
+        When thread_id is omitted: returns an empty list with guidance (future:
+        all recent tasks for the user regardless of thread).
+        """
+        requesting_user = getattr(request.state, "user_id", None)
+
+        if thread_id:
+            tasks = await task_store.list_tasks_for_thread(
+                thread_id,
+                user_id=requesting_user,
+                limit=limit,
+                offset=offset,
+            )
+        else:
+            tasks = []
+
+        return {
+            "tasks": [_task_to_snapshot_payload(t) for t in tasks],
+            "thread_id": thread_id,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    # -- Single task retrieval -----------------------------------------
+    # The orchestrator's `check_task_status` tool queries this endpoint for
+    # Web UI-originated tasks. Mirrors A2A's `GET /agents/{name}/tasks/{id}`
+    # but runs on the AG-UI surface so the Web UI never touches A2A.
+    @app.get("/api/tasks/{task_id}", tags=["tasks"])
+    async def get_task_route(task_id: str, request: Request) -> dict:
+        """Return a single task by ID (owner-filtered).
+
+        Used by the orchestrator's ``check_task_status`` tool when running
+        in a Web UI context (``agent_request_source_var == "web_ui"``).
+        """
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
+
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        task_owner = await auth.owner_of_session(task.session_id)
+        auth.requires_owner(
+            resource_owner=task_owner,
+            requesting_user=getattr(request.state, "user_id", None),
+            resource_kind="task",
+        )
+
+        return _task_to_snapshot_payload(task)
+
+    # -- Internal delegation ----------------------------------------
+    # The orchestrator's `delegate_to_specialist` tool POSTs here for Web
+    # UI-originated requests. Mirrors A2A's `POST /agents/{name}/tasks/send`
+    # but uses the CopilotKit thread_id directly (no external thread
+    # resolution), keeping the delegated task visible in the same
+    # conversation the browser user is watching.
+    @app.post("/api/delegate", tags=["delegation"], status_code=202)
+    async def delegate_task_route(request: Request) -> dict:
+        """Create and dispatch a specialist task for Web UI delegation.
+
+        Expects a JSON body::
+
+            {
+                "agent_name": "execution-agent",
+                "payload": { ... },
+                "test_run_id": "optional-correlation-key"
+            }
+
+        Identity context comes from headers set by
+        ``_agent_outbound_headers()`` in the orchestrator:
+
+        - ``X-Thread-Id``: the CopilotKit thread_id (stored as-is)
+        - ``X-Session-Id``: the browser session (resolved by middleware)
+        - ``X-PerfPilot-Token``: the browser user (resolved by middleware)
+        """
+        session_id = getattr(request.state, "session_id", None)
+        if session_id is None:
+            raise HTTPException(
+                status_code=401,
+                detail="No session resolved; delegation requires a valid session.",
+            )
+
+        body = await request.json()
+        agent_name = body.get("agent_name")
+        if not agent_name or not isinstance(agent_name, str):
+            raise HTTPException(status_code=400, detail="Missing or invalid 'agent_name'")
+
+        if not agents_config.is_agent_enabled(agent_name, FRAMEWORK_DIR):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent '{agent_name}' is not enabled or unknown.",
+            )
+
+        thread_id = (
+            request.headers.get("X-Thread-Id")
+            or request.headers.get("x-thread-id")
+        )
+        payload = body.get("payload") or {}
+        test_run_id = body.get("test_run_id") or payload.get("test_run_id")
+
+        task = await task_store.create_task(
+            session_id=session_id,
+            agent_name=agent_name,
+            payload=payload,
+            test_run_id=test_run_id,
+            thread_id=thread_id,
+        )
+        asyncio.create_task(task_executor.execute_task(task.task_id))
+
+        return {
+            "task_id": str(task.task_id),
+            "session_id": str(task.session_id),
+            "agent_name": task.agent_name,
+            "status": task.status,
+            "thread_id": thread_id,
+            "submitted_at": task.submitted_at.isoformat(),
         }
 
     # -- HITL approvals (PBI 3.6.5 + PBI 3.7.0b owner-filtering) -----------------

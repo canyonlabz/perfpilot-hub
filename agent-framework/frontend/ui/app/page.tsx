@@ -7,7 +7,7 @@ import { ThreadSidebar } from "@/components/sidebar/thread-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { CatalogPanel } from "@/components/catalog/catalog-panel";
 import { TaskProgressPanel } from "@/components/tasks/task-progress-panel";
-import { listThreads, createThread } from "@/lib/api";
+import { fetchCurrentSession, listThreads, createThread } from "@/lib/api";
 import type { Thread } from "@/lib/types";
 
 const STORAGE_KEY = "perfpilot_active_thread_id";
@@ -21,6 +21,13 @@ export default function HomePage() {
   useEffect(() => {
     async function init() {
       try {
+        // Establish the perfpilot_token cookie via the rewrite proxy
+        // BEFORE CopilotKit mounts. The CopilotKit API route handler
+        // bypasses the rewrite, so the AG-UI Set-Cookie never reaches
+        // the browser through that path. This call ensures a consistent
+        // token across CopilotKit and all other API calls.
+        await fetchCurrentSession().catch(() => {});
+
         const data = await listThreads();
         const storedId = localStorage.getItem(STORAGE_KEY);
 
@@ -116,7 +123,7 @@ export default function HomePage() {
         )}
         {showTasks && (
           <aside className="w-80 border-l bg-card flex-shrink-0">
-            <TaskProgressPanel />
+            <TaskProgressPanel threadId={activeThreadId} />
           </aside>
         )}
       </div>

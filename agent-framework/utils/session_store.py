@@ -75,8 +75,8 @@ async def create_session(
         source: Origin tag, ideally one of `VALID_SOURCES`. Free-text is
             allowed but a warning is logged when an unknown value is used.
         external_session_id: Optional propagated SDLC trace ID.
-        user_id: Epic 3 resolved user identifier from the X-User-Id header
-            or a server-issued cookie. Epic 4: subject identifier supplied
+        user_id: Epic 3 resolved identifier from the X-PerfPilot-Token
+            header or the perfpilot_token cookie. Epic 4: subject identifier supplied
             by whichever upstream auth middleware the operator chose
             (vendor-agnostic; e.g. ACA Easy Auth + EntraID `oid`, AWS ALB
             + Cognito, GCP IAP, oauth2-proxy). See Decision 20 in the

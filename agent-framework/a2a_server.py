@@ -189,6 +189,7 @@ def _register_routes(app: FastAPI) -> None:
             agent_name=agent_name,
             payload=body,
             test_run_id=body.get("test_run_id"),
+            thread_id=thread.thread_id,
             subscriber_endpoints=_extract_subscriber_endpoints(body),
         )
         # Fire-and-forget background execution.
@@ -226,6 +227,7 @@ def _register_routes(app: FastAPI) -> None:
             agent_name=agent_name,
             payload=body,
             test_run_id=body.get("test_run_id"),
+            thread_id=thread.thread_id,
             subscriber_endpoints=_extract_subscriber_endpoints(body),
         )
         queue = await task_executor.subscribe(task.task_id)
