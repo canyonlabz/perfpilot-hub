@@ -12,6 +12,8 @@ function extractToken(raw: string): string | undefined {
   return match?.[1];
 }
 
+const DEBUG = process.env.NODE_ENV !== "production";
+
 export const POST = async (req: NextRequest) => {
   const cookie = req.headers.get("cookie") || "";
   const token = extractToken(cookie);
@@ -19,6 +21,12 @@ export const POST = async (req: NextRequest) => {
   const headers: Record<string, string> = { cookie };
   if (token) {
     headers["X-PerfPilot-Token"] = token;
+  }
+
+  if (DEBUG) {
+    console.log("[copilotkit/route] cookie present:", !!cookie);
+    console.log("[copilotkit/route] perfpilot_token extracted:", token ?? "(none)");
+    console.log("[copilotkit/route] X-PerfPilot-Token header set:", !!headers["X-PerfPilot-Token"]);
   }
 
   const runtime = new CopilotRuntime({

@@ -90,26 +90,167 @@ AGUI_PORT_ENV = "AGUI_PORT"
 DEFAULT_HITL_TIMEOUT_SECONDS = 300.0
 DEFAULT_HITL_POLL_INTERVAL_SECONDS = 2.0
 
-# Contextvars are per-asyncio-Task, so concurrent requests don't interfere. The AG-UI layer
-# and A2A task executor set these before invoking the orchestrator; the
-# tool functions read them via `_agent_outbound_headers()`. Env vars remain
-# as the fallback for headless/CLI scenarios where no caller sets the
-# contextvars.
+# ── ContextVars (A2A task-executor path only) ──
+# AG2 runs tool functions in an isolated thread, so ContextVars set in
+# the AG-UI handler do NOT propagate into tool execution. Web UI tool
+# functions therefore use HTTP calls to the AG-UI server's own endpoints
+# (POST /api/delegate, GET /api/tasks/{id}) instead of direct DB access.
+# These ContextVars remain only for the A2A task_executor path, which
+# invokes the orchestrator in the same thread where the vars are set.
 agent_user_id_var: ContextVar[Optional[str]] = ContextVar("perfpilot_agent_user_id", default=None)
 agent_thread_id_var: ContextVar[Optional[str]] = ContextVar("perfpilot_agent_thread_id", default=None)
 agent_external_session_id_var: ContextVar[Optional[str]] = ContextVar(
     "perfpilot_agent_external_session_id", default=None
 )
-# Source discriminator so the orchestrator routes delegation to
-# the correct surface (AG-UI for Web UI callers, A2A for external frameworks).
 agent_request_source_var: ContextVar[Optional[str]] = ContextVar(
     "perfpilot_agent_request_source", default=None
 )
-# Browser session_id carried so Web UI delegation can reuse
-# the same session via X-Session-Id on the outbound POST to AG-UI.
 agent_session_id_var: ContextVar[Optional[str]] = ContextVar(
     "perfpilot_agent_session_id", default=None
 )
+
+# ── Per-request identity for HTTP header construction ──
+# AG2's thread isolation means tools can't read ContextVars.
+# The AG-UI handler sets these before dispatch so that
+# _agent_outbound_headers() can build the correct HTTP headers
+# for calls to /api/delegate and /api/tasks/{id}.
+# Only identity values -- no event loops, no DB connections.
+_caller_identity: dict[str, Optional[str]] = {
+    "user_id": None,
+    "thread_id": None,
+    "session_id": None,
+}
+
+# Strong references to background tasks so they aren't garbage collected
+# before completion. Standard Python pattern for fire-and-forget tasks.
+_background_tasks: set[asyncio.Task] = set()
+
+# Task IDs queued for background execution. The tool function appends here
+# (inside AG2's context), and agui_server drains after dispatch completes
+# (in normal FastAPI context where asyncio.create_task works reliably).
+_pending_executions: list[UUID] = []
+
+
+def drain_pending_executions() -> list[UUID]:
+    """Pop all queued task IDs. Called by agui_server after dispatch."""
+    result = list(_pending_executions)
+    _pending_executions.clear()
+    return result
+
+
+def set_caller_identity(
+    user_id: Optional[str],
+    thread_id: Optional[str],
+    session_id: Optional[str],
+) -> None:
+    _caller_identity["user_id"] = user_id
+    _caller_identity["thread_id"] = thread_id
+    _caller_identity["session_id"] = session_id
+
+
+def clear_caller_identity() -> None:
+    _caller_identity["user_id"] = None
+    _caller_identity["thread_id"] = None
+    _caller_identity["session_id"] = None
+
+
+# =============================================================================
+# Standalone DB helpers (bypass shared asyncpg pool)
+# =============================================================================
+
+async def _get_standalone_conn():
+    """Open a fresh asyncpg connection (not from the shared pool).
+
+    AG2's dispatch pipeline corrupts pool connection state across internal
+    task boundaries. These helpers use a standalone connection that is
+    completely isolated from the pool used by the rest of the AG-UI server.
+    """
+    import asyncpg
+    from utils.db import load_settings_from_env
+
+    settings = load_settings_from_env()
+    return await asyncpg.connect(
+        host=settings.host,
+        port=settings.port,
+        database=settings.database,
+        user=settings.user,
+        password=settings.password,
+    )
+
+
+async def _standalone_create_task(
+    session_id: UUID,
+    agent_name: str,
+    payload: dict,
+    test_run_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+) -> dict:
+    """INSERT a task row using a standalone connection. Returns a plain dict."""
+    conn = await _get_standalone_conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO agent_tasks (
+                session_id, agent_name, status,
+                test_run_id, thread_id, payload
+            )
+            VALUES ($1, $2, 'pending', $3, $4, $5::jsonb)
+            RETURNING task_id, session_id, agent_name, status,
+                      test_run_id, thread_id, submitted_at
+            """,
+            session_id,
+            agent_name,
+            test_run_id,
+            thread_id,
+            json.dumps(payload),
+        )
+        return {
+            "task_id": row["task_id"],
+            "session_id": row["session_id"],
+            "agent_name": row["agent_name"],
+            "status": row["status"],
+            "submitted_at": row["submitted_at"].isoformat(),
+        }
+    finally:
+        await conn.close()
+
+
+async def _standalone_get_task(task_id: UUID) -> Optional[dict]:
+    """SELECT a task row using a standalone connection. Returns a plain dict."""
+    conn = await _get_standalone_conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT task_id, session_id, agent_name, status,
+                   test_run_id, thread_id, result, error,
+                   submitted_at, started_at, completed_at
+            FROM agent_tasks
+            WHERE task_id = $1
+            """,
+            task_id,
+        )
+        if row is None:
+            return None
+        result_val = row["result"]
+        error_val = row["error"]
+        if isinstance(result_val, str):
+            result_val = json.loads(result_val)
+        if isinstance(error_val, str):
+            error_val = json.loads(error_val)
+        return {
+            "task_id": row["task_id"],
+            "session_id": row["session_id"],
+            "agent_name": row["agent_name"],
+            "status": row["status"],
+            "test_run_id": row["test_run_id"],
+            "result": result_val,
+            "error": error_val,
+            "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
+            "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+            "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+        }
+    finally:
+        await conn.close()
 
 
 # =============================================================================
@@ -386,36 +527,21 @@ async def delegate_to_specialist(
     can narrate the failure to the user instead of crashing the agent
     loop.
     """
-    source = agent_request_source_var.get()
+    # AG2's dispatch pipeline corrupts asyncpg pool connection state across
+    # internal task boundaries ("cannot perform operation: another operation
+    # is in progress"). Bypass the shared pool: use a standalone connection
+    # for the INSERT, then fire background execution on the main loop.
+    log.debug("delegate_to_specialist: agent=%s", agent_name)
 
-    if source == "web_ui":
-        return await _delegate_via_agui_local(agent_name, payload, test_run_id)
-    return await _delegate_via_a2a(agent_name, payload, test_run_id)
-
-
-async def _delegate_via_agui_local(
-    agent_name: str,
-    payload: Optional[dict],
-    test_run_id: Optional[str],
-) -> str:
-    """Direct in-process delegation for Web UI callers (no HTTP hop).
-
-    Creates the task via ``task_store`` and fires
-    ``task_executor.execute_task`` as a background coroutine. The task
-    is stamped with the CopilotKit ``thread_id`` from the ContextVar so
-    the browser's ``GET /api/tasks?thread_id=`` query finds it.
-    """
-    from utils import task_store, task_executor
-
-    session_id_str = agent_session_id_var.get()
-    thread_id = agent_thread_id_var.get()
+    session_id_str = _caller_identity.get("session_id")
+    thread_id = _caller_identity.get("thread_id")
 
     if not session_id_str:
         return json.dumps({
             "ok": False,
             "error": {
                 "type": "NoSession",
-                "message": "No browser session available for Web UI delegation.",
+                "message": "No browser session available for delegation.",
             },
         })
 
@@ -424,7 +550,7 @@ async def _delegate_via_agui_local(
         body.setdefault("test_run_id", test_run_id)
 
     try:
-        task = await task_store.create_task(
+        task_row = await _standalone_create_task(
             session_id=UUID(session_id_str),
             agent_name=agent_name,
             payload=body,
@@ -432,20 +558,66 @@ async def _delegate_via_agui_local(
             thread_id=thread_id,
         )
     except Exception as exc:
-        log.warning("delegate_to_specialist local create_task error: %s", exc)
+        log.warning("delegate_to_specialist create_task error: %s", exc)
         return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
-    asyncio.create_task(task_executor.execute_task(task.task_id))
+    _pending_executions.append(task_row["task_id"])
 
     return json.dumps({
         "ok": True,
-        "task_id": str(task.task_id),
-        "session_id": str(task.session_id),
-        "agent_name": task.agent_name,
-        "status": task.status,
+        "task_id": str(task_row["task_id"]),
+        "session_id": str(task_row["session_id"]),
+        "agent_name": task_row["agent_name"],
+        "status": task_row["status"],
         "thread_id": thread_id,
-        "submitted_at": task.submitted_at.isoformat(),
+        "submitted_at": task_row["submitted_at"],
     })
+
+
+async def _delegate_via_agui(
+    agent_name: str,
+    payload: Optional[dict],
+    test_run_id: Optional[str],
+) -> str:
+    """HTTP delegation to the AG-UI server for Web UI callers.
+
+    POSTs to ``/api/delegate`` on the AG-UI server. Identity and
+    thread context travel as HTTP headers (``X-PerfPilot-Token``,
+    ``X-Thread-Id``, ``X-Session-Id``), resolved by
+    ``SessionMiddleware`` on the receiving end. No ContextVars,
+    no direct DB access, no cross-thread hacks.
+    """
+    import httpx
+
+    base = _agui_base_url()
+    url = f"{base}/api/delegate"
+    headers = _agent_outbound_headers()
+    body: dict = {"agent_name": agent_name}
+    inner_payload = dict(payload or {})
+    if test_run_id is not None:
+        inner_payload.setdefault("test_run_id", test_run_id)
+        body["test_run_id"] = test_run_id
+    body["payload"] = inner_payload
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=body, headers=headers)
+    except Exception as exc:
+        log.warning("delegate_to_specialist AG-UI error (%s): %s", url, exc)
+        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+
+    if response.status_code >= 400:
+        return json.dumps({
+            "ok": False,
+            "error": {
+                "type": "HTTPError",
+                "status_code": response.status_code,
+                "message": response.text[:500],
+            },
+        })
+    body_out = response.json() if response.content else {}
+    body_out["ok"] = True
+    return json.dumps(body_out)
 
 
 async def _delegate_via_a2a(
@@ -509,43 +681,67 @@ async def check_task_status(
 
     The tool never raises -- the LLM gets a structured error dict.
     """
-    source = agent_request_source_var.get()
-
-    if source == "web_ui":
-        return await _check_task_status_local(task_id)
-    return await _check_task_status_a2a(agent_name, task_id)
-
-
-async def _check_task_status_local(task_id: str) -> str:
-    """Direct in-process task lookup for Web UI callers."""
-    from utils import task_store
+    log.debug("check_task_status: agent=%s task=%s", agent_name, task_id)
 
     try:
-        task = await task_store.get_task(UUID(task_id))
+        task_row = await _standalone_get_task(UUID(task_id))
     except Exception as exc:
-        log.warning("check_task_status local error: %s", exc)
+        log.warning("check_task_status error: %s", exc)
         return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
-    if task is None:
+    if task_row is None:
         return json.dumps({
             "ok": False,
             "error": {"type": "NotFound", "message": f"Task {task_id} not found."},
         })
 
-    result: dict = {
+    return json.dumps({
         "ok": True,
-        "task_id": str(task.task_id),
-        "session_id": str(task.session_id),
-        "agent_name": task.agent_name,
-        "status": task.status,
-        "test_run_id": task.test_run_id,
-        "result": task.result,
-        "error": task.error,
-        "submitted_at": task.submitted_at.isoformat() if task.submitted_at else None,
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-    }
-    return json.dumps(result)
+        "task_id": str(task_row["task_id"]),
+        "session_id": str(task_row["session_id"]),
+        "agent_name": task_row["agent_name"],
+        "status": task_row["status"],
+        "test_run_id": task_row.get("test_run_id"),
+        "result": task_row.get("result"),
+        "error": task_row.get("error"),
+        "submitted_at": task_row.get("submitted_at"),
+        "started_at": task_row.get("started_at"),
+        "completed_at": task_row.get("completed_at"),
+    })
+
+
+async def _check_task_status_agui(task_id: str) -> str:
+    """HTTP task status check via the AG-UI server for Web UI callers.
+
+    GETs ``/api/tasks/{task_id}`` on the AG-UI server. Identity
+    travels via ``X-PerfPilot-Token`` header; ``SessionMiddleware``
+    resolves the user and enforces owner-filtering.
+    """
+    import httpx
+
+    base = _agui_base_url()
+    url = f"{base}/api/tasks/{task_id}"
+    headers = _agent_outbound_headers()
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+    except Exception as exc:
+        log.warning("check_task_status AG-UI error (%s): %s", url, exc)
+        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+
+    if response.status_code >= 400:
+        return json.dumps({
+            "ok": False,
+            "error": {
+                "type": "HTTPError",
+                "status_code": response.status_code,
+                "message": response.text[:500],
+            },
+        })
+    body_out = response.json() if response.content else {}
+    body_out["ok"] = True
+    return json.dumps(body_out)
 
 
 async def _check_task_status_a2a(agent_name: str, task_id: str) -> str:
@@ -798,31 +994,42 @@ def _agent_outbound_headers() -> dict:
     """Propagate orchestrator-as-caller identity headers when available.
 
     Resolution order (per-field):
-      1. ContextVar (set per-request by the AG-UI layer or task executor)
-      2. Environment variable (set globally for headless / CLI scenarios)
+      1. Module-level ``_caller_identity`` (survives AG2 thread boundary)
+      2. ContextVar (set by A2A task executor in same thread)
+      3. Environment variable (headless / CLI fallback)
 
-    Headers are source-aware. When the request originated from the
-    Web UI (``agent_request_source_var == "web_ui"``), the thread is sent
-    as ``X-Thread-Id`` (the CopilotKit thread_id) and the browser session
-    as ``X-Session-Id``. When the request originated from an external AI
-    framework (A2A), the thread is sent as ``X-External-Thread-Id`` and
-    the external session as ``X-External-Session-Id`` for OpenTelemetry
-    span/trace traceability across sessions.
+    Headers are source-aware. Web UI uses ``X-Thread-Id`` /
+    ``X-Session-Id``; A2A uses ``X-External-Thread-Id`` /
+    ``X-External-Session-Id`` for OpenTelemetry traceability.
 
     ``X-PerfPilot-Token`` is always sent regardless of source.
     """
     headers: dict = {}
     source = agent_request_source_var.get()
-    user_id = agent_user_id_var.get() or os.environ.get("PERFPILOT_AGENT_USER_ID")
-    thread_id = agent_thread_id_var.get() or os.environ.get("PERFPILOT_AGENT_THREAD_ID")
+    user_id = (
+        _caller_identity.get("user_id")
+        or agent_user_id_var.get()
+        or os.environ.get("PERFPILOT_AGENT_USER_ID")
+    )
+    thread_id = (
+        _caller_identity.get("thread_id")
+        or agent_thread_id_var.get()
+        or os.environ.get("PERFPILOT_AGENT_THREAD_ID")
+    )
+    session_id = (
+        _caller_identity.get("session_id")
+        or agent_session_id_var.get()
+    )
 
     if user_id:
         headers["X-PerfPilot-Token"] = user_id
 
-    if source == "web_ui":
+    # Default to web_ui when source is None (AG2 thread isolation)
+    effective_source = source if source else ("web_ui" if session_id else None)
+
+    if effective_source == "web_ui":
         if thread_id:
             headers["X-Thread-Id"] = thread_id
-        session_id = agent_session_id_var.get()
         if session_id:
             headers["X-Session-Id"] = session_id
     else:

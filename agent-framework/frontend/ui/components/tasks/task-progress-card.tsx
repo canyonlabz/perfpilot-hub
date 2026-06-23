@@ -166,19 +166,30 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
   const stepCounterRef = useRef(0);
 
   const addStep = useCallback((status: TaskStatus, progress: string | null, timestamp: string) => {
-    stepCounterRef.current += 1;
-    setSteps((prev) => [
-      ...prev,
-      {
-        id: `step-${stepCounterRef.current}`,
-        status,
-        progress,
-        timestamp,
-      },
-    ]);
+    setSteps((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.status === status && last.progress === progress) {
+        return prev;
+      }
+      stepCounterRef.current += 1;
+      return [
+        ...prev,
+        {
+          id: `step-${stepCounterRef.current}`,
+          status,
+          progress,
+          timestamp,
+        },
+      ];
+    });
   }, []);
 
   useEffect(() => {
+    // Reset steps and counter on (re-)mount to avoid duplicate keys
+    // from React StrictMode double-invocation or subscription re-init.
+    stepCounterRef.current = 0;
+    setSteps([]);
+
     if (TERMINAL_STATUSES.has(currentStatus) && !initialSnapshot) return;
 
     const isAlreadyTerminal = initialSnapshot && TERMINAL_STATUSES.has(initialSnapshot.status);

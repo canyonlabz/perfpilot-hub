@@ -340,26 +340,26 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             combined_messages = prior_history_ag_ui + list(incoming.messages or [])
             modified = incoming.model_copy(update={"messages": combined_messages})
 
-            # Propagate the browser user's identity and request source into
-            # the orchestrator's tool execution context. Setting
-            # ``agent_request_source_var = "web_ui"`` tells
-            # ``delegate_to_specialist`` to route delegation through the
-            # AG-UI ``/api/delegate`` endpoint (not A2A), and
-            # ``agent_session_id_var`` carries the browser session so the
-            # delegated task inherits the same owner.
-            from agents.orchestrator.agent import (
-                agent_user_id_var,
-                agent_thread_id_var,
-                agent_request_source_var,
-                agent_session_id_var,
-            )
-            agent_user_id_var.set(requesting_user)
-            agent_request_source_var.set("web_ui")
-            if thread_id:
-                agent_thread_id_var.set(thread_id)
             session_id_val = getattr(request.state, "session_id", None)
-            if session_id_val:
-                agent_session_id_var.set(str(session_id_val))
+
+            # Set caller identity so _agent_outbound_headers() can build
+            # correct HTTP headers from AG2's isolated tool thread.
+            from agents.orchestrator.agent import (
+                set_caller_identity,
+                clear_caller_identity,
+            )
+            set_caller_identity(
+                user_id=requesting_user,
+                thread_id=thread_id,
+                session_id=str(session_id_val) if session_id_val else None,
+            )
+
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug(
+                    "/copilotkit caller identity: user_id=%s session_id=%s "
+                    "thread_id=%s",
+                    requesting_user, session_id_val, thread_id,
+                )
 
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []
@@ -402,6 +402,24 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                             "/copilotkit: failed to persist assistant reply for thread %s",
                             thread_id,
                         )
+
+                clear_caller_identity()
+
+                # Fire background execution for any tasks created by tools
+                # during dispatch. Done HERE (normal FastAPI async context)
+                # because asyncio.create_task() inside AG2's tool context
+                # creates tasks that never execute on the main event loop.
+                from agents.orchestrator.agent import (
+                    drain_pending_executions,
+                    _background_tasks,
+                )
+                from utils import task_executor
+
+                for pending_task_id in drain_pending_executions():
+                    log.debug("Starting background execution for task %s", pending_task_id)
+                    bg = asyncio.create_task(task_executor.execute_task(pending_task_id))
+                    _background_tasks.add(bg)
+                    bg.add_done_callback(_background_tasks.discard)
 
             return StreamingResponse(
                 _streaming_with_persistence(),
@@ -1328,6 +1346,11 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Temporary: enable DEBUG on identity-related loggers for token tracing.
+    # Remove after BUG-11 investigation is complete.
+    logging.getLogger("agui_server").setLevel(logging.DEBUG)
+    logging.getLogger("utils.session_middleware").setLevel(logging.DEBUG)
+    logging.getLogger("agents.orchestrator.agent").setLevel(logging.DEBUG)
     try:
         from dotenv import load_dotenv
         load_dotenv(FRAMEWORK_DIR / ".env", override=False)

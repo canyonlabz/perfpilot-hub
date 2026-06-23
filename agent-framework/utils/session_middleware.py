@@ -130,6 +130,20 @@ class SessionMiddleware(BaseHTTPMiddleware):
         resolved = user_identity.resolve_user_id(request)
         user_id = resolved.user_id
 
+        if log.isEnabledFor(logging.DEBUG):
+            has_token_header = bool(
+                (request.headers.get(user_identity.HEADER_PERFPILOT_TOKEN) or "").strip()
+            )
+            has_token_cookie = bool(
+                (request.cookies.get(user_identity.COOKIE_TOKEN) or "").strip()
+            )
+            log.debug(
+                "SessionMiddleware resolved: path=%s user_id=%s source=%s "
+                "needs_cookie_set=%s has_token_header=%s has_token_cookie=%s",
+                path, user_id, resolved.source,
+                resolved.needs_cookie_set, has_token_header, has_token_cookie,
+            )
+
         try:
             session = await self._resolve_session(
                 session_id=session_id_in,

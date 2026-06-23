@@ -202,6 +202,16 @@ EXECUTION_AGENT_TOOL_NAMES: tuple[str, ...] = (
     "extract_test_run_artifacts",
 )
 
+# MCP tool prefixes the execution-agent may call directly (pass-through).
+# Any tool whose name starts with one of these prefixes is routed to the
+# MCP gateway instead of the execution-agent Python module. This lets
+# end-users request specific MCP operations (e.g. blazemeter_get_public_report)
+# without going through the composite agent tools above.
+EXECUTION_AGENT_MCP_PREFIXES: tuple[str, ...] = (
+    "blazemeter_",
+    "jmeter_",
+)
+
 
 async def _dispatch_agent(task: task_store.AgentTask, common: dict) -> dict:
     """Route to the right runtime based on `task.agent_name`."""
@@ -570,14 +580,18 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         }
         return envelope
 
-    if tool not in EXECUTION_AGENT_TOOL_NAMES:
+    is_composite_tool = tool in EXECUTION_AGENT_TOOL_NAMES
+    is_mcp_passthrough = any(tool.startswith(p) for p in EXECUTION_AGENT_MCP_PREFIXES)
+
+    if not is_composite_tool and not is_mcp_passthrough:
         envelope["tool_result"] = {
             "ok": False,
             "error": {
                 "type": "UnknownTool",
                 "message": (
-                    f"Unknown tool {tool!r}. Valid tools: "
-                    f"{list(EXECUTION_AGENT_TOOL_NAMES)}."
+                    f"Unknown tool {tool!r}. Valid composite tools: "
+                    f"{list(EXECUTION_AGENT_TOOL_NAMES)}. "
+                    f"MCP pass-through prefixes: {list(EXECUTION_AGENT_MCP_PREFIXES)}."
                 ),
             },
         }
@@ -597,6 +611,32 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         return envelope
 
     args = args or {}
+
+    # ---- MCP pass-through dispatch ------------------------------------
+    if is_mcp_passthrough:
+        await _broadcast(
+            task.task_id,
+            TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
+        )
+        try:
+            mcp_result = await _call_mcp_tool_passthrough(tool, args)
+        except Exception as exc:
+            log.exception("MCP pass-through failed for tool %s", tool)
+            envelope["tool_result"] = {
+                "ok": False,
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": f"MCP pass-through call failed: {exc}",
+                },
+            }
+            return envelope
+
+        await _broadcast(
+            task.task_id,
+            TaskEvent(status="running", progress=f"tool_complete:{tool}", **common),
+        )
+        envelope["tool_result"] = mcp_result
+        return envelope
 
     # ---- Module load + function resolution ----------------------------
     await _broadcast(
@@ -762,3 +802,54 @@ async def _post_with_retry(client: Any, url: str, body: dict, task_id: UUID) -> 
             await asyncio.sleep(delay)
             delay *= 2  # exponential backoff
     log.error("Webhook %s exhausted %d attempts for task %s.", url, WEBHOOK_RETRY_ATTEMPTS, task_id)
+
+
+# =============================================================================
+# MCP pass-through
+# =============================================================================
+
+async def _call_mcp_tool_passthrough(tool_name: str, args: dict) -> dict:
+    """Call an MCP tool directly and return a structured result dict.
+
+    Used for MCP pass-through dispatch when the orchestrator delegates a
+    specific MCP tool (e.g. ``blazemeter_get_public_report``) rather than
+    a composite agent tool. Follows the same retry policy as the
+    execution-agent's API-based MCP calls: up to 3 attempts with 5s
+    back-off for ``blazemeter_*`` tools; single attempt for ``jmeter_*``
+    (code-based, deterministic).
+    """
+    from utils.mcp_client import MCPClient, build_client_config
+
+    is_code_based = tool_name.startswith("jmeter_")
+    max_attempts = 1 if is_code_based else 3
+    retry_delay = 5.0
+
+    config = build_client_config(["blazemeter", "jmeter"])
+    async with MCPClient(config) as client:
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await client.call_tool(tool_name, args)
+                data = getattr(result, "data", None)
+                if data is not None:
+                    payload = data
+                else:
+                    content = getattr(result, "content", None) or []
+                    payload = getattr(content[0], "text", None) if content else str(result)
+                return {"ok": True, "tool": tool_name, "result": payload, "attempts": attempt}
+            except PermissionError:
+                raise
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts:
+                    await asyncio.sleep(retry_delay)
+
+        return {
+            "ok": False,
+            "tool": tool_name,
+            "error": {
+                "type": type(last_error).__name__,
+                "message": str(last_error)[:500],
+            },
+            "attempts": max_attempts,
+        }
