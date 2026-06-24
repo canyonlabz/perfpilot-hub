@@ -97,7 +97,7 @@ async def check_test_status(run_id: str, ctx: Context) -> dict:
     return await get_test_status(run_id, ctx)
 
 @mcp.tool
-async def get_run_results(run_id: str, ctx: Context) -> str:
+async def get_run_results(run_id: str, ctx: Context) -> dict:
     """
     Get the latest summary for a given run.
 
@@ -105,7 +105,7 @@ async def get_run_results(run_id: str, ctx: Context) -> str:
         run_id: The BlazeMeter test run ID.
         ctx (Context, optional): FastMCP context to record, reuse, or cache summary info.
     Returns:
-        String (JSON or formatted text) summary of run status and KPIs; context updated with summary fields for workflow chaining.
+        Structured dict with run metadata, KPIs, response times, config, and file paths; context updated with summary fields for workflow chaining.
     """
     return await get_results_summary(run_id, ctx)
 

@@ -351,34 +351,9 @@ async def get_results_summary(run_id: str, ctx: Context) -> str:
         await ctx.set_state("summary", summary_fields)
         await ctx.set_state("test_config_json_path", test_config_json)
 
-    report = (
-        f"BlazeMeter Test Run Summary\n"
-        f"===========================\n"
-        f"Test Name: {test_name}\n"
-        f"Test ID: {test_id}\n"
-        f"Run ID: {run_id}\n\n"
-        f"Start Time: {start_time}\n"
-        f"End Time: {end_time}\n"
-        f"Duration: {duration_str}s\n"
-        f"Max Virtual Users: {max_virtual_users}\n\n"
-        f"Samples Total: {samples_total}\n"
-        f"Pass Count: {pass_count}\n"
-        f"Fail Count: {fail_count}\n"
-        f"Error Count: {error_count}\n\n"
-        f"Response Time (ms):\n"
-        f"Session ID: {sessions_id}\n"
-        f"  Min: {rt_min}\n"
-        f"  Max: {rt_max}\n"
-        f"  Avg: {rt_avg}\n"
-        f"  90th Percentile: {rt_p90}\n"
-        f"Test Config: \n"
-        f"  concurrency={config_fields.get('concurrency')}\n"
-        f"  rampUp={config_fields.get('rampUp')}\n"
-        f"  steps={config_fields.get('steps')}\n"
-        f"  iterations={config_fields.get('iterations')}\n"
-        f"Test Configuration JSON: {test_config_json}\n"
-    )
-    return report
+    summary_fields["sessions_id"] = sessions_id
+    summary_fields["test_config_json_path"] = test_config_json
+    return summary_fields
 
 async def list_test_runs(test_id: str, start_time: str, end_time: str, ctx: Context) -> list:
     """
