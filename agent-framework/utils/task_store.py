@@ -237,6 +237,18 @@ class RunSummary:
     started_at: datetime
     last_activity_at: datetime
     agent_names: list[str] = field(default_factory=list)
+    # KPI fields extracted from execution-agent extraction results
+    test_name: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    max_virtual_users: Optional[int] = None
+    samples_total: Optional[int] = None
+    avg_response_time_ms: Optional[float] = None
+    p90_response_time_ms: Optional[float] = None
+    median_response_time_ms: Optional[float] = None
+    avg_throughput: Optional[float] = None
+    error_rate: Optional[float] = None
+    avg_bandwidth_bytes: Optional[float] = None
+    public_url: Optional[str] = None
 
 
 async def list_runs(
@@ -265,22 +277,66 @@ async def list_runs(
 
     base_sql = """
         SELECT
-            t.test_run_id,
-            COUNT(*)::INT AS task_count,
-            SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END)::INT AS completed_count,
-            SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END)::INT AS failed_count,
-            SUM(CASE WHEN t.status IN ('pending', 'running') THEN 1 ELSE 0 END)::INT AS active_count,
-            SUM(CASE WHEN t.status = 'cancelled' THEN 1 ELSE 0 END)::INT AS cancelled_count,
-            MIN(t.submitted_at) AS started_at,
-            MAX(t.updated_at)   AS last_activity_at,
-            ARRAY_AGG(DISTINCT t.agent_name ORDER BY t.agent_name) AS agent_names
-        FROM agent_tasks t
-        {join_clause}
-        WHERE t.test_run_id IS NOT NULL
-          {extra_where}
-        GROUP BY t.test_run_id
-        ORDER BY MAX(t.updated_at) DESC
-        LIMIT $1 OFFSET $2
+            agg.test_run_id,
+            agg.task_count,
+            agg.completed_count,
+            agg.failed_count,
+            agg.active_count,
+            agg.cancelled_count,
+            agg.started_at,
+            agg.last_activity_at,
+            agg.agent_names,
+            kpi.test_name,
+            kpi.duration_seconds,
+            kpi.max_virtual_users,
+            kpi.samples_total,
+            kpi.avg_response_time_ms,
+            kpi.p90_response_time_ms,
+            kpi.median_response_time_ms,
+            kpi.avg_throughput,
+            kpi.error_rate,
+            kpi.avg_bandwidth_bytes,
+            kpi.public_url
+        FROM (
+            SELECT
+                t.test_run_id,
+                COUNT(*)::INT AS task_count,
+                SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END)::INT AS completed_count,
+                SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END)::INT AS failed_count,
+                SUM(CASE WHEN t.status IN ('pending', 'running') THEN 1 ELSE 0 END)::INT AS active_count,
+                SUM(CASE WHEN t.status = 'cancelled' THEN 1 ELSE 0 END)::INT AS cancelled_count,
+                MIN(t.submitted_at) AS started_at,
+                MAX(t.updated_at)   AS last_activity_at,
+                ARRAY_AGG(DISTINCT t.agent_name ORDER BY t.agent_name) AS agent_names
+            FROM agent_tasks t
+            {join_clause}
+            WHERE t.test_run_id IS NOT NULL
+              {extra_where}
+            GROUP BY t.test_run_id
+            ORDER BY MAX(t.updated_at) DESC
+            LIMIT $1 OFFSET $2
+        ) agg
+        LEFT JOIN LATERAL (
+            SELECT
+                e.result->'tool_result'->'kpis'->>'test_name' AS test_name,
+                (e.result->'tool_result'->'kpis'->>'duration_seconds')::INT AS duration_seconds,
+                (e.result->'tool_result'->'kpis'->>'max_virtual_users')::INT AS max_virtual_users,
+                (e.result->'tool_result'->'kpis'->>'samples_total')::INT AS samples_total,
+                (e.result->'tool_result'->'kpis'->>'avg_response_time_ms')::FLOAT AS avg_response_time_ms,
+                (e.result->'tool_result'->'kpis'->>'p90_response_time_ms')::FLOAT AS p90_response_time_ms,
+                (e.result->'tool_result'->'kpis'->>'median_response_time_ms')::FLOAT AS median_response_time_ms,
+                (e.result->'tool_result'->'kpis'->>'avg_throughput')::FLOAT AS avg_throughput,
+                (e.result->'tool_result'->'kpis'->>'error_rate')::FLOAT AS error_rate,
+                (e.result->'tool_result'->'kpis'->>'avg_bandwidth_bytes')::FLOAT AS avg_bandwidth_bytes,
+                e.result->'tool_result'->'steps'->'get_public_report'->>'public_url' AS public_url
+            FROM agent_tasks e
+            WHERE e.test_run_id = agg.test_run_id
+              AND e.status = 'completed'
+              AND e.result->>'tool' = 'extract_test_run_artifacts'
+            ORDER BY e.completed_at DESC
+            LIMIT 1
+        ) kpi ON TRUE
+        ORDER BY agg.last_activity_at DESC
     """
 
     pool = await db.get_pool()
@@ -305,6 +361,17 @@ async def list_runs(
             started_at=row["started_at"],
             last_activity_at=row["last_activity_at"],
             agent_names=list(row["agent_names"] or []),
+            test_name=row["test_name"],
+            duration_seconds=row["duration_seconds"],
+            max_virtual_users=row["max_virtual_users"],
+            samples_total=row["samples_total"],
+            avg_response_time_ms=row["avg_response_time_ms"],
+            p90_response_time_ms=row["p90_response_time_ms"],
+            median_response_time_ms=row["median_response_time_ms"],
+            avg_throughput=row["avg_throughput"],
+            error_rate=row["error_rate"],
+            avg_bandwidth_bytes=row["avg_bandwidth_bytes"],
+            public_url=row["public_url"],
         )
         for row in rows
     ]

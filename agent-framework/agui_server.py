@@ -1212,6 +1212,17 @@ def _run_summary_to_dict(run: task_store.RunSummary) -> dict:
         "agents": run.agent_names,
         "earliest_submitted": run.started_at.isoformat() if run.started_at else None,
         "latest_completed": run.last_activity_at.isoformat() if run.last_activity_at else None,
+        "test_name": run.test_name,
+        "duration_seconds": run.duration_seconds,
+        "max_virtual_users": run.max_virtual_users,
+        "samples_total": run.samples_total,
+        "avg_response_time_ms": run.avg_response_time_ms,
+        "p90_response_time_ms": run.p90_response_time_ms,
+        "median_response_time_ms": run.median_response_time_ms,
+        "avg_throughput": run.avg_throughput,
+        "error_rate": run.error_rate,
+        "avg_bandwidth_bytes": run.avg_bandwidth_bytes,
+        "public_url": run.public_url,
     }
 
 

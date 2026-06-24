@@ -82,6 +82,66 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
+interface RunKpis {
+  test_name: string | null;
+  duration_seconds: number | null;
+  max_virtual_users: number | null;
+  samples_total: number | null;
+  avg_response_time_ms: number | null;
+  p90_response_time_ms: number | null;
+  median_response_time_ms: number | null;
+  avg_throughput: number | null;
+  error_rate: number | null;
+  avg_bandwidth_bytes: number | null;
+}
+
+function extractKpisFromTasks(tasks: TaskSnapshot[]): RunKpis | null {
+  for (const task of tasks) {
+    const result = task.result;
+    if (!result) continue;
+    if (result.tool !== "extract_test_run_artifacts") continue;
+    const toolResult = result.tool_result as Record<string, unknown> | undefined;
+    if (!toolResult) continue;
+    const kpis = toolResult.kpis as Record<string, unknown> | undefined;
+    if (!kpis) continue;
+    if (kpis.avg_response_time_ms == null && kpis.max_virtual_users == null) continue;
+    return {
+      test_name: (kpis.test_name as string) ?? null,
+      duration_seconds: (kpis.duration_seconds as number) ?? null,
+      max_virtual_users: (kpis.max_virtual_users as number) ?? null,
+      samples_total: (kpis.samples_total as number) ?? null,
+      avg_response_time_ms: (kpis.avg_response_time_ms as number) ?? null,
+      p90_response_time_ms: (kpis.p90_response_time_ms as number) ?? null,
+      median_response_time_ms: (kpis.median_response_time_ms as number) ?? null,
+      avg_throughput: (kpis.avg_throughput as number) ?? null,
+      error_rate: (kpis.error_rate as number) ?? null,
+      avg_bandwidth_bytes: (kpis.avg_bandwidth_bytes as number) ?? null,
+    };
+  }
+  return null;
+}
+
+function formatMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms)} ms`;
+}
+
+function formatDurationSecs(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+function KpiTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col items-center px-4 py-2 rounded-md bg-muted/50 min-w-[80px]">
+      <span className="text-base font-semibold tabular-nums">{value}</span>
+      <span className="text-[10px] text-muted-foreground leading-tight">{label}</span>
+    </div>
+  );
+}
+
 function extractBlazeMeterUrl(task: TaskSnapshot): string | null {
   const result = task.result;
   if (!result) return null;
@@ -239,6 +299,7 @@ interface RunDetailViewProps {
 
 export function RunDetailView({ run }: RunDetailViewProps) {
   const overallStatus = deriveOverallStatus(run.tasks);
+  const kpis = extractKpisFromTasks(run.tasks);
 
   const earliest = run.tasks.reduce<string | null>((min, t) => {
     if (!t.submitted_at) return min;
@@ -328,6 +389,51 @@ export function RunDetailView({ run }: RunDetailViewProps) {
           </a>
         )}
       </div>
+
+      {/* KPI summary (only when extraction data is available) */}
+      {kpis && (
+        <div className="rounded-lg border bg-card shadow-sm p-5 mb-6">
+          <h2 className="text-sm font-semibold mb-3">
+            Performance Summary
+            {kpis.test_name && (
+              <span className="font-normal text-muted-foreground">
+                {" \u2014 "}{kpis.test_name}
+              </span>
+            )}
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {kpis.max_virtual_users != null && (
+              <KpiTile label="Max VU" value={String(kpis.max_virtual_users)} />
+            )}
+            {kpis.avg_throughput != null && (
+              <KpiTile label="Throughput" value={`${kpis.avg_throughput} Hit/s`} />
+            )}
+            {kpis.error_rate != null && (
+              <KpiTile label="Errors" value={`${kpis.error_rate}%`} />
+            )}
+            {kpis.avg_response_time_ms != null && (
+              <KpiTile label="Avg RT" value={formatMs(kpis.avg_response_time_ms)} />
+            )}
+            {kpis.p90_response_time_ms != null && (
+              <KpiTile label="P90 RT" value={formatMs(kpis.p90_response_time_ms)} />
+            )}
+            {kpis.median_response_time_ms != null && (
+              <KpiTile label="Median RT" value={formatMs(kpis.median_response_time_ms)} />
+            )}
+            {kpis.avg_bandwidth_bytes != null && (
+              <KpiTile label="Bandwidth" value={`${kpis.avg_bandwidth_bytes.toFixed(1)} KiB/s`} />
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+            {kpis.duration_seconds != null && (
+              <span>Duration: {formatDurationSecs(kpis.duration_seconds)}</span>
+            )}
+            {kpis.samples_total != null && (
+              <span>Samples: {kpis.samples_total}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Tasks breakdown */}
       <h2 className="text-sm font-semibold mb-3">

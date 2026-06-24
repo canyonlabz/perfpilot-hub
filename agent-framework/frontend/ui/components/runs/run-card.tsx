@@ -8,9 +8,9 @@ import {
   Clock,
   Ban,
   ChevronRight,
+  ExternalLink,
 } from "lucide-react";
-import type { RunSummary } from "@/lib/types";
-import type { TaskStatus } from "@/lib/types";
+import type { RunSummary, TaskStatus } from "@/lib/types";
 
 function formatAgentName(name: string): string {
   return name
@@ -27,6 +27,18 @@ function formatRelativeTime(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+function formatMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms)} ms`;
 }
 
 function deriveOverallStatus(statuses?: Record<string, number>): TaskStatus {
@@ -66,6 +78,15 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; className: string; icon
   },
 };
 
+function KpiTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col items-center px-3 py-1.5 rounded-md bg-muted/50">
+      <span className="text-sm font-semibold tabular-nums">{value}</span>
+      <span className="text-[10px] text-muted-foreground leading-tight">{label}</span>
+    </div>
+  );
+}
+
 interface RunCardProps {
   run: RunSummary;
 }
@@ -73,6 +94,7 @@ interface RunCardProps {
 export function RunCard({ run }: RunCardProps) {
   const overallStatus = deriveOverallStatus(run.statuses);
   const { label, className, icon } = STATUS_CONFIG[overallStatus] ?? STATUS_CONFIG.pending;
+  const hasKpis = run.avg_response_time_ms != null || run.max_virtual_users != null;
 
   return (
     <Link
@@ -80,9 +102,18 @@ export function RunCard({ run }: RunCardProps) {
       className="block rounded-lg border bg-card text-card-foreground shadow-sm hover:shadow-md hover:border-primary/30 transition-all"
     >
       <div className="px-4 py-3">
-        {/* Top row: test_run_id + status badge */}
+        {/* Top row: test_run_id + test_name + status badge */}
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold truncate">{run.test_run_id}</h3>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold truncate">
+              {run.test_run_id}
+              {run.test_name && (
+                <span className="font-normal text-muted-foreground">
+                  {" \u2014 "}{run.test_name}
+                </span>
+              )}
+            </h3>
+          </div>
           <span
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${className}`}
           >
@@ -91,12 +122,45 @@ export function RunCard({ run }: RunCardProps) {
           </span>
         </div>
 
-        {/* Middle row: task count + agents */}
+        {/* KPI tiles row (only when data is available) */}
+        {hasKpis && (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {run.max_virtual_users != null && (
+              <KpiTile label="Max VU" value={String(run.max_virtual_users)} />
+            )}
+            {run.avg_throughput != null && (
+              <KpiTile label="Throughput" value={`${run.avg_throughput} Hit/s`} />
+            )}
+            {run.error_rate != null && (
+              <KpiTile label="Errors" value={`${run.error_rate}%`} />
+            )}
+            {run.avg_response_time_ms != null && (
+              <KpiTile label="Avg RT" value={formatMs(run.avg_response_time_ms)} />
+            )}
+            {run.p90_response_time_ms != null && (
+              <KpiTile label="P90 RT" value={formatMs(run.p90_response_time_ms)} />
+            )}
+          </div>
+        )}
+
+        {/* Bottom row: metadata */}
         <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+          {run.duration_seconds != null && (
+            <>
+              <span>{formatDuration(run.duration_seconds)}</span>
+              <span className="text-border">|</span>
+            </>
+          )}
           <span>
             {run.task_count} {run.task_count === 1 ? "task" : "tasks"}
           </span>
-          {run.agents.length > 0 && (
+          {run.samples_total != null && (
+            <>
+              <span className="text-border">|</span>
+              <span>{run.samples_total} samples</span>
+            </>
+          )}
+          {run.agents.length > 0 && !hasKpis && (
             <>
               <span className="text-border">|</span>
               <span className="truncate">
@@ -104,34 +168,36 @@ export function RunCard({ run }: RunCardProps) {
               </span>
             </>
           )}
+          {run.avg_bandwidth_bytes != null && (
+            <>
+              <span className="text-border">|</span>
+              <span>{run.avg_bandwidth_bytes.toFixed(1)} KiB/s</span>
+            </>
+          )}
         </div>
 
-        {/* Status breakdown for multi-task runs */}
-        {run.task_count > 1 && (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {Object.entries(run.statuses).map(([status, count]) => {
-              const cfg = STATUS_CONFIG[status as TaskStatus];
-              if (!cfg) return null;
-              return (
-                <span
-                  key={status}
-                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${cfg.className}`}
-                >
-                  {cfg.icon}
-                  {count}
-                </span>
-              );
-            })}
+        {/* Timestamp + report link + arrow */}
+        <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-3">
+            <span>
+              {run.earliest_submitted
+                ? formatRelativeTime(run.earliest_submitted)
+                : "No timestamp"}
+            </span>
+            {run.public_url && (
+              <span
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.open(run.public_url!, "_blank", "noopener,noreferrer");
+                }}
+                className="inline-flex items-center gap-0.5 text-primary hover:underline cursor-pointer"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Report
+              </span>
+            )}
           </div>
-        )}
-
-        {/* Bottom row: timestamps + arrow */}
-        <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>
-            {run.earliest_submitted
-              ? formatRelativeTime(run.earliest_submitted)
-              : "No timestamp"}
-          </span>
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
         </div>
       </div>

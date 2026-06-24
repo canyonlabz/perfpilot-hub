@@ -1007,6 +1007,21 @@ async def _extract_test_run_artifacts_with_client(
 
     result["steps"]["get_run_results"] = {"status": "success", "error": None}
 
+    raw1 = step1["raw"]
+    if isinstance(raw1, dict):
+        kpis = result["kpis"]
+        kpis["test_name"] = raw1.get("test_name")
+        kpis["duration_seconds"] = raw1.get("duration_seconds")
+        kpis["max_virtual_users"] = raw1.get("max_virtual_users")
+        kpis["samples_total"] = raw1.get("samples_total")
+        kpis["pass_count"] = raw1.get("pass_count")
+        kpis["fail_count"] = raw1.get("fail_count")
+        kpis["error_count"] = raw1.get("error_count")
+        kpis["min_response_time_ms"] = raw1.get("response_time_min_ms")
+        kpis["max_response_time_ms"] = raw1.get("response_time_max_ms")
+        kpis["avg_response_time_ms"] = raw1.get("response_time_avg_ms")
+        kpis["p90_response_time_ms"] = raw1.get("response_time_p90_ms")
+
     # ---- Step 2 (CRITICAL): get_artifacts_path --------------------------
     await _emit("Step 2/6: get_artifacts_path (CRITICAL)")
     step2 = await _call_blazemeter_with_retries(
@@ -1154,6 +1169,20 @@ async def _extract_test_run_artifacts_with_client(
         s5_status = payload.get("status")
         if s5_status == "success":
             result["steps"]["get_aggregate_report"] = {"status": "success", "error": None}
+            agg = payload.get("aggregate_summary")
+            if isinstance(agg, dict):
+                kpis = result["kpis"]
+                kpis["avg_response_time_ms"] = agg.get("avgResponseTime")
+                kpis["p90_response_time_ms"] = agg.get("90line")
+                kpis["median_response_time_ms"] = agg.get("medianResponseTime")
+                kpis["min_response_time_ms"] = agg.get("minResponseTime")
+                kpis["max_response_time_ms"] = agg.get("maxResponseTime")
+                kpis["avg_throughput"] = agg.get("avgThroughput")
+                kpis["error_rate"] = agg.get("errorsRate")
+                kpis["avg_bandwidth_bytes"] = agg.get("avgBytes")
+                kpis["avg_latency_ms"] = agg.get("avgLatency")
+                if agg.get("samples") is not None:
+                    kpis["samples_total"] = agg.get("samples")
         else:
             err = payload.get("error") or f"unexpected status={s5_status!r}"
             result["steps"]["get_aggregate_report"] = {
@@ -1244,6 +1273,24 @@ def _new_extraction_result(test_run_id: str) -> dict:
         "end_time": None,
         "mcp_artifacts_base_path": None,
         "artifacts_path": None,
+        "kpis": {
+            "test_name": None,
+            "duration_seconds": None,
+            "max_virtual_users": None,
+            "samples_total": None,
+            "pass_count": None,
+            "fail_count": None,
+            "error_count": None,
+            "avg_response_time_ms": None,
+            "p90_response_time_ms": None,
+            "median_response_time_ms": None,
+            "min_response_time_ms": None,
+            "max_response_time_ms": None,
+            "avg_throughput": None,
+            "error_rate": None,
+            "avg_bandwidth_bytes": None,
+            "avg_latency_ms": None,
+        },
         "steps": {
             "get_run_results":           {"status": "pending", "error": None},
             "get_artifacts_path":        {"status": "pending", "error": None},

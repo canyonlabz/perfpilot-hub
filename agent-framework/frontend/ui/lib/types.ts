@@ -111,6 +111,17 @@ export interface RunSummary {
   agents: string[];
   earliest_submitted: string | null;
   latest_completed: string | null;
+  test_name: string | null;
+  duration_seconds: number | null;
+  max_virtual_users: number | null;
+  samples_total: number | null;
+  avg_response_time_ms: number | null;
+  p90_response_time_ms: number | null;
+  median_response_time_ms: number | null;
+  avg_throughput: number | null;
+  error_rate: number | null;
+  avg_bandwidth_bytes: number | null;
+  public_url: string | null;
 }
 
 export interface RunDetail {
