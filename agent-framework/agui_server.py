@@ -364,6 +364,25 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []
 
+                from agents.orchestrator.agent import (
+                    drain_pending_executions,
+                    _background_tasks,
+                )
+                from utils import task_executor
+
+                def _drain_inline():
+                    """Start background execution for tasks queued by tools
+                    during this dispatch. Called after each SSE chunk so
+                    delegated tasks begin immediately — not deferred until
+                    the full dispatch completes (which would deadlock if the
+                    orchestrator polls check_task_status in the same turn).
+                    """
+                    for pending_task_id in drain_pending_executions():
+                        log.debug("Inline-drain: starting task %s", pending_task_id)
+                        bg = asyncio.create_task(task_executor.execute_task(pending_task_id))
+                        _background_tasks.add(bg)
+                        bg.add_done_callback(_background_tasks.discard)
+
                 # AG2's dispatch yields SSE-encoded strings already (one
                 # `event: ...\ndata: ...\n\n` block per chunk). We pass each
                 # through to the client AND parse the data line to capture
@@ -387,6 +406,12 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                                 pass
                     _capture_assistant_text_from_sse_chunk(chunk, accumulated_text)
 
+                    # Inline drain: start delegated tasks as soon as the
+                    # TOOL_CALL_END event is yielded — prevents the deadlock
+                    # where the orchestrator polls check_task_status for a
+                    # task that can't start until dispatch completes.
+                    _drain_inline()
+
                 if existing_thread is not None and accumulated_text:
                     full_text = "".join(accumulated_text)
                     try:
@@ -405,21 +430,10 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
 
                 clear_caller_identity()
 
-                # Fire background execution for any tasks created by tools
-                # during dispatch. Done HERE (normal FastAPI async context)
-                # because asyncio.create_task() inside AG2's tool context
-                # creates tasks that never execute on the main event loop.
-                from agents.orchestrator.agent import (
-                    drain_pending_executions,
-                    _background_tasks,
-                )
-                from utils import task_executor
-
-                for pending_task_id in drain_pending_executions():
-                    log.debug("Starting background execution for task %s", pending_task_id)
-                    bg = asyncio.create_task(task_executor.execute_task(pending_task_id))
-                    _background_tasks.add(bg)
-                    bg.add_done_callback(_background_tasks.discard)
+                # Safety-net drain: catch any tasks queued in the final
+                # tool call whose TOOL_CALL_END event wasn't yielded before
+                # the stream closed.
+                _drain_inline()
 
             return StreamingResponse(
                 _streaming_with_persistence(),

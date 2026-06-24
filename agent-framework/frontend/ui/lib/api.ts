@@ -7,6 +7,8 @@ import type {
   RunSummary,
   RunDetail,
   TasksResponse,
+  HitlApproval,
+  HitlTaskResponse,
 } from "./types";
 
 export interface HealthResponse {
@@ -155,5 +157,47 @@ export async function fetchCurrentSession(): Promise<SessionInfo> {
   const res = await fetch("/api/sessions/me");
   if (!res.ok)
     throw new Error(`Failed to fetch current session: ${res.status}`);
+  return res.json();
+}
+
+// --- HITL Approval API ---
+
+export async function fetchHitlForTask(
+  taskId: string
+): Promise<HitlTaskResponse> {
+  const res = await fetch(`/api/hitl/tasks/${encodeURIComponent(taskId)}`);
+  if (!res.ok)
+    throw new Error(`Failed to fetch HITL approvals: ${res.status}`);
+  return res.json();
+}
+
+export async function approveHitl(
+  approvalId: number,
+  decidedBy?: string
+): Promise<HitlApproval> {
+  const res = await fetch("/api/hitl/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approval_id: approvalId, decided_by: decidedBy }),
+  });
+  if (!res.ok) throw new Error(`Failed to approve HITL: ${res.status}`);
+  return res.json();
+}
+
+export async function rejectHitl(
+  approvalId: number,
+  feedback?: string,
+  decidedBy?: string
+): Promise<HitlApproval> {
+  const res = await fetch("/api/hitl/reject", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      approval_id: approvalId,
+      feedback: feedback || null,
+      decided_by: decidedBy,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to reject HITL: ${res.status}`);
   return res.json();
 }

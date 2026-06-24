@@ -118,3 +118,28 @@ export interface RunDetail {
   task_count: number;
   tasks: TaskSnapshot[];
 }
+
+// --- HITL Approvals ---
+
+export type HitlDecision = "pending" | "approved" | "rejected";
+
+export interface HitlPrompt {
+  title: string;
+  summary: string;
+  artifact?: Record<string, unknown>;
+}
+
+export interface HitlApproval {
+  id: number;
+  task_id: string;
+  prompt: HitlPrompt;
+  decision: HitlDecision;
+  feedback: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+}
+
+export interface HitlTaskResponse {
+  task_id: string;
+  approvals: HitlApproval[];
+}

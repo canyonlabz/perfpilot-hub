@@ -11,8 +11,11 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { subscribeToTask } from "@/lib/sse";
+import { fetchHitlForTask } from "@/lib/api";
 import { TaskStep } from "./task-step";
-import type { TaskSnapshot, TaskEvent, TaskStatus } from "@/lib/types";
+import { ApprovalCard } from "@/components/hitl/approval-card";
+import { ApprovalStatus } from "@/components/hitl/approval-status";
+import type { TaskSnapshot, TaskEvent, TaskStatus, HitlApproval } from "@/lib/types";
 import { TERMINAL_STATUSES } from "@/lib/types";
 
 interface TaskProgressCardProps {
@@ -148,6 +151,8 @@ function formatErrorSummary(error: Record<string, unknown>): React.ReactNode {
   return json.length > 120 ? json.slice(0, 120) + "…" : json;
 }
 
+const HITL_POLL_INTERVAL_MS = 3_000;
+
 export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardProps) {
   const [agentName, setAgentName] = useState(initialSnapshot?.agent_name ?? "");
   const [currentStatus, setCurrentStatus] = useState<TaskStatus>(
@@ -164,6 +169,9 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
   const [expanded, setExpanded] = useState(true);
   const stepsEndRef = useRef<HTMLDivElement>(null);
   const stepCounterRef = useRef(0);
+
+  // HITL approval state
+  const [hitlApprovals, setHitlApprovals] = useState<HitlApproval[]>([]);
 
   const addStep = useCallback((status: TaskStatus, progress: string | null, timestamp: string) => {
     setSteps((prev) => {
@@ -237,6 +245,41 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
     return cleanup;
   }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // HITL polling: fetch approvals for running tasks
+  useEffect(() => {
+    if (TERMINAL_STATUSES.has(currentStatus) && currentStatus !== "completed") return;
+
+    let active = true;
+
+    const pollHitl = async () => {
+      try {
+        const data = await fetchHitlForTask(taskId);
+        if (active) setHitlApprovals(data.approvals);
+      } catch {
+        // Silently ignore — task may not have HITL prompts, or 404 if task not found
+      }
+    };
+
+    pollHitl();
+
+    // Only keep polling while task is actively running
+    const hasPending = currentStatus === "running" || currentStatus === "pending";
+    const interval = hasPending
+      ? setInterval(pollHitl, HITL_POLL_INTERVAL_MS)
+      : undefined;
+
+    return () => {
+      active = false;
+      if (interval) clearInterval(interval);
+    };
+  }, [taskId, currentStatus]);
+
+  const handleHitlDecided = (updated: HitlApproval) => {
+    setHitlApprovals((prev) =>
+      prev.map((a) => (a.id === updated.id ? updated : a))
+    );
+  };
+
   useEffect(() => {
     if (stepsEndRef.current) {
       stepsEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -244,6 +287,8 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
   }, [steps.length]);
 
   const isTerminal = TERMINAL_STATUSES.has(currentStatus);
+  const pendingApprovals = hitlApprovals.filter((a) => a.decision === "pending");
+  const decidedApprovals = hitlApprovals.filter((a) => a.decision !== "pending");
 
   return (
     <div
@@ -292,6 +337,23 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
             />
           ))}
           <div ref={stepsEndRef} />
+
+          {/* HITL pending approval cards */}
+          {pendingApprovals.map((approval) => (
+            <div key={`hitl-${approval.id}`} className="mx-1 mt-2">
+              <ApprovalCard
+                approval={approval}
+                onDecided={handleHitlDecided}
+              />
+            </div>
+          ))}
+
+          {/* HITL decided approval cards */}
+          {decidedApprovals.map((approval) => (
+            <div key={`hitl-decided-${approval.id}`} className="mx-1 mt-1">
+              <ApprovalStatus approval={approval} />
+            </div>
+          ))}
 
           {/* Terminal result/error summary */}
           {isTerminal && error && (

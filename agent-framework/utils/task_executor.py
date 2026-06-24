@@ -138,6 +138,102 @@ async def _broadcast(task_id: UUID, event: TaskEvent) -> None:
 # Public API
 # =============================================================================
 
+def _find_matching_hitl_rule(
+    agent_name: str,
+    tool: Optional[str],
+) -> Optional[HitlGateRule]:
+    """Return the first HITL gate rule that matches (agent, tool) AND is
+    enabled in config, or ``None`` if no gate applies.
+    """
+    hitl_cfg = _get_hitl_config()
+    for rule in _HITL_GATE_RULES:
+        if rule.matches(agent_name, tool) and hitl_cfg.get(rule.config_key, False):
+            return rule
+    return None
+
+
+async def _enforce_hitl_gate(
+    task: task_store.AgentTask,
+    common: dict,
+) -> Optional[str]:
+    """Check config-driven HITL gates and wait for human decision if required.
+
+    Iterates ``_HITL_GATE_RULES`` looking for a rule that matches the
+    task's ``(agent_name, payload.tool)`` AND whose config key is enabled.
+    If a match is found, creates a HITL prompt and polls until the human
+    decides (approve / reject) or the configured timeout expires.
+
+    Returns ``None`` when no gate applies or when the human approved.
+    Returns a rejection reason string when the human rejected or the gate
+    timed out — the caller should cancel the task.
+
+    Polling interval and timeout are read from the orchestrator's
+    ``config.yaml`` under ``pipeline.poll_interval_seconds`` and
+    ``pipeline.poll_timeout_seconds`` respectively.
+    """
+    payload = task.payload if isinstance(task.payload, dict) else {}
+    tool = payload.get("tool") if isinstance(payload.get("tool"), str) else None
+
+    rule = _find_matching_hitl_rule(task.agent_name, tool)
+    if rule is None:
+        return None
+
+    from . import hitl_store
+
+    prompt = rule.build_prompt(task.agent_name, payload)
+
+    try:
+        approval = await hitl_store.create_prompt(task.task_id, prompt)
+    except Exception as exc:
+        log.exception("_enforce_hitl_gate: failed to create HITL prompt")
+        return f"Failed to create HITL prompt: {exc}"
+
+    log.info(
+        "HITL gate active for task %s (approval_id=%d, rule=%s)",
+        task.task_id, approval.id, rule.config_key,
+    )
+
+    await _broadcast(
+        task.task_id,
+        TaskEvent(status="running", progress="Waiting for human approval...", **common),
+    )
+
+    hitl_cfg = _get_hitl_config()
+    poll_interval = float(hitl_cfg.get("poll_interval_seconds", 2.0))
+    timeout = float(hitl_cfg.get("timeout_seconds", 300.0))
+    deadline = asyncio.get_event_loop().time() + max(0.0, timeout)
+
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            current = await hitl_store.get_approval(approval.id)
+        except Exception:
+            log.exception("_enforce_hitl_gate: poll error (will retry)")
+            await asyncio.sleep(poll_interval)
+            continue
+
+        if current and current.decision != "pending":
+            if current.decision == "approved":
+                log.info("HITL gate approved for task %s", task.task_id)
+                await _broadcast(
+                    task.task_id,
+                    TaskEvent(
+                        status="running",
+                        progress="Human approval granted — proceeding with execution",
+                        **common,
+                    ),
+                )
+                return None
+            else:
+                reason = current.feedback or "Rejected by user"
+                log.info("HITL gate rejected for task %s: %s", task.task_id, reason)
+                return reason
+
+        await asyncio.sleep(poll_interval)
+
+    log.warning("HITL gate timed out for task %s after %.0fs", task.task_id, timeout)
+    return f"HITL approval timed out after {int(timeout)}s"
+
+
 async def execute_task(task_id: UUID) -> None:
     """Run the task end-to-end. Schedule with `asyncio.create_task(...)`."""
     task = await task_store.get_task(task_id)
@@ -159,6 +255,23 @@ async def execute_task(task_id: UUID) -> None:
     try:
         await task_store.mark_running(task.task_id)
         await _broadcast(task.task_id, TaskEvent(status="running", progress="started", **common))
+
+        # Config-driven HITL gate: pause before executing if approval is
+        # required. The frontend polls /api/hitl/tasks/{task_id} and renders
+        # an inline approval card. The gate blocks here until decided.
+        hitl_rejection = await _enforce_hitl_gate(task, common)
+        if hitl_rejection is not None:
+            await task_store.mark_cancelled(task.task_id, reason=hitl_rejection)
+            await _broadcast(
+                task.task_id,
+                TaskEvent(
+                    status="cancelled",
+                    error={"reason": hitl_rejection},
+                    **common,
+                ),
+            )
+            return
+
         result = await _dispatch_agent(task, common)
         await task_store.mark_completed(task.task_id, result)
         await _broadcast(task.task_id, TaskEvent(status="completed", result=result, **common))
@@ -191,6 +304,135 @@ async def execute_task(task_id: UUID) -> None:
 
 ORCHESTRATOR_AGENT_NAME = "orchestrator"
 EXECUTION_AGENT_NAME = "execution-agent"
+
+# =============================================================================
+# HITL gate infrastructure (config-driven, extensible)
+# =============================================================================
+# Each HitlGateRule declares a mapping from (agent, tool) to a config key
+# under `hitl.*` in the orchestrator's config.yaml.  Adding a new HITL gate
+# is two steps:
+#   1. Add a `require_approval_before_<name>: true` key in config.yaml
+#   2. Add a HitlGateRule to _HITL_GATE_RULES below
+# The framework handles prompt creation, polling, and approval/rejection.
+
+
+@dataclass
+class HitlGateRule:
+    """Declares when a HITL gate should fire and what prompt to show."""
+
+    config_key: str
+    agent_names: tuple[str, ...]
+    tools: Optional[frozenset[str]]
+    title: str
+    summary_template: str
+
+    def matches(self, agent_name: str, tool: Optional[str]) -> bool:
+        if agent_name not in self.agent_names:
+            return False
+        if self.tools is not None and (tool is None or tool not in self.tools):
+            return False
+        return True
+
+    def build_prompt(self, agent_name: str, payload: dict) -> dict:
+        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        tool = payload.get("tool", "unknown")
+
+        template_vars = {
+            "agent_name": agent_name,
+            "tool": tool,
+            **{k: str(v) for k, v in args.items()},
+        }
+        summary = self.summary_template.format_map(
+            _SafeFormatMap(template_vars)
+        )
+
+        artifact: dict[str, Any] = {"tool": tool, "agent": agent_name}
+        artifact.update({k: str(v) for k, v in args.items()})
+        if payload.get("action"):
+            artifact["action"] = payload["action"]
+
+        return {"title": self.title, "summary": summary, "artifact": artifact}
+
+
+class _SafeFormatMap(dict):
+    """Dict subclass that returns '{key}' for missing keys in str.format_map."""
+
+    def __missing__(self, key: str) -> str:
+        return f"{{{key}}}"
+
+
+_HITL_GATE_RULES: list[HitlGateRule] = [
+    HitlGateRule(
+        config_key="require_approval_before_test_start",
+        agent_names=(EXECUTION_AGENT_NAME,),
+        tools=frozenset({"start_performance_test"}),
+        title="Approve Performance Test Start",
+        summary_template=(
+            "The {agent_name} wants to start BlazeMeter test {test_id}. "
+            "Approve to proceed or reject to cancel."
+        ),
+    ),
+    HitlGateRule(
+        config_key="require_approval_before_publish",
+        agent_names=("reporting-agent",),
+        tools=None,
+        title="Approve Report Publication",
+        summary_template=(
+            "The {agent_name} wants to publish content. "
+            "Approve to proceed or reject to cancel."
+        ),
+    ),
+]
+
+# Orchestrator config cache (loaded once per process)
+_orchestrator_config: Optional[dict] = None
+_orchestrator_config_loaded = False
+
+
+def _load_orchestrator_config() -> dict:
+    """Load the full orchestrator config.yaml (cached after first load)."""
+    global _orchestrator_config, _orchestrator_config_loaded
+    if _orchestrator_config_loaded:
+        return _orchestrator_config or {}
+
+    try:
+        from pathlib import Path
+
+        import yaml
+
+        from .base_agent import resolve_agent_config_path
+
+        orchestrator_dir = Path(__file__).resolve().parent.parent / "agents" / "orchestrator"
+        config_path = resolve_agent_config_path(orchestrator_dir)
+        if config_path is None:
+            log.warning("_load_orchestrator_config: no config found")
+            _orchestrator_config = {}
+        else:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
+                _orchestrator_config = yaml.safe_load(f) or {}
+            if not isinstance(_orchestrator_config, dict):
+                _orchestrator_config = {}
+            log.info("Orchestrator config loaded (hitl=%s)", _orchestrator_config.get("hitl"))
+    except Exception:
+        log.exception("_load_orchestrator_config: failed")
+        _orchestrator_config = {}
+
+    _orchestrator_config_loaded = True
+    return _orchestrator_config or {}
+
+
+def _get_hitl_config() -> dict:
+    """Return the ``hitl:`` section of the orchestrator config."""
+    cfg = _load_orchestrator_config()
+    hitl = cfg.get("hitl")
+    return hitl if isinstance(hitl, dict) else {}
+
+
+def _get_pipeline_config() -> dict:
+    """Return the ``pipeline:`` section of the orchestrator config."""
+    cfg = _load_orchestrator_config()
+    pipeline = cfg.get("pipeline")
+    return pipeline if isinstance(pipeline, dict) else {}
 
 # F3.8 execution-agent tool surface (INSTRUCTIONS.md §3). Kept here as a
 # tuple of authoritative names; `_run_execution_agent` validates incoming
