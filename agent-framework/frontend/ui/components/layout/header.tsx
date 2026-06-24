@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, CheckCircle2, XCircle, BookOpen, ListChecks } from "lucide-react";
+import Link from "next/link";
+import { Activity, CheckCircle2, XCircle, BookOpen, ListChecks, FlaskConical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fetchHealth } from "@/lib/api";
 
@@ -44,6 +45,14 @@ export function Header({ showCatalog, onToggleCatalog, showTasks, onToggleTasks 
         <span className="font-semibold text-lg">PerfPilot</span>
       </div>
       <div className="flex items-center gap-3">
+        <Link
+          href="/runs"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          title="Test Runs"
+        >
+          <FlaskConical className="h-3.5 w-3.5" />
+          Runs
+        </Link>
         {onToggleCatalog && (
           <button
             onClick={onToggleCatalog}
