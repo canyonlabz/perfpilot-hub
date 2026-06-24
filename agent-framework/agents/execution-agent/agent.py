@@ -1376,18 +1376,10 @@ async def _call_mcp_once(client: Any, tool_name: str, args: dict) -> dict:
 def _parse_get_run_results(raw: Any) -> dict:
     """Extract `start_time`, `end_time`, `sessions_id` from a get_run_results response.
 
-    The MCP tool `blazemeter_get_run_results` returns a formatted multi-line
-    STRING (see `blazemeter-mcp/services/blazemeter_api.py::get_results_summary`
-    line 349). This helper:
-
-      1. If the raw value is already a dict (future MCP refactor), pull
-         fields directly.
-      2. Otherwise treat it as a string and regex-extract the labeled
-         lines. The Python-repr session list (`Session ID: ['1','2']`)
-         is parsed via `ast.literal_eval` for safety.
-      3. Returns a `warnings` list when fields are present but unparseable
-         (e.g. `Start Time: N/A`); §4 of INSTRUCTIONS.md says these go
-         into the return JSON's `notes`.
+    The MCP tool `blazemeter_get_run_results` returns a structured dict.
+    The dict branch (isinstance check) is the primary code path. The
+    legacy text-parsing branch below is retained for backward
+    compatibility but is no longer exercised in normal operation.
     """
     out: dict = {
         "start_time": None,
@@ -1402,6 +1394,10 @@ def _parse_get_run_results(raw: Any) -> dict:
         if isinstance(sid, (list, tuple)):
             out["sessions_id"] = [str(x) for x in sid]
         return out
+
+    # --- Legacy text-parsing branch ---
+    # Retained for backward compatibility; no longer exercised when the
+    # MCP tool returns a structured dict.
 
     if not isinstance(raw, str):
         out["warnings"].append(

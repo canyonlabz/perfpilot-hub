@@ -29,7 +29,8 @@ function formatRelativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-function deriveOverallStatus(statuses: Record<string, number>): TaskStatus {
+function deriveOverallStatus(statuses?: Record<string, number>): TaskStatus {
+  if (!statuses) return "pending";
   if (statuses.failed) return "failed";
   if (statuses.running) return "running";
   if (statuses.pending) return "pending";

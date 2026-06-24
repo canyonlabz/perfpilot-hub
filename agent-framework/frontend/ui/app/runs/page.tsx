@@ -116,7 +116,7 @@ export default function RunsListPage() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <p className="text-xs text-muted-foreground">
-                  {runs.total} {runs.total === 1 ? "run" : "runs"} total
+                  {runs.total ?? runs.runs.length} {(runs.total ?? runs.runs.length) === 1 ? "run" : "runs"} total
                 </p>
               </div>
               <div className="space-y-3">

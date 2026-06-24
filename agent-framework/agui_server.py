@@ -752,6 +752,7 @@ def _register_routes(app: FastAPI) -> None:
         )
         return {
             "runs": [_run_summary_to_dict(r) for r in runs],
+            "total": len(runs),
             "limit": limit,
             "offset": offset,
         }
@@ -1198,17 +1199,19 @@ def _session_to_dict(session: session_store.AgentSession) -> dict:
 
 
 def _run_summary_to_dict(run: task_store.RunSummary) -> dict:
-    """Browser-friendly view of a `RunSummary` (PBI 3.6.6)."""
+    """Browser-friendly view of a `RunSummary`."""
     return {
         "test_run_id": run.test_run_id,
         "task_count": run.task_count,
-        "completed_count": run.completed_count,
-        "failed_count": run.failed_count,
-        "active_count": run.active_count,
-        "cancelled_count": run.cancelled_count,
-        "agent_names": run.agent_names,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "last_activity_at": run.last_activity_at.isoformat() if run.last_activity_at else None,
+        "statuses": {
+            "completed": run.completed_count,
+            "failed": run.failed_count,
+            "running": run.active_count,
+            "cancelled": run.cancelled_count,
+        },
+        "agents": run.agent_names,
+        "earliest_submitted": run.started_at.isoformat() if run.started_at else None,
+        "latest_completed": run.last_activity_at.isoformat() if run.last_activity_at else None,
     }
 
 

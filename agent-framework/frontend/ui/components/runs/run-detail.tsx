@@ -224,7 +224,8 @@ function TaskRow({ task }: { task: TaskSnapshot }) {
   );
 }
 
-function deriveOverallStatus(tasks: TaskSnapshot[]): TaskStatus {
+function deriveOverallStatus(tasks?: TaskSnapshot[]): TaskStatus {
+  if (!tasks || tasks.length === 0) return "pending";
   if (tasks.some((t) => t.status === "failed")) return "failed";
   if (tasks.some((t) => t.status === "running")) return "running";
   if (tasks.some((t) => t.status === "pending")) return "pending";
