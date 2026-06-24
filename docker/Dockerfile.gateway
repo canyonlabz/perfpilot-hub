@@ -107,8 +107,6 @@ RUN if [ "$ENABLE_CORP_CA" = "true" ] && ls /tmp/corporate-certs/*.pem 1>/dev/nu
         echo "Corporate CA installed for runtime SSL"; \
     fi && rm -rf /tmp/corporate-certs
 
-ENV SSL_CERT_FILE=${ENABLE_CORP_CA:+/etc/ssl/certs/corporate-ca.pem}
-
 # Copy JMeter + Java from builder stage
 COPY --from=jmeter-layer /opt/jmeter /opt/jmeter
 COPY --from=jmeter-layer /usr/lib/jvm /usr/lib/jvm

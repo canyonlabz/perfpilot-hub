@@ -38,6 +38,19 @@ if [ -f "/app/jmeter-config/jmeter-overrides.properties" ]; then
 fi
 
 # =============================================================================
+# Python/httpx TLS Configuration
+# =============================================================================
+if [ -f "/etc/ssl/certs/corporate-ca.pem" ]; then
+    export SSL_CERT_FILE="/etc/ssl/certs/corporate-ca.pem"
+    export REQUESTS_CA_BUNDLE="/etc/ssl/certs/corporate-ca.pem"
+    echo "[entrypoint] Corporate CA configured for Python/httpx"
+else
+    unset SSL_CERT_FILE
+    unset REQUESTS_CA_BUNDLE
+    echo "[entrypoint] No corporate CA bundle found; using default Python trust store"
+fi
+
+# =============================================================================
 # Start the Gateway
 # =============================================================================
 echo "[entrypoint] Starting PerfPilot Hub gateway (transport=${GATEWAY_TRANSPORT:-http})"

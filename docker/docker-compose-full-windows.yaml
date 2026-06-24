@@ -27,6 +27,7 @@ services:
       - PERFPILOT_DOCKER=true
       - GATEWAY_TRANSPORT=http
       - GATEWAY_PORT=8000
+      - FASTMCP_CHECK_FOR_UPDATES=off
       # Override POSTGRES_HOST to use the internal Docker network service name
       - POSTGRES_HOST=perfmemory-db
       - POSTGRES_PORT=5432
