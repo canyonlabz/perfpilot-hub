@@ -147,7 +147,7 @@ export function RunCard({ run }: RunCardProps) {
         <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
           {run.duration_seconds != null && (
             <>
-              <span>{formatDuration(run.duration_seconds)}</span>
+              <span>Test: {formatDuration(run.duration_seconds)}</span>
               <span className="text-border">|</span>
             </>
           )}

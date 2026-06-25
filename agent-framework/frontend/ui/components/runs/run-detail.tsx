@@ -184,9 +184,24 @@ function formatResultSummary(result: Record<string, unknown>): string {
   const tool = result.tool as string | undefined;
 
   if (toolResult && tool) {
-    const ok = toolResult.ok as boolean;
     const toolLabel = formatToolName(tool);
-    if (!ok) {
+
+    const extractionStatus = toolResult.status as string | undefined;
+    if (extractionStatus === "success" || extractionStatus === "partial") {
+      const kpis = toolResult.kpis as Record<string, unknown> | undefined;
+      const testName = kpis?.test_name as string | undefined;
+      const parts: string[] = [];
+      if (testName) parts.push(testName);
+      parts.push(extractionStatus === "partial" ? "completed (partial)" : "completed");
+      return `${toolLabel} ${parts.join(" — ")}`;
+    }
+    if (extractionStatus === "failed") {
+      const notes = toolResult.notes as string | undefined;
+      return `${toolLabel} failed${notes ? `: ${notes.slice(0, 120)}` : ""}`;
+    }
+
+    const ok = toolResult.ok as boolean;
+    if (ok === false) {
       const err = toolResult.error as Record<string, unknown> | undefined;
       return `${toolLabel} failed: ${(err?.message as string) ?? "Unknown error"}`;
     }
@@ -245,9 +260,13 @@ function TaskRow({ task }: { task: TaskSnapshot }) {
       {task.result && (
         <div
           className={`mt-2 p-2 rounded text-xs ${
-            (task.result.tool_result as Record<string, unknown>)?.ok === false
-              ? "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300"
-              : "bg-muted text-muted-foreground"
+            (() => {
+              const tr = task.result.tool_result as Record<string, unknown> | undefined;
+              if (tr?.ok === false) return "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300";
+              if (tr?.status === "failed") return "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300";
+              if (tr?.status === "partial") return "bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300";
+              return "bg-muted text-muted-foreground";
+            })()
           }`}
         >
           {formatResultSummary(task.result)}
@@ -352,7 +371,7 @@ export function RunDetailView({ run }: RunDetailViewProps) {
           </div>
           {totalDuration && (
             <div>
-              <span className="text-muted-foreground">Duration:</span>{" "}
+              <span className="text-muted-foreground">Total Elapsed:</span>{" "}
               <span className="font-medium">{totalDuration}</span>
             </div>
           )}
@@ -426,7 +445,7 @@ export function RunDetailView({ run }: RunDetailViewProps) {
           </div>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
             {kpis.duration_seconds != null && (
-              <span>Duration: {formatDurationSecs(kpis.duration_seconds)}</span>
+              <span>Test Duration: {formatDurationSecs(kpis.duration_seconds)}</span>
             )}
             {kpis.samples_total != null && (
               <span>Samples: {kpis.samples_total}</span>
