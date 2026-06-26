@@ -1,10 +1,10 @@
 {
   "name": "reporting-agent",
   "display_name": "PerfPilot Reporting Agent",
-  "description": "Specialist agent for performance report generation, multi-round HITL revision, and Confluence publishing in the PerfPilot Agents framework. Owns the final-mile delivery pipeline: (1) Chart generation — creates response-time, throughput, error-rate, and infrastructure PNG charts from analysis data using perfreport-mcp; (2) Markdown report assembly — produces a structured performance test report from a template, embedding analysis verdicts, charts, aggregate tables, and infrastructure findings; (3) AI-driven report revision — the only specialist that drives multi-round Human-in-the-Loop revision loops (executive summary, key observations, issues table, recommendations), incorporating human feedback until approved; (4) Confluence publishing — creates or updates a Confluence page with the final report content and attaches chart images. Consumes artifacts from the analysis-agent (SLA results, bottleneck analysis, error analysis), execution-agent (aggregate CSV, public report URL), and monitoring-agent (infrastructure metrics). Currently in development (F3.9 stub); tools will be wired in F3.10.",
+  "description": "Specialist agent for performance report generation, multi-round HITL revision, and Confluence publishing in the PerfPilot Agents framework. Owns the final-mile delivery pipeline: chart generation, Markdown report assembly, AI-driven report revision, and Confluence page creation with chart image attachments.",
   "url": "/agents/reporting-agent",
-  "version": "0.1.0",
-  "status": "in_development",
+  "version": "0.2.0",
+  "status": "available",
   "tags": [
     "reporting",
     "charts",
@@ -18,13 +18,24 @@
     "webhook_subscribers": true,
     "human_in_the_loop": true
   },
-  "skills": [],
+  "skills": [
+    "Generate performance charts (response-time, throughput, error-rate, infrastructure PNGs)",
+    "Assemble structured Markdown performance test reports from templates",
+    "Discover revisable report sections and prepare revision context",
+    "AI-driven report section revision with human-in-the-loop feedback",
+    "Generate comparison reports analyzing multiple test runs side-by-side",
+    "Create or update Confluence pages with report content",
+    "Attach chart images to Confluence pages",
+    "Navigate Confluence spaces and search for existing pages",
+    "Manage report templates and chart color configurations"
+  ],
   "metadata": {
     "epic": "3",
-    "feature": "3.9",
+    "feature": "3.10",
     "pbi_scaffolded_at": "3.9.4",
-    "status_target": "F3.10 promotion to available",
-    "mcp_namespaces_today": ["perfreport", "confluence"],
+    "pbi_promoted_at": "3.10.5",
+    "mcp_namespaces": ["perfreport", "confluence"],
+    "mcp_tool_discovery": "auto (register_mcp_tools_on_agent at build time)",
     "report_pipeline": {
       "chart_generation": "Response-time, throughput, error-rate, infrastructure PNG charts",
       "report_assembly": "Template-driven Markdown report with embedded analysis + charts",
@@ -32,9 +43,9 @@
       "confluence_publishing": "Page creation/update + chart image attachment"
     },
     "upstream_dependencies": [
-      "analysis-agent (artifacts/{test_run_id}/analysis/ — SLA results, bottleneck analysis, error analysis)",
-      "execution-agent (artifacts/{test_run_id}/blazemeter/ — aggregate CSV, public report URL)",
-      "monitoring-agent (artifacts/{test_run_id}/datadog/ — infrastructure metrics)"
+      "analysis-agent (artifacts/{test_run_id}/analysis/)",
+      "execution-agent (artifacts/{test_run_id}/blazemeter/)",
+      "monitoring-agent (artifacts/{test_run_id}/datadog/)"
     ]
   }
 }

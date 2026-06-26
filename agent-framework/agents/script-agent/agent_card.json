@@ -1,15 +1,13 @@
 {
   "name": "script-agent",
   "display_name": "PerfPilot Script Agent",
-  "description": "Specialist agent for JMeter script creation, debugging, and iterative refinement in the PerfPilot Agents framework. Owns the full script lifecycle: capture network traffic via browser automation (Playwright MCP), convert to JMX via multiple input paths (HAR files, Swagger/OpenAPI specs, ADO test cases, or live Playwright recordings), look up known issues and cross-project patterns (PerfMemory MCP with pgvector semantic search + Apache AGE graph RAG), apply fixes automatically when solutions exist, run JMeter smoke tests, and iterate until the script is clean. Collaborates with three MCP servers: JMeter MCP (jmeter_* via gateway — JMX creation, component editing, correlation, smoke testing), PerfMemory MCP (perfmemory_* via gateway — lessons-learned database for similar issues, cross-project pattern matching, automatic solution application), and Microsoft Playwright MCP (browser_* direct — browser automation for live network capture). Uses a dual test_run_id model: a script_run_id (user-supplied or auto-minted) organizes creation-phase artifacts under artifacts/{script_run_id}/jmeter/, while the BlazeMeter-generated test_run_id (owned by the execution-agent) organizes execution-phase results separately. Currently in development (F3.9 stub); tools will be wired in F3.10.",
+  "description": "Specialist agent for JMeter script creation, debugging, and iterative refinement in the PerfPilot Agents framework. Owns the full script lifecycle: convert HAR files, Swagger/OpenAPI specs, or Playwright recordings to JMX scripts, edit and analyze script components, run JMeter smoke tests, and iteratively debug with log analysis. Playwright browser automation tools are deferred to F3.12 (pending Playwright MCP container).",
   "url": "/agents/script-agent",
-  "version": "0.1.0",
-  "status": "in_development",
+  "version": "0.2.0",
+  "status": "available",
   "tags": [
     "script",
     "jmeter",
-    "playwright",
-    "perfmemory",
     "har",
     "swagger",
     "epic-3"
@@ -20,27 +18,39 @@
     "webhook_subscribers": true,
     "human_in_the_loop": false
   },
-  "skills": [],
+  "skills": [
+    "Convert HAR files to JMeter network capture format",
+    "Convert Swagger/OpenAPI specs to JMeter network capture format",
+    "Generate JMeter JMX scripts from captured network traffic",
+    "Analyze existing JMeter scripts for structure and components",
+    "Add or edit JMeter script components (samplers, assertions, extractors, etc.)",
+    "Start and monitor JMeter smoke tests",
+    "Analyze JMeter log files for errors and warnings",
+    "Generate aggregate performance reports from JMeter results",
+    "Compare HAR captures to JMX scripts for coverage analysis",
+    "List available JMeter scripts and component types"
+  ],
   "metadata": {
     "epic": "3",
-    "feature": "3.9",
+    "feature": "3.10",
     "pbi_scaffolded_at": "3.9.1",
-    "status_target": "F3.10 promotion to available",
-    "mcp_collaboration": {
-      "jmeter_mcp": "gateway (jmeter_*) — JMX creation, editing, component manipulation, smoke testing, HAR/Swagger conversion, correlation",
-      "perfmemory_mcp": "gateway (perfmemory_*) — similar-issue lookup (pgvector), cross-project patterns (Apache AGE graph RAG), automatic fix application",
-      "playwright_mcp": "direct (browser_*) — browser automation for live network capture; runs outside gateway-mcp"
-    },
-    "dual_test_run_id": {
-      "script_run_id": "User-supplied or auto-minted reference for creation-phase artifacts (artifacts/{script_run_id}/jmeter/)",
-      "test_run_id": "BlazeMeter-generated; owned by execution-agent for execution-phase results (artifacts/{test_run_id}/blazemeter/)"
+    "pbi_promoted_at": "3.10.6",
+    "promotion_status": "partial (JMeter MCP only; Playwright deferred to F3.12)",
+    "mcp_namespaces": ["jmeter"],
+    "mcp_tool_discovery": "auto (register_mcp_tools_on_agent at build time)",
+    "deferred_to_f3_12": {
+      "playwright_mcp": "browser_* tools require Playwright MCP container",
+      "blocked_tools": [
+        "jmeter_capture_network_traffic",
+        "jmeter_get_browser_steps",
+        "jmeter_get_test_specs",
+        "jmeter_archive_playwright_traces"
+      ]
     },
     "input_modes": [
       "HAR file (Chrome DevTools / Fiddler / mitmproxy / Postman export)",
       "Swagger 2.x or OpenAPI 3.x specification (JSON or YAML)",
-      "Azure DevOps (ADO) QA Functional test cases (converted to browser automation Markdown specs)",
-      "Live Playwright browser recording (browser_* tools)",
-      "Existing JMeter script reference (GitHub or ADO Git repo)"
+      "Existing JMeter script reference"
     ]
   }
 }

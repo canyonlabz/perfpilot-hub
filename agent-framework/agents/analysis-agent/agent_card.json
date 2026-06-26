@@ -1,10 +1,10 @@
 {
   "name": "analysis-agent",
   "display_name": "PerfPilot Analysis Agent",
-  "description": "Specialist agent for post-test data correlation and verdict generation in the PerfPilot Agents framework. Owns three analytical pipelines: (1) SLA validation — compares per-transaction P90 response times from the BlazeMeter aggregate CSV against thresholds declared in perfanalysis-mcp/slas.yaml and renders a pass/fail verdict per transaction and overall; (2) Bottleneck attribution — correlates BlazeMeter performance metrics with Datadog infrastructure data (host CPU/memory, K8s pod resource utilization, APM service latency) to identify whether degradation is application-side, infrastructure-side, or external; (3) Log-error analysis — maps failed transactions from the JMeter log analysis output to root-cause buckets (timeouts, 5xx clusters, auth failures, connection resets, etc.) with frequency counts and suggested investigation paths. Consumes artifacts from the execution-agent (blazemeter/) and monitoring-agent (datadog/) and produces structured analysis output under artifacts/{test_run_id}/analysis/ for the reporting-agent. Currently in development (F3.9 stub); tools will be wired in F3.10.",
+  "description": "Specialist agent for post-test data correlation and verdict generation in the PerfPilot Agents framework. Owns three analytical pipelines: (1) SLA validation -- compares per-transaction P90 response times against slas.yaml thresholds; (2) Bottleneck attribution -- correlates BlazeMeter performance metrics with Datadog infrastructure data; (3) Log-error analysis -- maps failed transactions to root-cause buckets with frequency counts.",
   "url": "/agents/analysis-agent",
-  "version": "0.1.0",
-  "status": "in_development",
+  "version": "0.2.0",
+  "status": "available",
   "tags": [
     "analysis",
     "sla",
@@ -18,21 +18,29 @@
     "webhook_subscribers": true,
     "human_in_the_loop": false
   },
-  "skills": [],
+  "skills": [
+    "Analyze test results against SLA thresholds (P90 response times, error rates)",
+    "Identify performance bottlenecks by correlating BlazeMeter and Datadog data",
+    "Analyze environment metrics (host CPU/memory, K8s pod utilization, APM latency)",
+    "Analyze application logs for error patterns and root-cause bucketing",
+    "Correlate test results across data sources for comprehensive analysis",
+    "Check analysis status for a given test run"
+  ],
   "metadata": {
     "epic": "3",
-    "feature": "3.9",
+    "feature": "3.10",
     "pbi_scaffolded_at": "3.9.3",
-    "status_target": "F3.10 promotion to available",
-    "mcp_namespaces_today": ["perfanalysis"],
+    "pbi_promoted_at": "3.10.4",
+    "mcp_namespaces": ["perfanalysis"],
+    "mcp_tool_discovery": "auto (register_mcp_tools_on_agent at build time)",
     "analytical_pipelines": {
-      "sla_validation": "P90 response times vs slas.yaml thresholds — pass/fail per transaction",
-      "bottleneck_attribution": "BlazeMeter + Datadog correlation — application vs infrastructure vs external",
-      "log_error_analysis": "JMeter log root-cause bucketing — timeouts, 5xx, auth failures, etc."
+      "sla_validation": "P90 response times vs slas.yaml thresholds -- pass/fail per transaction",
+      "bottleneck_attribution": "BlazeMeter + Datadog correlation -- application vs infrastructure vs external",
+      "log_error_analysis": "JMeter log root-cause bucketing -- timeouts, 5xx, auth failures, etc."
     },
     "upstream_dependencies": [
-      "execution-agent (artifacts/{test_run_id}/blazemeter/ — aggregate CSV, test-results CSV, log analysis)",
-      "monitoring-agent (artifacts/{test_run_id}/datadog/ — host metrics, K8s metrics, APM traces, logs)"
+      "execution-agent (artifacts/{test_run_id}/blazemeter/)",
+      "monitoring-agent (artifacts/{test_run_id}/datadog/)"
     ],
     "output_path": "artifacts/{test_run_id}/analysis/"
   }

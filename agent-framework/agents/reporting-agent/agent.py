@@ -1,37 +1,35 @@
-"""PerfPilot Reporting Agent -- AG2 ConversableAgent factory (F3.9 stub).
+"""PerfPilot Reporting Agent -- AG2 ConversableAgent factory.
 
-This module ships the four-file pattern's `agent.py` slot per V2 doc
-§7.1.  In F3.9, it contains ONLY the agent factory -- no tool functions
-are registered.  Tool wiring lands in F3.10 when the agent is promoted
-from `in_development` to `available`.
+This module ships the four-file pattern's ``agent.py`` slot per V2 doc
+§7.1. The reporting-agent owns the final-mile delivery of performance
+test results: chart generation from analysis data, Markdown report
+assembly, multi-round Human-in-the-Loop revision (the only specialist
+that drives HITL revision loops), and Confluence publishing.
 
-The reporting-agent owns the final-mile delivery of performance test
-results: chart generation from analysis data, Markdown report assembly,
-multi-round Human-in-the-Loop revision (the only specialist that drives
-HITL revision loops), and Confluence publishing.
-
-**MCP collaboration:**
+**MCP collaboration (auto-discovered at build time via F3.10):**
 
 - PerfReport MCP (gateway, ``perfreport_*``) -- chart generation (PNG),
   Markdown report creation, AI-driven report revision, template
-  management.
+  management. Code-based (single attempt, no retry).
 - Confluence MCP (gateway, ``confluence_*``) -- page creation, content
-  update, image attachment, space/page navigation.
+  update, image attachment, space/page navigation. API-based (retry up
+  to 3x with 5s back-off).
 
-**Upstream dependencies:**
+**Workflow orchestration** is handled externally by three Cursor Skills:
+- ``performance-testing-workflow`` Step 5 -- report + chart generation
+- ``report-revision-workflow`` -- HITL iterative revision loop
+- ``comparison-report-workflow`` -- multi-run comparison reports
 
-- Analysis-agent artifacts (``artifacts/{test_run_id}/analysis/``):
-  SLA results, bottleneck analysis, error analysis, summary.
-- Execution-agent artifacts (``artifacts/{test_run_id}/blazemeter/``):
-  aggregate CSV (for embedding in report tables), public report URL.
-- Monitoring-agent artifacts (``artifacts/{test_run_id}/datadog/``):
-  infrastructure metrics (for infrastructure sections in the report).
-
-Heavy imports (``autogen``, ``yaml``) live inside the functions that
-need them so this module is cheap to import in smoke tests.
+Heavy imports (``autogen``, ``yaml``, ``fastmcp``) live inside the
+functions that need them so this module is cheap to import in smoke
+tests.
 
 NOTE: This module deliberately does NOT use ``from __future__ import
 annotations``.
+
+Status:
+    F3.9 PBI 3.9.4 -- stub scaffold (no tools registered).
+    F3.10 PBI 3.10.5 -- promoted to working agent with MCP auto-discovery.
 """
 
 import logging
@@ -41,15 +39,15 @@ logger = logging.getLogger(__name__)
 
 _AGENT_DIR = pathlib.Path(__file__).resolve().parent
 
+MCP_NAMESPACES = ["perfreport", "confluence"]
+
 
 def build_reporting_agent():
     """Construct and return the PerfPilot Reporting Agent.
 
-    No tools are registered in F3.9 (stub).  F3.10 will wire:
-    - Chart generation (response-time, throughput, error-rate charts)
-    - Markdown report assembly (template-driven)
-    - AI-driven report revision (multi-round HITL loop)
-    - Confluence publishing (page creation + image attachment)
+    Returns a ``ConversableAgent`` with PerfReport + Confluence MCP
+    tools auto-discovered from the gateway and registered with full
+    JSON schemas.
     """
     import yaml
 
@@ -77,5 +75,36 @@ def build_reporting_agent():
         human_input_mode="NEVER",
     )
 
-    logger.info("reporting-agent built (F3.9 stub — no tools registered)")
+    tool_count = _register_mcp_tools(agent)
+    logger.info(
+        "reporting-agent built (F3.10 — %d MCP tools registered)", tool_count,
+    )
     return agent
+
+
+def _register_mcp_tools(agent) -> int:
+    """Auto-discover and register PerfReport + Confluence MCP tools."""
+    import asyncio
+
+    from utils.mcp_client import resolve_gateway_url
+    from utils.mcp_tool_registry import register_mcp_tools_on_agent
+
+    gateway_url = resolve_gateway_url()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                asyncio.run,
+                register_mcp_tools_on_agent(agent, gateway_url, MCP_NAMESPACES),
+            )
+            return future.result(timeout=30)
+    else:
+        return asyncio.run(
+            register_mcp_tools_on_agent(agent, gateway_url, MCP_NAMESPACES),
+        )

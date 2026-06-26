@@ -1,10 +1,10 @@
 {
   "name": "monitoring-agent",
   "display_name": "PerfPilot Monitoring Agent",
-  "description": "Specialist agent for per-test-run observability data extraction in the PerfPilot Agents framework. Owns Datadog metric, trace, and log extraction scoped to a test run's time window: host metrics (CPU, memory, disk, network), Kubernetes pod/node metrics, APM service traces (latency, error rates, throughput), and application log queries. Uses environment-specific host and service definitions from datadog-mcp/environments.json and optional custom queries from datadog-mcp/custom_queries.json. Extracted data feeds the analysis-agent's SLA validation, bottleneck attribution, and the reporting-agent's infrastructure sections. Currently in development (F3.9 stub); tools will be wired in F3.10.",
+  "description": "Specialist agent for per-test-run observability data extraction in the PerfPilot Agents framework. Owns Datadog metric, trace, and log extraction scoped to a test run's time window: host metrics (CPU, memory, disk, network), Kubernetes pod/node metrics, APM service traces (latency, error rates, throughput), and application log queries. Uses environment-specific host and service definitions from datadog-mcp/environments.json and optional custom queries from datadog-mcp/custom_queries.json. Extracted data feeds the analysis-agent's SLA validation, bottleneck attribution, and the reporting-agent's infrastructure sections.",
   "url": "/agents/monitoring-agent",
-  "version": "0.1.0",
-  "status": "in_development",
+  "version": "0.2.0",
+  "status": "available",
   "tags": [
     "monitoring",
     "datadog",
@@ -19,13 +19,21 @@
     "webhook_subscribers": true,
     "human_in_the_loop": false
   },
-  "skills": [],
+  "skills": [
+    "Load Datadog environment configuration (hosts, services, Kubernetes clusters)",
+    "Extract host-level infrastructure metrics (CPU, memory, disk I/O, network) for a test window",
+    "Extract Kubernetes pod/node/container resource utilization metrics",
+    "Extract APM service traces (latency percentiles, error rates, throughput)",
+    "Query application logs scoped to a test run's time window",
+    "Extract custom KPI timeseries metrics from Datadog"
+  ],
   "metadata": {
     "epic": "3",
-    "feature": "3.9",
+    "feature": "3.10",
     "pbi_scaffolded_at": "3.9.2",
-    "status_target": "F3.10 promotion to available",
-    "mcp_namespaces_today": ["datadog"],
+    "pbi_promoted_at": "3.10.3",
+    "mcp_namespaces": ["datadog"],
+    "mcp_tool_discovery": "auto (register_mcp_tools_on_agent at build time)",
     "data_sources": {
       "host_metrics": "CPU, memory, disk I/O, network throughput per host",
       "kubernetes_metrics": "Pod/node/container resource utilization and events",

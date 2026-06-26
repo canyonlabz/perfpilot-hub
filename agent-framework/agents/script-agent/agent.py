@@ -1,43 +1,39 @@
-"""PerfPilot Script Agent -- AG2 ConversableAgent factory (F3.9 stub).
+"""PerfPilot Script Agent -- AG2 ConversableAgent factory.
 
-This module ships the four-file pattern's `agent.py` slot per V2 doc
-§7.1.  In F3.9, it contains ONLY the agent factory -- no tool functions
-are registered.  Tool wiring lands in F3.10 when the agent is promoted
-from `in_development` to `available`.
+This module ships the four-file pattern's ``agent.py`` slot per V2 doc
+§7.1. The script-agent owns the JMeter-script lifecycle: convert
+HAR/Swagger/Playwright captures to JMX, edit and analyze scripts,
+run smoke tests, and iteratively debug with PerfMemory integration.
 
-The script-agent owns the JMeter-script lifecycle: capture network
-traffic (Playwright MCP), convert to JMX (JMeter MCP), look up known
-issues (PerfMemory MCP), iteratively debug, and deliver a clean script
-for the execution-agent to run.
+**MCP collaboration (auto-discovered at build time via F3.10):**
 
-**Three-way MCP collaboration:**
-
-1. JMeter MCP   (gateway, ``jmeter_*``)      -- JMX creation, editing,
+1. JMeter MCP (gateway, ``jmeter_*``) -- JMX creation, editing,
    component manipulation, smoke testing, HAR/Swagger conversion,
-   correlation.
-2. PerfMemory MCP (gateway, ``perfmemory_*``) -- Similar-issue lookup
-   (pgvector semantic search), cross-project pattern discovery (Apache
-   AGE graph RAG), and automatic solution application.
-3. Playwright MCP (direct, ``browser_*``)     -- Browser automation for
-   live network capture against real applications.  Runs outside the
-   gateway-mcp; the script-agent connects to it directly.
+   correlation. Code-based (single attempt, no retry).
 
-**Dual test_run_id lifecycle:**
+**Blocked on F3.12:**
 
-- **Script-creation phase** uses a ``script_run_id`` (user-supplied or
-  auto-minted) to organize input files and generated JMX artifacts under
-  ``artifacts/{script_run_id}/jmeter/``.
-- **Test-execution phase** uses the BlazeMeter-generated ``test_run_id``
-  (owned by the execution-agent).  These are separate artifact trees by
-  design: one for what the AI created, one for real-world test results.
+- Playwright MCP (direct, ``browser_*``) -- Browser automation for
+  live network capture. Requires Playwright MCP container. The
+  ``jmeter_capture_network_traffic``, ``jmeter_get_browser_steps``,
+  ``jmeter_get_test_specs``, and ``jmeter_archive_playwright_traces``
+  tools depend on this and are excluded from the namespace filter
+  at the gateway level until F3.12.
 
-Heavy imports (``autogen``, ``yaml``) live inside the functions that need
-them so this module is cheap to import in smoke tests.
+**Workflow orchestration** is handled externally by Cursor Skills
+(HAR conversion, Swagger conversion, debugging, HITL editing skills).
+
+Heavy imports (``autogen``, ``yaml``, ``fastmcp``) live inside the
+functions that need them so this module is cheap to import in smoke
+tests.
 
 NOTE: This module deliberately does NOT use ``from __future__ import
-annotations``.  AG2 0.13.3 introspects tool function signatures via
-pydantic's ``TypeAdapter``, which cannot evaluate stringified
-``Annotated`` annotations.
+annotations``.
+
+Status:
+    F3.9 PBI 3.9.1 -- stub scaffold (no tools registered).
+    F3.10 PBI 3.10.6 -- partial promotion (JMeter MCP only; Playwright
+        deferred to F3.12).
 """
 
 import logging
@@ -47,19 +43,15 @@ logger = logging.getLogger(__name__)
 
 _AGENT_DIR = pathlib.Path(__file__).resolve().parent
 
+MCP_NAMESPACES = ["jmeter"]
+
 
 def build_script_agent():
     """Construct and return the PerfPilot Script Agent.
 
-    Returns a ``ConversableAgent`` with the system prompt loaded from
-    ``INSTRUCTIONS.md`` and LLM configuration resolved from the
-    per-agent config cascade (``config.yaml`` > ``config.example.yaml``
-    > global ``agents.yaml`` fallback).
-
-    No tools are registered in F3.9 (stub).  F3.10 will wire:
-    - JMX generation tools (HAR/Swagger/Playwright capture)
-    - Script debugging / smoke-test loop
-    - PerfMemory lookup + automatic fix application
+    Returns a ``ConversableAgent`` with JMeter MCP tools
+    auto-discovered from the gateway. Playwright (``browser_*``) tools
+    are deferred to F3.12.
     """
     import yaml
 
@@ -87,5 +79,37 @@ def build_script_agent():
         human_input_mode="NEVER",
     )
 
-    logger.info("script-agent built (F3.9 stub — no tools registered)")
+    tool_count = _register_mcp_tools(agent)
+    logger.info(
+        "script-agent built (F3.10 partial — %d JMeter MCP tools registered; "
+        "Playwright deferred to F3.12)", tool_count,
+    )
     return agent
+
+
+def _register_mcp_tools(agent) -> int:
+    """Auto-discover and register JMeter MCP tools on the agent."""
+    import asyncio
+
+    from utils.mcp_client import resolve_gateway_url
+    from utils.mcp_tool_registry import register_mcp_tools_on_agent
+
+    gateway_url = resolve_gateway_url()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                asyncio.run,
+                register_mcp_tools_on_agent(agent, gateway_url, MCP_NAMESPACES),
+            )
+            return future.result(timeout=30)
+    else:
+        return asyncio.run(
+            register_mcp_tools_on_agent(agent, gateway_url, MCP_NAMESPACES),
+        )

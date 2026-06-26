@@ -442,8 +442,9 @@ agent-framework/sql/drop_perfagent_state.py
 !.cursor/agents/datadog-extractor.md
 !.cursor/agents/jmeter-script-validator.md
 
-# Ignore all custom Cursor Plans files, except the below
+# Ignore all custom Cursor Docs & Plans files, except the below
 .cursor/plans/*
+.cursor/docs/
 
 # Temp test files
 scripts/*

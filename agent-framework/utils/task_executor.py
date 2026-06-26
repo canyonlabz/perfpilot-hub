@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -304,6 +305,14 @@ async def execute_task(task_id: UUID) -> None:
 
 ORCHESTRATOR_AGENT_NAME = "orchestrator"
 EXECUTION_AGENT_NAME = "execution-agent"
+MONITORING_AGENT_NAME = "monitoring-agent"
+MONITORING_AGENT_MCP_PREFIXES: tuple[str, ...] = ("datadog_",)
+ANALYSIS_AGENT_NAME = "analysis-agent"
+ANALYSIS_AGENT_MCP_PREFIXES: tuple[str, ...] = ("perfanalysis_",)
+REPORTING_AGENT_NAME = "reporting-agent"
+REPORTING_AGENT_MCP_PREFIXES: tuple[str, ...] = ("perfreport_", "confluence_")
+SCRIPT_AGENT_NAME = "script-agent"
+SCRIPT_AGENT_MCP_PREFIXES: tuple[str, ...] = ("jmeter_",)
 
 # =============================================================================
 # HITL gate infrastructure (config-driven, extensible)
@@ -461,6 +470,14 @@ async def _dispatch_agent(task: task_store.AgentTask, common: dict) -> dict:
         return await _run_orchestrator(task, common)
     if task.agent_name == EXECUTION_AGENT_NAME:
         return await _run_execution_agent(task, common)
+    if task.agent_name == MONITORING_AGENT_NAME:
+        return await _run_monitoring_agent(task, common)
+    if task.agent_name == ANALYSIS_AGENT_NAME:
+        return await _run_analysis_agent(task, common)
+    if task.agent_name == REPORTING_AGENT_NAME:
+        return await _run_reporting_agent(task, common)
+    if task.agent_name == SCRIPT_AGENT_NAME:
+        return await _run_script_agent(task, common)
     return await _run_stub_agent(task, common)
 
 
@@ -690,35 +707,48 @@ def _extract_user_message_from_payload(payload: Any) -> Optional[str]:
 
 
 # =============================================================================
-# Execution-agent dispatch (PBI 3.8.6)
+# Generalized specialist module loader (PBI 3.10.2 Part A)
 # =============================================================================
-# Loads `agents/execution-agent/agent.py` via `importlib.util` because the
-# folder name is hyphenated and `from agents.execution-agent.agent import ...`
-# is a Python syntax error. The module is cached on first load to avoid
-# re-paying the `fastmcp` / `autogen` import cost on every task. PBI 3.7's
-# orchestrator uses the normal `from agents.orchestrator.agent import ...`
-# path; future hyphenated specialists (e.g. `script-agent`, `analysis-agent`)
-# will reuse this same pattern.
+# Loads `agents/<agent-name>/agent.py` via `importlib.util` because
+# hyphenated folder names make `from agents.execution-agent.agent import ...`
+# a Python syntax error. Modules are cached per agent name to avoid
+# re-paying the `fastmcp` / `autogen` import cost on every task.
+# Replaces the old execution-agent-specific `_load_execution_agent_module()`.
 
-_execution_agent_module: Optional[Any] = None
-_execution_agent_module_lock = asyncio.Lock()
+_specialist_module_cache: dict[str, Any] = {}
+_specialist_module_locks: dict[str, asyncio.Lock] = defaultdict(lambda: asyncio.Lock())
 
 
-async def _load_execution_agent_module() -> Any:
-    """Return the loaded `agents/execution-agent/agent.py` module (cached).
+async def _load_specialist_module(agent_name: str) -> Any:
+    """Return the loaded ``agents/<agent_name>/agent.py`` module (cached).
 
-    Thread-safe under asyncio: the first concurrent loader wins; subsequent
-    callers wait on the lock and see the cached module. Subsequent calls
-    after the cache is populated return the cached value without touching
-    the lock.
+    Thread-safe under asyncio: the first concurrent loader for a given
+    ``agent_name`` wins; subsequent callers wait on the per-agent lock
+    and see the cached module. Subsequent calls after the cache is
+    populated return the cached value without touching the lock.
+
+    The module alias registered in ``sys.modules`` uses underscores
+    (``agents_execution_agent_dynamic``) to stay a valid Python
+    identifier.
+
+    Args:
+        agent_name: The hyphenated folder name under ``agents/``
+            (e.g. ``"execution-agent"``, ``"monitoring-agent"``).
+
+    Returns:
+        The loaded module object.
+
+    Raises:
+        FileNotFoundError: when ``agents/<agent_name>/agent.py`` does
+            not exist on disk.
+        ImportError: when ``importlib`` cannot build a module spec.
     """
-    global _execution_agent_module
-    if _execution_agent_module is not None:
-        return _execution_agent_module
+    if agent_name in _specialist_module_cache:
+        return _specialist_module_cache[agent_name]
 
-    async with _execution_agent_module_lock:
-        if _execution_agent_module is not None:
-            return _execution_agent_module
+    async with _specialist_module_locks[agent_name]:
+        if agent_name in _specialist_module_cache:
+            return _specialist_module_cache[agent_name]
 
         import importlib.util
         import sys
@@ -727,16 +757,17 @@ async def _load_execution_agent_module() -> Any:
         module_path = (
             Path(__file__).resolve().parent.parent
             / "agents"
-            / "execution-agent"
+            / agent_name
             / "agent.py"
         )
         if not module_path.exists():
             raise FileNotFoundError(
-                f"Execution-agent module not found at {module_path}"
+                f"Agent module not found at {module_path}"
             )
 
+        module_alias = f"agents_{agent_name.replace('-', '_')}_dynamic"
         spec = importlib.util.spec_from_file_location(
-            "agents_execution_agent_dynamic", str(module_path)
+            module_alias, str(module_path),
         )
         if spec is None or spec.loader is None:
             raise ImportError(
@@ -744,12 +775,10 @@ async def _load_execution_agent_module() -> Any:
             )
 
         module = importlib.util.module_from_spec(spec)
-        # Register in sys.modules BEFORE exec_module so the module's own
-        # internal imports (e.g. `from utils.mcp_client import MCPClient`)
-        # resolve against the framework package layout.
-        sys.modules["agents_execution_agent_dynamic"] = module
+        sys.modules[module_alias] = module
         spec.loader.exec_module(module)
-        _execution_agent_module = module
+        _specialist_module_cache[agent_name] = module
+        log.info("Loaded specialist module: %s -> %s", agent_name, module_path)
         return module
 
 
@@ -886,7 +915,7 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         TaskEvent(status="running", progress="loading_execution_agent", **common),
     )
     try:
-        module = await _load_execution_agent_module()
+        module = await _load_specialist_module(EXECUTION_AGENT_NAME)
     except Exception as exc:
         log.exception("execution-agent module load failed for task %s", task.task_id)
         envelope["tool_result"] = {
@@ -989,6 +1018,230 @@ async def _run_stub_agent(task: task_store.AgentTask, common: dict) -> dict:
         "echo": task.payload,
         "note": "F3.5 stub executor; replaced by real AG2 dispatch in F3.7+",
     }
+
+
+# =============================================================================
+# Promoted specialist dispatch wrappers (PBI 3.10.3+)
+# =============================================================================
+# Each promoted specialist's _run_<agent>() is a thin wrapper around
+# _run_mcp_specialist_agent() with the correct constants. Adding a new
+# agent is two lines: the wrapper function + its _dispatch_agent branch.
+
+
+async def _run_monitoring_agent(task: task_store.AgentTask, common: dict) -> dict:
+    """Dispatch to monitoring-agent (Datadog MCP tools, PBI 3.10.3)."""
+    return await _run_mcp_specialist_agent(
+        task, common, MONITORING_AGENT_NAME, MONITORING_AGENT_MCP_PREFIXES,
+    )
+
+
+async def _run_analysis_agent(task: task_store.AgentTask, common: dict) -> dict:
+    """Dispatch to analysis-agent (PerfAnalysis MCP tools, PBI 3.10.4)."""
+    return await _run_mcp_specialist_agent(
+        task, common, ANALYSIS_AGENT_NAME, ANALYSIS_AGENT_MCP_PREFIXES,
+    )
+
+
+async def _run_reporting_agent(task: task_store.AgentTask, common: dict) -> dict:
+    """Dispatch to reporting-agent (PerfReport + Confluence MCP tools, PBI 3.10.5)."""
+    return await _run_mcp_specialist_agent(
+        task, common, REPORTING_AGENT_NAME, REPORTING_AGENT_MCP_PREFIXES,
+    )
+
+
+async def _run_script_agent(task: task_store.AgentTask, common: dict) -> dict:
+    """Dispatch to script-agent (JMeter MCP tools, PBI 3.10.6 partial)."""
+    return await _run_mcp_specialist_agent(
+        task, common, SCRIPT_AGENT_NAME, SCRIPT_AGENT_MCP_PREFIXES,
+    )
+
+
+# =============================================================================
+# Generic MCP specialist dispatch (PBI 3.10.2 Part B)
+# =============================================================================
+# Used by promoted specialist agents that have MCP-only tools (no composite
+# agent tools). Each specialist's thin `_run_<agent>()` wrapper calls this
+# with the agent's name and MCP namespace prefixes. Avoids duplicating the
+# dispatch/validation logic 4 times across monitoring, analysis, reporting,
+# and script agents.
+
+
+async def _run_mcp_specialist_agent(
+    task: task_store.AgentTask,
+    common: dict,
+    agent_name: str,
+    mcp_prefixes: tuple[str, ...],
+) -> dict:
+    """Generic dispatch for specialists with MCP-only tools (no composites).
+
+    Validates the task payload, checks that the requested tool falls
+    within the agent's declared MCP namespace prefixes, then routes to
+    ``_call_mcp_tool_passthrough_for_specialist()`` with the correct
+    namespace config.
+
+    Return envelope shape matches the execution-agent's pattern::
+
+        {
+          "agent":       "<agent_name>",
+          "tool":        "<echoed>",
+          "action":      "<echoed>",
+          "test_run_id": "<echoed>",
+          "tool_result": <dict>
+        }
+
+    Args:
+        task: The ``AgentTask`` row from the task store.
+        common: SSE broadcast fields (task_id, session_id, etc.).
+        agent_name: The specialist's name (e.g. ``"monitoring-agent"``).
+        mcp_prefixes: Tuple of allowed MCP prefixes (e.g.
+            ``("datadog_",)``). Each prefix includes the trailing
+            underscore.
+    """
+    payload = task.payload if isinstance(task.payload, dict) else {}
+    tool = payload.get("tool")
+    action = payload.get("action")
+    test_run_id = payload.get("test_run_id")
+    args_raw = payload.get("args")
+    args = args_raw if isinstance(args_raw, dict) else None
+
+    envelope: dict = {
+        "agent": agent_name,
+        "tool": tool,
+        "action": action,
+        "test_run_id": test_run_id,
+    }
+
+    if not isinstance(tool, str) or not tool:
+        envelope["tool_result"] = {
+            "ok": False,
+            "error": {
+                "type": "InvalidPayload",
+                "message": (
+                    f"Payload is missing required field 'tool'. "
+                    f"MCP namespace prefixes for {agent_name}: "
+                    f"{list(mcp_prefixes)}."
+                ),
+            },
+        }
+        return envelope
+
+    if not any(tool.startswith(p) for p in mcp_prefixes):
+        envelope["tool_result"] = {
+            "ok": False,
+            "error": {
+                "type": "UnknownTool",
+                "message": (
+                    f"Tool {tool!r} is not within {agent_name}'s "
+                    f"namespace prefixes: {list(mcp_prefixes)}."
+                ),
+            },
+        }
+        return envelope
+
+    if args_raw is not None and args is None:
+        envelope["tool_result"] = {
+            "ok": False,
+            "error": {
+                "type": "InvalidPayload",
+                "message": (
+                    f"Payload field 'args' must be a dict (or omitted); got "
+                    f"{type(args_raw).__name__}."
+                ),
+            },
+        }
+        return envelope
+
+    args = args or {}
+
+    await _broadcast(
+        task.task_id,
+        TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
+    )
+
+    # Derive the bare namespace list from the prefixes for MCPClient config.
+    bare_namespaces = [p.rstrip("_") for p in mcp_prefixes]
+
+    try:
+        mcp_result = await _call_mcp_tool_passthrough_for_specialist(
+            tool, args, bare_namespaces,
+        )
+    except Exception as exc:
+        log.exception("MCP pass-through failed for tool %s on %s", tool, agent_name)
+        envelope["tool_result"] = {
+            "ok": False,
+            "error": {
+                "type": type(exc).__name__,
+                "message": f"MCP pass-through call failed: {exc}",
+            },
+        }
+        return envelope
+
+    await _broadcast(
+        task.task_id,
+        TaskEvent(status="running", progress=f"tool_complete:{tool}", **common),
+    )
+    envelope["tool_result"] = mcp_result
+    return envelope
+
+
+async def _call_mcp_tool_passthrough_for_specialist(
+    tool_name: str,
+    args: dict,
+    allowed_namespaces: list[str],
+) -> dict:
+    """Call an MCP tool via the gateway with namespace-scoped retry policy.
+
+    Generalizes the execution-agent's ``_call_mcp_tool_passthrough()``
+    for any specialist. Retry classification uses the registry's
+    ``_is_api_based()`` helper so the policy stays consistent with the
+    auto-discovery wrappers.
+
+    Args:
+        tool_name: Fully-qualified gateway tool name.
+        args: Tool arguments dict.
+        allowed_namespaces: Bare namespace list for ``MCPClient`` config
+            (e.g. ``["datadog"]``).
+
+    Returns:
+        ``{ok: True, tool, result, attempts}`` on success.
+        ``{ok: False, tool, error, attempts}`` on failure.
+    """
+    from utils.mcp_client import MCPClient, build_client_config
+    from utils.mcp_tool_registry import _is_api_based
+
+    is_api = _is_api_based(tool_name)
+    max_attempts = 3 if is_api else 1
+    retry_delay = 5.0
+
+    config = build_client_config(allowed_namespaces)
+    async with MCPClient(config) as client:
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await client.call_tool(tool_name, args)
+                data = getattr(result, "data", None)
+                if data is not None:
+                    payload = data
+                else:
+                    content = getattr(result, "content", None) or []
+                    payload = getattr(content[0], "text", None) if content else str(result)
+                return {"ok": True, "tool": tool_name, "result": payload, "attempts": attempt}
+            except PermissionError:
+                raise
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts:
+                    await asyncio.sleep(retry_delay)
+
+        return {
+            "ok": False,
+            "tool": tool_name,
+            "error": {
+                "type": type(last_error).__name__,
+                "message": str(last_error)[:500],
+            },
+            "attempts": max_attempts,
+        }
 
 
 # =============================================================================
