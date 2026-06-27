@@ -479,6 +479,8 @@ def _read_mcp_namespaces(agent_folder: Path) -> list[str]:
         log.exception("_read_mcp_namespaces: failed to parse %s", config_path)
         return []
     raw = parsed.get("mcp_tools")
+    if isinstance(raw, dict):
+        raw = raw.get("allowed_namespaces", [])
     if not raw or not isinstance(raw, list):
         return []
     return [str(entry) for entry in raw if isinstance(entry, (str, int))]

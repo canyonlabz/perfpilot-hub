@@ -1021,166 +1021,246 @@ async def _run_stub_agent(task: task_store.AgentTask, common: dict) -> dict:
 
 
 # =============================================================================
-# Promoted specialist dispatch wrappers (PBI 3.10.3+)
+# Promoted specialist dispatch wrappers
 # =============================================================================
 # Each promoted specialist's _run_<agent>() is a thin wrapper around
-# _run_mcp_specialist_agent() with the correct constants. Adding a new
-# agent is two lines: the wrapper function + its _dispatch_agent branch.
+# _run_mcp_specialist_agent(). Adding a new agent is two lines: the
+# wrapper function + its _dispatch_agent branch.
 
 
 async def _run_monitoring_agent(task: task_store.AgentTask, common: dict) -> dict:
-    """Dispatch to monitoring-agent (Datadog MCP tools, PBI 3.10.3)."""
-    return await _run_mcp_specialist_agent(
-        task, common, MONITORING_AGENT_NAME, MONITORING_AGENT_MCP_PREFIXES,
-    )
+    """Dispatch to monitoring-agent (Datadog MCP tools)."""
+    return await _run_mcp_specialist_agent(task, common, MONITORING_AGENT_NAME)
 
 
 async def _run_analysis_agent(task: task_store.AgentTask, common: dict) -> dict:
-    """Dispatch to analysis-agent (PerfAnalysis MCP tools, PBI 3.10.4)."""
-    return await _run_mcp_specialist_agent(
-        task, common, ANALYSIS_AGENT_NAME, ANALYSIS_AGENT_MCP_PREFIXES,
-    )
+    """Dispatch to analysis-agent (PerfAnalysis MCP tools)."""
+    return await _run_mcp_specialist_agent(task, common, ANALYSIS_AGENT_NAME)
 
 
 async def _run_reporting_agent(task: task_store.AgentTask, common: dict) -> dict:
-    """Dispatch to reporting-agent (PerfReport + Confluence MCP tools, PBI 3.10.5)."""
-    return await _run_mcp_specialist_agent(
-        task, common, REPORTING_AGENT_NAME, REPORTING_AGENT_MCP_PREFIXES,
-    )
+    """Dispatch to reporting-agent (PerfReport + Confluence MCP tools)."""
+    return await _run_mcp_specialist_agent(task, common, REPORTING_AGENT_NAME)
 
 
 async def _run_script_agent(task: task_store.AgentTask, common: dict) -> dict:
-    """Dispatch to script-agent (JMeter MCP tools, PBI 3.10.6 partial)."""
-    return await _run_mcp_specialist_agent(
-        task, common, SCRIPT_AGENT_NAME, SCRIPT_AGENT_MCP_PREFIXES,
-    )
+    """Dispatch to script-agent (JMeter MCP tools)."""
+    return await _run_mcp_specialist_agent(task, common, SCRIPT_AGENT_NAME)
 
 
 # =============================================================================
-# Generic MCP specialist dispatch (PBI 3.10.2 Part B)
+# Specialist prompt composition
 # =============================================================================
-# Used by promoted specialist agents that have MCP-only tools (no composite
-# agent tools). Each specialist's thin `_run_<agent>()` wrapper calls this
-# with the agent's name and MCP namespace prefixes. Avoids duplicating the
-# dispatch/validation logic 4 times across monitoring, analysis, reporting,
-# and script agents.
+
+def _compose_specialist_prompt(payload: dict) -> str:
+    """Compose a natural LLM prompt from the delegation payload.
+
+    The orchestrator passes the user's original message plus whatever
+    contextual data it has gathered (test_run_id, environment,
+    timestamps, etc.). This function assembles all available
+    information into a coherent prompt for the specialist's LLM.
+
+    Falls back to stringifying the payload when no explicit message
+    field is found (backward compatibility with older callers).
+    """
+    user_msg = None
+    for key in ("user_message", "message", "text", "prompt"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            user_msg = val
+            break
+
+    message_keys = {"user_message", "message", "text", "prompt"}
+    context = {
+        k: v for k, v in payload.items()
+        if k not in message_keys and not k.startswith("_") and v is not None
+    }
+
+    if not user_msg:
+        if context:
+            user_msg = json.dumps(context)
+        else:
+            return ""
+
+    parts = [user_msg]
+    if context:
+        lines = []
+        for k, v in context.items():
+            if isinstance(v, dict):
+                lines.append(f"- {k}: {json.dumps(v)}")
+            else:
+                lines.append(f"- {k}: {v}")
+        parts.append("\nContext provided by the orchestrator:\n" + "\n".join(lines))
+
+    return "\n".join(parts)
+
+
+# =============================================================================
+# Specialist AG2 agent invocation (sync, runs inside asyncio.to_thread)
+# =============================================================================
+
+def _invoke_specialist_sync(
+    agent_name: str,
+    module: Any,
+    messages: list[dict],
+) -> tuple[str, Any]:
+    """Build a fresh specialist agent and produce a reply.
+
+    Synchronous so it can run inside ``asyncio.to_thread``. The
+    specialist is rebuilt per call deliberately: AG2
+    ``ConversableAgent`` carries per-conversation state that we do not
+    want bleeding across tasks.
+
+    The ``build_<name>_agent()`` factory on the specialist module
+    creates the ``ConversableAgent`` with MCP tools auto-discovered
+    and registered via ``mcp_tool_registry``. The agent's LLM sees the
+    full tool schemas and autonomously selects the right tool(s).
+    """
+    import sys
+    from pathlib import Path
+
+    framework_dir = Path(__file__).resolve().parent.parent
+    if str(framework_dir) not in sys.path:
+        sys.path.insert(0, str(framework_dir))
+
+    factory_name = f"build_{agent_name.replace('-', '_')}"
+    factory = getattr(module, factory_name, None)
+    if not callable(factory):
+        raise RuntimeError(
+            f"Specialist module for '{agent_name}' does not export "
+            f"a '{factory_name}()' factory function."
+        )
+
+    agent = factory()
+    reply = agent.generate_reply(messages=messages)
+
+    if isinstance(reply, str):
+        return reply, reply
+    if isinstance(reply, dict):
+        content = reply.get("content")
+        if isinstance(content, str):
+            return content, reply
+        return str(content) if content is not None else "", reply
+    return str(reply) if reply is not None else "", reply
+
+
+# =============================================================================
+# Generic MCP specialist dispatch (AG2 LLM loop)
+# =============================================================================
+# Used by promoted specialist agents whose MCP tools are auto-discovered
+# at build time. The specialist's ConversableAgent has full JSON schemas
+# for every tool in its namespace. The LLM autonomously selects tools
+# and parameters based on the user's request and contextual data.
 
 
 async def _run_mcp_specialist_agent(
     task: task_store.AgentTask,
     common: dict,
     agent_name: str,
-    mcp_prefixes: tuple[str, ...],
 ) -> dict:
-    """Generic dispatch for specialists with MCP-only tools (no composites).
+    """Build and invoke a specialist's AG2 agent with MCP tools.
 
-    Validates the task payload, checks that the requested tool falls
-    within the agent's declared MCP namespace prefixes, then routes to
-    ``_call_mcp_tool_passthrough_for_specialist()`` with the correct
-    namespace config.
+    The specialist's ``build_*_agent()`` factory creates a
+    ``ConversableAgent`` with MCP tools auto-discovered and registered
+    via ``mcp_tool_registry``. The agent's LLM sees the full tool
+    schemas and autonomously selects the right tool(s) based on the
+    user's request.
 
-    Return envelope shape matches the execution-agent's pattern::
+    The payload carries the user's original message (``user_message``)
+    plus any contextual data the orchestrator included (test_run_id,
+    environment, timestamps, etc.). The specialist's LLM uses all
+    available information to fulfill the request.
+
+    Return envelope::
 
         {
-          "agent":       "<agent_name>",
-          "tool":        "<echoed>",
-          "action":      "<echoed>",
-          "test_run_id": "<echoed>",
-          "tool_result": <dict>
+          "agent":        "<agent_name>",
+          "test_run_id":  "<echoed from payload, or None>",
+          "user_message": "<echoed for audit trail>",
+          "reply_text":   "<specialist LLM response text>",
+          "reply_raw":    <raw LLM reply object>
         }
 
     Args:
         task: The ``AgentTask`` row from the task store.
         common: SSE broadcast fields (task_id, session_id, etc.).
         agent_name: The specialist's name (e.g. ``"monitoring-agent"``).
-        mcp_prefixes: Tuple of allowed MCP prefixes (e.g.
-            ``("datadog_",)``). Each prefix includes the trailing
-            underscore.
     """
     payload = task.payload if isinstance(task.payload, dict) else {}
-    tool = payload.get("tool")
-    action = payload.get("action")
     test_run_id = payload.get("test_run_id")
-    args_raw = payload.get("args")
-    args = args_raw if isinstance(args_raw, dict) else None
+
+    user_message = None
+    for key in ("user_message", "message", "text", "prompt"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            user_message = val
+            break
 
     envelope: dict = {
         "agent": agent_name,
-        "tool": tool,
-        "action": action,
         "test_run_id": test_run_id,
+        "user_message": user_message,
     }
 
-    if not isinstance(tool, str) or not tool:
-        envelope["tool_result"] = {
-            "ok": False,
-            "error": {
-                "type": "InvalidPayload",
-                "message": (
-                    f"Payload is missing required field 'tool'. "
-                    f"MCP namespace prefixes for {agent_name}: "
-                    f"{list(mcp_prefixes)}."
-                ),
-            },
+    user_prompt = _compose_specialist_prompt(payload)
+    if not user_prompt.strip():
+        envelope["error"] = {
+            "type": "InvalidPayload",
+            "message": "Payload contains no actionable message or data.",
         }
         return envelope
 
-    if not any(tool.startswith(p) for p in mcp_prefixes):
-        envelope["tool_result"] = {
-            "ok": False,
-            "error": {
-                "type": "UnknownTool",
-                "message": (
-                    f"Tool {tool!r} is not within {agent_name}'s "
-                    f"namespace prefixes: {list(mcp_prefixes)}."
-                ),
-            },
-        }
-        return envelope
-
-    if args_raw is not None and args is None:
-        envelope["tool_result"] = {
-            "ok": False,
-            "error": {
-                "type": "InvalidPayload",
-                "message": (
-                    f"Payload field 'args' must be a dict (or omitted); got "
-                    f"{type(args_raw).__name__}."
-                ),
-            },
-        }
-        return envelope
-
-    args = args or {}
-
+    # ---- Module load --------------------------------------------------
     await _broadcast(
         task.task_id,
-        TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
+        TaskEvent(
+            status="running",
+            progress=f"building_{agent_name}",
+            **common,
+        ),
     )
-
-    # Derive the bare namespace list from the prefixes for MCPClient config.
-    bare_namespaces = [p.rstrip("_") for p in mcp_prefixes]
 
     try:
-        mcp_result = await _call_mcp_tool_passthrough_for_specialist(
-            tool, args, bare_namespaces,
-        )
+        module = await _load_specialist_module(agent_name)
     except Exception as exc:
-        log.exception("MCP pass-through failed for tool %s on %s", tool, agent_name)
-        envelope["tool_result"] = {
-            "ok": False,
-            "error": {
-                "type": type(exc).__name__,
-                "message": f"MCP pass-through call failed: {exc}",
-            },
+        log.exception("%s module load failed for task %s", agent_name, task.task_id)
+        envelope["error"] = {
+            "type": type(exc).__name__,
+            "message": f"Failed to load {agent_name} module: {exc}",
         }
         return envelope
 
+    # ---- Agent invocation ---------------------------------------------
+    messages_for_llm = [{"role": "user", "content": user_prompt}]
+
     await _broadcast(
         task.task_id,
-        TaskEvent(status="running", progress=f"tool_complete:{tool}", **common),
+        TaskEvent(
+            status="running",
+            progress=f"invoking_{agent_name}_llm",
+            **common,
+        ),
     )
-    envelope["tool_result"] = mcp_result
+
+    try:
+        reply_text, raw_reply = await asyncio.to_thread(
+            _invoke_specialist_sync, agent_name, module, messages_for_llm,
+        )
+    except Exception as exc:
+        log.exception("%s agent invocation failed for task %s", agent_name, task.task_id)
+        raise RuntimeError(f"{agent_name} agent invocation failed: {exc}") from exc
+
+    await _broadcast(
+        task.task_id,
+        TaskEvent(
+            status="running",
+            progress=f"{agent_name}_complete",
+            **common,
+        ),
+    )
+
+    envelope["reply_text"] = reply_text
+    envelope["reply_raw"] = raw_reply
     return envelope
 
 
