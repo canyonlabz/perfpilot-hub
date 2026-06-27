@@ -392,6 +392,10 @@ agent-framework/sql/drop_perfagent_state.py
 # Ignore all Playwright output files
 .playwright-mcp/*
 
+# =========================================================
+# Custom Cursor files
+# =========================================================
+
 # Ignore all custom Cursor Rules files, except the below
 .cursor/rules/*.mdc
 !.cursor/rules/prerequisites.mdc
@@ -443,10 +447,14 @@ agent-framework/sql/drop_perfagent_state.py
 !.cursor/agents/jmeter-script-validator.md
 
 # Ignore all custom Cursor Docs & Plans files, except the below
-.cursor/plans/*
+.cursor/plans/
 .cursor/docs/
+.cursor/bugs/
 
-# Temp test files
+# =========================================================
+# Test scripts and test files
+# =========================================================
+
 scripts/*
 test_datadog.py
 test_blazemeter.py
