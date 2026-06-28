@@ -41,16 +41,20 @@ export function AgentCard({ agent }: AgentCardProps) {
           </button>
           {skillsExpanded && (
             <ul className="mt-2 space-y-1.5 pl-5">
-              {agent.skills.map((skill) => (
-                <li key={skill.name} className="text-xs">
-                  <span className="font-mono text-foreground">{skill.name}</span>
-                  {skill.description && (
-                    <span className="text-muted-foreground ml-1.5">
-                      — {skill.description}
-                    </span>
-                  )}
-                </li>
-              ))}
+              {agent.skills.map((skill, idx) => {
+                const name = typeof skill === "string" ? skill : skill.name;
+                const desc = typeof skill === "string" ? undefined : skill.description;
+                return (
+                  <li key={name ?? idx} className="text-xs">
+                    <span className="font-mono text-foreground">{name}</span>
+                    {desc && (
+                      <span className="text-muted-foreground ml-1.5">
+                        — {desc}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>

@@ -148,6 +148,26 @@ def load_default_provider_config(framework_dir: Optional[Path] = None) -> dict:
 # LLMProvider
 # =============================================================================
 
+def build_llm_config(agent_llm_block: dict | None = None) -> dict:
+    """Build an AG2-compatible ``llm_config`` dict for a specialist agent.
+
+    This is the convenience function every specialist ``build_*_agent()``
+    factory calls.  It merges the per-agent YAML ``llm_provider`` block
+    (if any) with environment-variable credentials and the global
+    ``config/agents.yaml`` defaults, then returns the dict that
+    ``autogen.ConversableAgent(llm_config=...)`` expects.
+
+    Args:
+        agent_llm_block: The ``llm_provider`` sub-dict from the agent's
+            own ``config.yaml``.  ``None`` means "use global defaults".
+    """
+    if agent_llm_block:
+        merged = merge_env_credentials(agent_llm_block)
+    else:
+        merged = load_default_provider_config()
+    return LLMProvider(merged).to_ag2_config()
+
+
 class LLMProvider:
     """Abstraction layer for chat-completion LLM providers.
 
