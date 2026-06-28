@@ -63,6 +63,8 @@ services:
       # PerfMemory config
       - ./config/perfmemory/config.yaml:/app/perfmemory-mcp/config.yaml:ro
       - ./config/perfmemory/taxonomy.yaml:/app/perfmemory-mcp/taxonomy.yaml:ro
+      # Playwright traces (shared volume with playwright-mcp container)
+      - playwright-traces:/app/.playwright-mcp/traces
     depends_on:
       perfmemory-db:
         condition: service_healthy
@@ -94,6 +96,23 @@ services:
     restart: unless-stopped
     networks:
       - perf-network
+
+  playwright-mcp:
+    image: mcp/playwright:latest
+    container_name: playwright-mcp
+    user: "0:0"
+    ports:
+      - "8931:8931"
+    command: ["--port", "8931", "--host", "0.0.0.0", "--caps", "devtools", "--config", "/app/config.json"]
+    volumes:
+      - playwright-traces:/home/node/output/traces
+      - ./config/playwright/config.json:/app/config.json:ro
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+volumes:
+  playwright-traces:
 
 networks:
   perf-network:
