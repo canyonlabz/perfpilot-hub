@@ -450,6 +450,7 @@ agent-framework/sql/drop_perfagent_state.py
 .cursor/plans/
 .cursor/docs/
 .cursor/bugs/
+.cursor/enhancements/
 
 # =========================================================
 # Test scripts and test files

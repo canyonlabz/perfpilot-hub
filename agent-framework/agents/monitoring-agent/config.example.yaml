@@ -52,7 +52,24 @@ retries: 3
 timeout_seconds: 90
 
 # =============================================================================
-# 5. A2A discovery metadata
+# 5. Multi-turn loop engineering
+# =============================================================================
+# Controls the autonomous tool-execution loop that allows the agent to
+# chain multiple MCP tool calls to fulfill a high-level objective.
+#
+# max_tool_rounds: Maximum number of LLM → tool → LLM cycles before the
+#   loop exits with a warning. Prevents infinite loops. Higher values
+#   allow more complex multi-step workflows. Default: 7.
+#
+# max_consecutive_repeats: If the LLM calls the same tool with identical
+#   arguments this many times in a row, the loop exits with a "stuck"
+#   warning. Prevents the LLM from retrying a deterministic failure
+#   endlessly. Default: 3.
+max_tool_rounds: 7
+max_consecutive_repeats: 3
+
+# =============================================================================
+# 6. A2A discovery metadata
 # =============================================================================
 a2a:
   display_name: "PerfPilot Monitoring Agent"

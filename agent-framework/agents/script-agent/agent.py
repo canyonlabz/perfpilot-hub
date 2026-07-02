@@ -1,27 +1,21 @@
-"""PerfPilot Script Agent -- AG2 ConversableAgent factory.
+"""PerfPilot Script Agent — AG2 ConversableAgent factory.
 
-This module ships the four-file pattern's ``agent.py`` slot per V2 doc
-§7.1. The script-agent owns the JMeter-script lifecycle: convert
+The script-agent owns the JMeter-script lifecycle: convert
 HAR/Swagger/Playwright captures to JMX, edit and analyze scripts,
 run smoke tests, and iteratively debug with PerfMemory integration.
 
-**MCP collaboration (auto-discovered at build time via F3.10):**
+MCP collaboration (auto-discovered at build time):
 
-1. JMeter MCP (gateway, ``jmeter_*``) -- JMX creation, editing,
+1. JMeter MCP (via gateway, ``jmeter_*``) — JMX creation, editing,
    component manipulation, smoke testing, HAR/Swagger conversion,
-   correlation. Code-based (single attempt, no retry).
+   correlation, network traffic capture/analysis. Code-based (single
+   attempt, no retry).
 
-**Blocked on F3.12:**
-
-- Playwright MCP (direct, ``browser_*``) -- Browser automation for
-  live network capture. Requires Playwright MCP container. The
-  ``jmeter_capture_network_traffic``, ``jmeter_get_browser_steps``,
-  ``jmeter_get_test_specs``, and ``jmeter_archive_playwright_traces``
-  tools depend on this and are excluded from the namespace filter
-  at the gateway level until F3.12.
-
-**Workflow orchestration** is handled externally by Cursor Skills
-(HAR conversion, Swagger conversion, debugging, HITL editing skills).
+2. Playwright MCP (direct connection, ``browser_*``) — Browser
+   automation for live network capture driven by test specification
+   files. The Playwright MCP container (Microsoft ``playwright-mcp``)
+   runs as a separate service and the script-agent connects directly
+   to it (not through the gateway).
 
 Heavy imports (``autogen``, ``yaml``, ``fastmcp``) live inside the
 functions that need them so this module is cheap to import in smoke
@@ -29,29 +23,58 @@ tests.
 
 NOTE: This module deliberately does NOT use ``from __future__ import
 annotations``.
-
-Status:
-    F3.9 PBI 3.9.1 -- stub scaffold (no tools registered).
-    F3.10 PBI 3.10.6 -- partial promotion (JMeter MCP only; Playwright
-        deferred to F3.12).
 """
 
 import logging
+import os
 import pathlib
 
 logger = logging.getLogger(__name__)
 
 _AGENT_DIR = pathlib.Path(__file__).resolve().parent
 
-MCP_NAMESPACES = ["jmeter"]
+GATEWAY_MCP_NAMESPACES = ["jmeter"]
+PLAYWRIGHT_MCP_NAMESPACE = ["browser"]
+
+# Playwright MCP endpoint resolution:
+#   1. PLAYWRIGHT_MCP_URL env var (operator override)
+#   2. Docker internal: http://playwright-mcp:8931 (when PERFPILOT_DOCKER=true)
+#   3. Local default: http://localhost:8931
+_DEFAULT_PLAYWRIGHT_URL_DOCKER = "http://playwright-mcp:8931/mcp"
+_DEFAULT_PLAYWRIGHT_URL_LOCAL = "http://localhost:8931/mcp"
+
+
+def _resolve_playwright_url(agent_config: dict) -> str | None:
+    """Resolve the Playwright MCP endpoint URL.
+
+    Returns None if Playwright is explicitly disabled in config.
+    """
+    playwright_cfg = agent_config.get("playwright_mcp", {})
+    if not playwright_cfg.get("enabled", True):
+        return None
+
+    # Explicit env var takes priority
+    env_url = os.environ.get("PLAYWRIGHT_MCP_URL")
+    if env_url:
+        return env_url
+
+    # Config file override
+    cfg_url = playwright_cfg.get("endpoint")
+    if cfg_url:
+        return cfg_url
+
+    # Auto-detect Docker vs local
+    if os.environ.get("PERFPILOT_DOCKER", "").lower() in ("true", "1"):
+        return _DEFAULT_PLAYWRIGHT_URL_DOCKER
+    return _DEFAULT_PLAYWRIGHT_URL_LOCAL
 
 
 def build_script_agent():
     """Construct and return the PerfPilot Script Agent.
 
-    Returns a ``ConversableAgent`` with JMeter MCP tools
-    auto-discovered from the gateway. Playwright (``browser_*``) tools
-    are deferred to F3.12.
+    Returns a ``ConversableAgent`` with:
+    - JMeter MCP tools auto-discovered from the gateway
+    - Playwright MCP tools auto-discovered from the Playwright container
     """
     import yaml
 
@@ -79,16 +102,25 @@ def build_script_agent():
         human_input_mode="NEVER",
     )
 
-    tool_count = _register_mcp_tools(agent)
+    # Register JMeter tools (via gateway)
+    jmeter_count = _register_gateway_tools(agent)
+
+    # Register Playwright tools (direct connection)
+    playwright_url = _resolve_playwright_url(agent_config)
+    playwright_count = 0
+    if playwright_url:
+        playwright_count = _register_playwright_tools(agent, playwright_url)
+
+    total = jmeter_count + playwright_count
     logger.info(
-        "script-agent built (F3.10 partial — %d JMeter MCP tools registered; "
-        "Playwright deferred to F3.12)", tool_count,
+        "script-agent built — %d JMeter tools + %d Playwright tools = %d total",
+        jmeter_count, playwright_count, total,
     )
     return agent
 
 
-def _register_mcp_tools(agent) -> int:
-    """Auto-discover and register JMeter MCP tools on the agent."""
+def _register_gateway_tools(agent) -> int:
+    """Auto-discover and register JMeter MCP tools from the gateway."""
     import asyncio
 
     from utils.mcp_client import resolve_gateway_url
@@ -106,10 +138,35 @@ def _register_mcp_tools(agent) -> int:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
-                register_mcp_tools_on_agent(agent, gateway_url, MCP_NAMESPACES),
+                register_mcp_tools_on_agent(agent, gateway_url, GATEWAY_MCP_NAMESPACES),
             )
             return future.result(timeout=30)
     else:
         return asyncio.run(
-            register_mcp_tools_on_agent(agent, gateway_url, MCP_NAMESPACES),
+            register_mcp_tools_on_agent(agent, gateway_url, GATEWAY_MCP_NAMESPACES),
+        )
+
+
+def _register_playwright_tools(agent, playwright_url: str) -> int:
+    """Auto-discover and register Playwright browser tools (direct connection)."""
+    import asyncio
+
+    from utils.mcp_tool_registry import register_mcp_tools_on_agent
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                asyncio.run,
+                register_mcp_tools_on_agent(agent, playwright_url, PLAYWRIGHT_MCP_NAMESPACE),
+            )
+            return future.result(timeout=30)
+    else:
+        return asyncio.run(
+            register_mcp_tools_on_agent(agent, playwright_url, PLAYWRIGHT_MCP_NAMESPACE),
         )

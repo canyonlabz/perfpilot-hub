@@ -56,6 +56,8 @@ services:
       - ./config/jmeter/config.yaml:/app/jmeter-mcp/config.yaml:ro
       - ./config/jmeter/jmeter_config.yaml:/app/jmeter-mcp/jmeter_config.yaml:ro
       - ./config/jmeter/correlation_config.yaml:/app/jmeter-mcp/correlation_config.yaml:ro
+      # JMeter test-specs (subfolder structure: web-flows/, azure-devops/, etc.)
+      - ./config/jmeter/test-specs:/app/jmeter-mcp/test-specs:ro
       # JMeter properties overrides (optional — appended to jmeter.properties at startup)
       - ./config/jmeter/jmeter-overrides.properties:/app/jmeter-config/jmeter-overrides.properties:ro
       # JMeter client certs (optional — place .jks files here, configure via env vars)

@@ -48,7 +48,7 @@ from typing import Any, Iterable
 log = logging.getLogger(__name__)
 
 DEFAULT_GATEWAY_URL = "http://localhost:8000/mcp/"
-DEFAULT_PLAYWRIGHT_URL = "http://localhost:8003/mcp/"
+DEFAULT_PLAYWRIGHT_URL = "http://localhost:8931/mcp"
 
 # FastMCP namespace separator. `gateway.mount(..., namespace="blazemeter")`
 # in `gateway-mcp/gateway.py` prefixes every tool from blazemeter-mcp with

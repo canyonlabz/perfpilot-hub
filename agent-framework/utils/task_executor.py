@@ -235,6 +235,75 @@ async def _enforce_hitl_gate(
     return f"HITL approval timed out after {int(timeout)}s"
 
 
+# =============================================================================
+# Push notification: inject completion message into conversation thread
+# =============================================================================
+
+def _build_completion_summary(task: task_store.AgentTask) -> str:
+    """Compose a short orchestrator-voice message summarizing task outcome."""
+    agent = task.agent_name
+    if task.status == "completed":
+        result_snippet = ""
+        if isinstance(task.result, dict):
+            reply_text = task.result.get("reply_text", "")
+            if reply_text:
+                result_snippet = reply_text
+            else:
+                result_snippet = task.result.get("summary") or task.result.get("message") or ""
+        msg = f"**{agent}** completed successfully."
+        if result_snippet:
+            # Truncate very long results for the chat bubble
+            if len(result_snippet) > 1000:
+                result_snippet = result_snippet[:1000] + "..."
+            msg += f"\n\n{result_snippet}"
+        if task.test_run_id:
+            msg += f"\n\n*Test run ID: `{task.test_run_id}`*"
+        return msg
+    elif task.status == "failed":
+        error_msg = ""
+        if isinstance(task.error, dict):
+            error_msg = task.error.get("message") or str(task.error)
+        elif isinstance(task.error, str):
+            error_msg = task.error
+        return (
+            f"**{agent}** encountered an error.\n\n"
+            f"**Error:** {error_msg or 'Unknown error — check task logs.'}\n\n"
+            f"*Task ID: `{task.task_id}`*"
+        )
+    return f"**{agent}** reached status `{task.status}`."
+
+
+async def _inject_completion_message(task: task_store.AgentTask) -> None:
+    """Persist the specialist's completion into the conversation thread.
+
+    This is the server-side push notification (Change 1 from the push
+    notification enhancement doc). The message appears in the thread's
+    history so the next time the user's UI loads messages (or if a
+    React polling hook is active), the result is visible without the
+    user needing to ask "is it done?".
+    """
+    from utils import conversation_store, thread_store
+
+    summary = _build_completion_summary(task)
+    try:
+        await conversation_store.append_message(
+            task.thread_id,
+            agent_name="orchestrator",
+            role="assistant",
+            content={"text": summary, "source": "task_executor_callback"},
+        )
+        await thread_store.touch_thread(task.thread_id)
+        log.info(
+            "Injected completion message for task %s into thread %s",
+            task.task_id, task.thread_id,
+        )
+    except Exception:
+        log.exception(
+            "Failed to inject completion message for task %s thread %s",
+            task.task_id, task.thread_id,
+        )
+
+
 async def execute_task(task_id: UUID) -> None:
     """Run the task end-to-end. Schedule with `asyncio.create_task(...)`."""
     task = await task_store.get_task(task_id)
@@ -293,6 +362,11 @@ async def execute_task(task_id: UUID) -> None:
     final = await task_store.get_task(task.task_id)
     if final is not None and final.subscriber_endpoints:
         await _deliver_webhooks(final)
+
+    # ---- Push notification: inject completion message into conversation thread
+    # So the user sees the result without needing to ask "is it done?"
+    if final is not None and final.thread_id and final.status in task_store.TERMINAL_STATUSES:
+        await _inject_completion_message(final)
 
 
 # =============================================================================
@@ -1099,49 +1173,209 @@ def _compose_specialist_prompt(payload: dict) -> str:
 # Specialist AG2 agent invocation (sync, runs inside asyncio.to_thread)
 # =============================================================================
 
-def _invoke_specialist_sync(
-    agent_name: str,
-    module: Any,
+def _generate_reply_sync(
+    agent: Any,
     messages: list[dict],
-) -> tuple[str, Any]:
-    """Build a fresh specialist agent and produce a reply.
+) -> Any:
+    """Thin sync wrapper around AG2's ``generate_reply()``.
 
-    Synchronous so it can run inside ``asyncio.to_thread``. The
-    specialist is rebuilt per call deliberately: AG2
-    ``ConversableAgent`` carries per-conversation state that we do not
-    want bleeding across tasks.
+    This is the ONLY synchronous operation in the specialist loop —
+    AG2's LLM call.  Runs inside ``asyncio.to_thread()`` so the async
+    event loop is not blocked.
 
-    The ``build_<name>_agent()`` factory on the specialist module
-    creates the ``ConversableAgent`` with MCP tools auto-discovered
-    and registered via ``mcp_tool_registry``. The agent's LLM sees the
-    full tool schemas and autonomously selects the right tool(s).
+    Returns whatever AG2 returns: a ``str`` (text response), a
+    ``dict`` (tool call suggestion), or ``None`` (model failure).
     """
-    import sys
-    from pathlib import Path
+    return agent.generate_reply(messages=messages)
 
-    framework_dir = Path(__file__).resolve().parent.parent
-    if str(framework_dir) not in sys.path:
-        sys.path.insert(0, str(framework_dir))
 
-    factory_name = f"build_{agent_name.replace('-', '_')}"
-    factory = getattr(module, factory_name, None)
-    if not callable(factory):
-        raise RuntimeError(
-            f"Specialist module for '{agent_name}' does not export "
-            f"a '{factory_name}()' factory function."
-        )
+async def _execute_tool_on_agent(
+    agent: Any,
+    fn_name: str,
+    fn_args: dict,
+) -> str:
+    """Look up a registered tool function on the agent and execute it.
 
-    agent = factory()
-    reply = agent.generate_reply(messages=messages)
+    AG2's ``register_for_execution()`` stores callables in
+    ``agent._function_map``.  The MCP tool wrappers from
+    ``mcp_tool_registry`` are async coroutines — we ``await`` them
+    directly.  Any sync functions are dispatched via ``to_thread``.
 
-    if isinstance(reply, str):
-        return reply, reply
-    if isinstance(reply, dict):
-        content = reply.get("content")
-        if isinstance(content, str):
-            return content, reply
-        return str(content) if content is not None else "", reply
-    return str(reply) if reply is not None else "", reply
+    Always returns a string (JSON-serialized result or error).
+    """
+    import inspect
+
+    fn = agent._function_map.get(fn_name)
+    if fn is None:
+        return json.dumps({
+            "ok": False,
+            "error": {
+                "type": "ToolNotFound",
+                "message": f"No registered execution function for '{fn_name}'",
+            },
+        })
+
+    try:
+        if inspect.iscoroutinefunction(fn):
+            result = await fn(**fn_args)
+        else:
+            result = await asyncio.to_thread(fn, **fn_args)
+    except Exception as e:
+        log.exception("Tool execution failed: %s", fn_name)
+        return json.dumps({
+            "ok": False,
+            "error": {
+                "type": type(e).__name__,
+                "message": str(e)[:500],
+            },
+        })
+
+    if isinstance(result, str):
+        return result
+    return json.dumps(result, default=str)
+
+
+async def _run_multi_turn_tool_loop(
+    agent: Any,
+    messages: list[dict],
+    *,
+    max_tool_rounds: int,
+    max_consecutive_repeats: int,
+    task_id: Any,
+    common: dict,
+    agent_name: str,
+) -> tuple[str, Any, list[dict], str]:
+    """Async multi-turn tool-execution loop for specialist agents.
+
+    Implements the loop engineering pattern:
+      1. Call LLM (sync via to_thread)
+      2. If text response → exit (success)
+      3. If tool calls → execute each tool → feed results back → next round
+      4. Exit conditions: max rounds, consecutive repeats, or errors
+
+    Returns:
+        Tuple of (reply_text, raw_reply, tool_rounds_audit, exit_reason).
+    """
+    tool_rounds: list[dict] = []
+    last_tool_signature: str | None = None
+    consecutive_repeats = 0
+
+    for round_num in range(1, max_tool_rounds + 1):
+        # ---- LLM call (sync AG2) ------------------------------------------
+        reply = await asyncio.to_thread(_generate_reply_sync, agent, messages)
+
+        # ---- Exit: text response (success) --------------------------------
+        if isinstance(reply, str):
+            return reply, reply, tool_rounds, "text_response"
+
+        # ---- Exit: None / empty (model failure) ---------------------------
+        if reply is None:
+            return "", None, tool_rounds, "null_reply"
+
+        # ---- Dict response: check for tool calls -------------------------
+        if isinstance(reply, dict):
+            tool_calls = reply.get("tool_calls")
+            if not tool_calls:
+                content = reply.get("content", "")
+                text = content if isinstance(content, str) else str(content) if content else ""
+                return text, reply, tool_rounds, "text_response"
+
+            # ---- Execute tool calls ---------------------------------------
+            messages.append(reply)
+            round_audit: dict = {
+                "round": round_num,
+                "tool_calls": [],
+                "results": [],
+            }
+
+            for tc in tool_calls:
+                fn_name = tc["function"]["name"]
+                fn_args_raw = tc["function"]["arguments"]
+                fn_args = (
+                    json.loads(fn_args_raw)
+                    if isinstance(fn_args_raw, str)
+                    else fn_args_raw
+                )
+                tc_id = tc["id"]
+
+                round_audit["tool_calls"].append({"name": fn_name, "args": fn_args})
+
+                # ---- Repetition detection ---------------------------------
+                tool_sig = json.dumps(
+                    {"name": fn_name, "args": fn_args}, sort_keys=True,
+                )
+                if tool_sig == last_tool_signature:
+                    consecutive_repeats += 1
+                else:
+                    consecutive_repeats = 1
+                    last_tool_signature = tool_sig
+
+                if consecutive_repeats >= max_consecutive_repeats:
+                    warning = (
+                        f"[Loop exited: tool '{fn_name}' called with identical "
+                        f"arguments {max_consecutive_repeats} times consecutively]"
+                    )
+                    log.warning(
+                        "%s task %s: %s", agent_name, task_id, warning,
+                    )
+                    return warning, reply, tool_rounds, "consecutive_repeat_limit"
+
+                # ---- Execute the tool -------------------------------------
+                result_str = await _execute_tool_on_agent(agent, fn_name, fn_args)
+
+                result_ok = True
+                try:
+                    parsed = json.loads(result_str)
+                    if isinstance(parsed, dict) and parsed.get("ok") is False:
+                        result_ok = False
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+                round_audit["results"].append({
+                    "tool": fn_name,
+                    "ok": result_ok,
+                    "snippet": result_str[:200],
+                })
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result_str,
+                })
+
+            tool_rounds.append(round_audit)
+
+            # ---- SSE progress broadcast -----------------------------------
+            tool_names = [tc["name"] for tc in round_audit["tool_calls"]]
+            await _broadcast(
+                task_id,
+                TaskEvent(
+                    status="running",
+                    progress=f"tool_round_{round_num}_of_{max_tool_rounds}",
+                    result={
+                        "round": round_num,
+                        "tools_called": tool_names,
+                        "agent": agent_name,
+                    },
+                    **common,
+                ),
+            )
+            continue
+
+        # ---- Exit: unexpected reply type ----------------------------------
+        return str(reply), reply, tool_rounds, "unexpected_reply_type"
+
+    # ---- Exit: max rounds reached -----------------------------------------
+    log.warning(
+        "%s task %s: max_tool_rounds (%d) reached",
+        agent_name, task_id, max_tool_rounds,
+    )
+    return (
+        f"[Max tool rounds ({max_tool_rounds}) reached — task may be incomplete]",
+        None,
+        tool_rounds,
+        "max_rounds_reached",
+    )
 
 
 # =============================================================================
@@ -1171,6 +1405,12 @@ async def _run_mcp_specialist_agent(
     environment, timestamps, etc.). The specialist's LLM uses all
     available information to fulfill the request.
 
+    Uses a multi-turn tool-execution loop: the LLM may
+    return tool calls which are executed and fed back until the LLM
+    produces a final text response or an exit condition is reached.
+    Loop parameters (``max_tool_rounds``, ``max_consecutive_repeats``)
+    are read from the agent's ``config.yaml``.
+
     Return envelope::
 
         {
@@ -1178,7 +1418,10 @@ async def _run_mcp_specialist_agent(
           "test_run_id":  "<echoed from payload, or None>",
           "user_message": "<echoed for audit trail>",
           "reply_text":   "<specialist LLM response text>",
-          "reply_raw":    <raw LLM reply object>
+          "reply_raw":    <raw LLM reply object>,
+          "tool_rounds":  [<per-round audit dicts>],
+          "total_rounds": <int>,
+          "exit_reason":  "<text_response|max_rounds_reached|...>"
         }
 
     Args:
@@ -1242,9 +1485,62 @@ async def _run_mcp_specialist_agent(
         ),
     )
 
+    # ---- Build the specialist agent -----------------------------------
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    framework_dir = Path(__file__).resolve().parent.parent
+    if str(framework_dir) not in sys.path:
+        sys.path.insert(0, str(framework_dir))
+
+    factory_name = f"build_{agent_name.replace('-', '_')}"
+    factory = getattr(module, factory_name, None)
+    if not callable(factory):
+        envelope["error"] = {
+            "type": "RuntimeError",
+            "message": (
+                f"Specialist module for '{agent_name}' does not export "
+                f"a '{factory_name}()' factory function."
+            ),
+        }
+        return envelope
+
     try:
-        reply_text, raw_reply = await asyncio.to_thread(
-            _invoke_specialist_sync, agent_name, module, messages_for_llm,
+        agent = await asyncio.to_thread(factory)
+    except Exception as exc:
+        log.exception("%s agent build failed for task %s", agent_name, task.task_id)
+        raise RuntimeError(f"{agent_name} agent build failed: {exc}") from exc
+
+    # ---- Load loop config from agent's config.yaml --------------------
+    from utils.base_agent import resolve_agent_config_path
+
+    agent_dir = framework_dir / "agents" / agent_name
+    agent_config: dict = {}
+    config_path = resolve_agent_config_path(agent_dir)
+    if config_path:
+        try:
+            with open(config_path, encoding="utf-8-sig") as fh:
+                agent_config = yaml.safe_load(fh) or {}
+        except Exception:
+            log.warning("Could not load config for %s, using defaults", agent_name)
+
+    max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
+    max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
+
+    # ---- Run multi-turn tool execution loop ---------------------------
+    try:
+        reply_text, raw_reply, tool_rounds, exit_reason = (
+            await _run_multi_turn_tool_loop(
+                agent=agent,
+                messages=messages_for_llm,
+                max_tool_rounds=max_tool_rounds,
+                max_consecutive_repeats=max_consecutive_repeats,
+                task_id=task.task_id,
+                common=common,
+                agent_name=agent_name,
+            )
         )
     except Exception as exc:
         log.exception("%s agent invocation failed for task %s", agent_name, task.task_id)
@@ -1261,6 +1557,9 @@ async def _run_mcp_specialist_agent(
 
     envelope["reply_text"] = reply_text
     envelope["reply_raw"] = raw_reply
+    envelope["tool_rounds"] = tool_rounds
+    envelope["total_rounds"] = len(tool_rounds)
+    envelope["exit_reason"] = exit_reason
     return envelope
 
 

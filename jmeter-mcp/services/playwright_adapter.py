@@ -30,6 +30,7 @@ from utils.browser_utils import extract_apex_domain_from_task
 from services.spec_parser import (
     load_browser_steps,
     generate_task,
+    _resolve_spec_path,
 )
 from services import network_capture  # for should_capture_url
 
@@ -66,7 +67,7 @@ def run_playwright_capture_pipeline(spec_path: str, run_id: str) -> str:
     network_file, resources_dir = _find_latest_network_trace()
 
     # Optionally derive/override capture_domain from the Task content
-    task_text = generate_task(spec_path)
+    task_text = generate_task(_resolve_spec_path(spec_path, run_id))
     apex_domain = extract_apex_domain_from_task(task_text)
     capture_config = dict(NETWORK_CAPTURE_CONFIG)  # shallow copy
     if apex_domain and not capture_config.get("capture_domain"):

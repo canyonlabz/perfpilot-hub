@@ -1,9 +1,8 @@
-# Script Agent - Per-Agent Configuration (PBI 3.9.1)
-# ---------------------------------------------------
+# Script Agent - Per-Agent Configuration
+# ----------------------------------------
 # **This is the committed, public-facing reference file.** Mirrors the
 # same `config.yaml` / `config.example.yaml` split that the MCP servers
-# under this repo already use (and that `agent-framework/config/agents.yaml`
-# uses for the global-fallback LLM block). The agent factory in
+# under this repo already use. The agent factory in
 # `agents/script-agent/agent.py` (and the framework-level loader in
 # `utils/base_agent.py`) walk the candidates in priority order:
 #
@@ -14,18 +13,14 @@
 # without polluting git. The example stays unmodified in the branch so
 # smoke tests and fresh clones always have a working default.
 #
-# Consumed by `agents/script-agent/agent.py::build_script_agent()` at
-# startup. See `agent-framework/AGENTS.md` -> "Per-agent `config.yaml`
-# schema" for the full schema reference and the candidate-resolution
-# convention.
-#
 # Sections:
 #   1. llm_provider     - per-agent LLM override
 #   2. mcp_tools        - gateway namespace allowlist (jmeter, perfmemory)
 #   3. playwright_mcp   - direct Playwright MCP connection (outside gateway)
 #   4. retries          - call-level retry budget for transient MCP failures
 #   5. timeout_seconds  - per-tool soft timeout for short MCP calls
-#   6. a2a              - A2A discovery metadata override
+#   6. max_tool_rounds  - multi-turn loop safety valve
+#   7. a2a              - A2A discovery metadata override
 
 # =============================================================================
 # 1. LLM provider override
@@ -78,23 +73,22 @@ mcp_tools:
 # separate service, NOT through the gateway-mcp. The script-agent
 # connects to it directly for browser automation tasks.
 #
-# Per AGENTS.md Convention 5: "the script-agent's call to the Microsoft
-# Playwright MCP is also mediated, just to a different MCP server."
+# Endpoint resolution priority:
+#   1. PLAYWRIGHT_MCP_URL environment variable (operator override)
+#   2. This config file's `endpoint` value (if uncommented)
+#   3. Auto-detect: Docker (http://playwright-mcp:8931) vs local (http://localhost:8931)
 #
-# Tools available (browser_* namespace, 23 tools):
-#   browser_navigate, browser_click, browser_type, browser_fill_form,
-#   browser_network_requests, browser_network_request, browser_snapshot,
-#   browser_take_screenshot, browser_hover, browser_select_option,
-#   browser_press_key, browser_tabs, browser_close, etc.
+# Tools available (browser_* namespace):
+#   browser_navigate, browser_click, browser_type, browser_fill,
+#   browser_hover, browser_select_option, browser_press_key,
+#   browser_snapshot, browser_take_screenshot, browser_tabs,
+#   browser_close, etc.
 #
-# The Playwright MCP must be active and running before browser automation
-# tools can be used. If unreachable, the agent returns a structured
-# error (see INSTRUCTIONS.md §6.3).
+# Set `enabled: false` to skip Playwright tool registration (e.g.,
+# if the Playwright container is not running).
 playwright_mcp:
   enabled: true
-  # Default endpoint for containerized Playwright MCP (F3.12 will
-  # configure the actual endpoint in docker-compose):
-  # endpoint: "http://playwright-mcp:8003/mcp"
+  # endpoint: "http://localhost:8931"
 
 # =============================================================================
 # 4. Retries
@@ -113,7 +107,25 @@ retries: 3
 timeout_seconds: 120
 
 # =============================================================================
-# 6. A2A discovery metadata
+# 6. Multi-turn loop engineering
+# =============================================================================
+# Controls the autonomous tool-execution loop that allows the agent to
+# chain multiple MCP tool calls to fulfill a high-level objective.
+#
+# max_tool_rounds: Maximum number of LLM → tool → LLM cycles before the
+#   loop exits with a warning. Prevents infinite loops. Higher values
+#   allow more complex multi-step workflows (e.g., a debug-fix loop might
+#   need 20+). Default: 7.
+#
+# max_consecutive_repeats: If the LLM calls the same tool with identical
+#   arguments this many times in a row, the loop exits with a "stuck"
+#   warning. Prevents the LLM from retrying a deterministic failure
+#   endlessly. Default: 3.
+max_tool_rounds: 25
+max_consecutive_repeats: 3
+
+# =============================================================================
+# 7. A2A discovery metadata
 # =============================================================================
 a2a:
   display_name: "PerfPilot Script Agent"
