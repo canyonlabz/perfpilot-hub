@@ -69,8 +69,17 @@ def _resolve_playwright_url(agent_config: dict) -> str | None:
     return _DEFAULT_PLAYWRIGHT_URL_LOCAL
 
 
-def build_script_agent():
+def build_script_agent(stateful_client_holder: dict | None = None):
     """Construct and return the PerfPilot Script Agent.
+
+    Args:
+        stateful_client_holder: Optional mutable dict
+            ``{"client": Client | None}`` for Playwright browser tools.
+            When provided, ``browser_*`` tools use the shared persistent
+            client instead of per-call connections, preserving browser
+            state across the multi-turn tool loop. When ``None``
+            (default), all tools use per-call connections (backward-
+            compatible with non-Playwright workflows).
 
     Returns a ``ConversableAgent`` with:
     - JMeter MCP tools auto-discovered from the gateway
@@ -109,7 +118,9 @@ def build_script_agent():
     playwright_url = _resolve_playwright_url(agent_config)
     playwright_count = 0
     if playwright_url:
-        playwright_count = _register_playwright_tools(agent, playwright_url)
+        playwright_count = _register_playwright_tools(
+            agent, playwright_url, stateful_client_holder,
+        )
 
     total = jmeter_count + playwright_count
     logger.info(
@@ -147,8 +158,17 @@ def _register_gateway_tools(agent) -> int:
         )
 
 
-def _register_playwright_tools(agent, playwright_url: str) -> int:
-    """Auto-discover and register Playwright browser tools (direct connection)."""
+def _register_playwright_tools(
+    agent,
+    playwright_url: str,
+    stateful_client_holder: dict | None = None,
+) -> int:
+    """Auto-discover and register Playwright browser tools (direct connection).
+
+    When ``stateful_client_holder`` is provided, ``browser_*`` tools are
+    registered with a shared persistent client wrapper instead of the
+    default per-call connection wrapper.
+    """
     import asyncio
 
     from utils.mcp_tool_registry import register_mcp_tools_on_agent
@@ -158,15 +178,15 @@ def _register_playwright_tools(agent, playwright_url: str) -> int:
     except RuntimeError:
         loop = None
 
+    coro = register_mcp_tools_on_agent(
+        agent, playwright_url, PLAYWRIGHT_MCP_NAMESPACE,
+        stateful_client_holder=stateful_client_holder,
+    )
+
     if loop and loop.is_running():
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                asyncio.run,
-                register_mcp_tools_on_agent(agent, playwright_url, PLAYWRIGHT_MCP_NAMESPACE),
-            )
+            future = pool.submit(asyncio.run, coro)
             return future.result(timeout=30)
     else:
-        return asyncio.run(
-            register_mcp_tools_on_agent(agent, playwright_url, PLAYWRIGHT_MCP_NAMESPACE),
-        )
+        return asyncio.run(coro)

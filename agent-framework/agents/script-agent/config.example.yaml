@@ -89,6 +89,15 @@ mcp_tools:
 playwright_mcp:
   enabled: true
   # endpoint: "http://localhost:8931"
+  #
+  # Session persistence:
+  # browser_* tools require a persistent MCP session across the entire
+  # multi-turn tool loop. The framework handles this automatically —
+  # when `enabled: true`, the task executor opens a single persistent
+  # client before the loop starts and closes it when the loop exits.
+  # No user configuration is needed. The Playwright MCP URL is resolved
+  # from PLAYWRIGHT_MCP_URL env var, this config's `endpoint` value,
+  # or auto-detected (Docker vs local).
 
 # =============================================================================
 # 4. Retries

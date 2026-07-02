@@ -53,6 +53,10 @@ CODE_BASED_NAMESPACES: frozenset[str] = frozenset({
     "perfmemory", "msteams", "sharepoint",
 })
 
+STATEFUL_NAMESPACES: frozenset[str] = frozenset({
+    "browser",
+})
+
 _MAX_RETRY_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 5.0
 
@@ -144,6 +148,19 @@ def _is_api_based(tool_name: str) -> bool:
     return False
 
 
+def _is_stateful(tool_name: str) -> bool:
+    """Return True if ``tool_name`` belongs to a stateful namespace
+    requiring a persistent client connection across the tool loop.
+
+    Stateful tools (e.g. Playwright ``browser_*``) maintain server-side
+    session state (page, cookies, DOM) that must survive between calls.
+    """
+    for ns in STATEFUL_NAMESPACES:
+        if tool_name.startswith(ns + "_"):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Tool wrapper factories (proper closure capture, no default-arg hack)
 # ---------------------------------------------------------------------------
@@ -209,6 +226,52 @@ def _make_code_tool_wrapper(
     return _call_tool
 
 
+def _make_stateful_tool_wrapper(
+    tool_name: str,
+    client_holder: dict,
+) -> Callable[..., Coroutine[Any, Any, str]]:
+    """Build an async wrapper for a stateful MCP tool that uses a shared
+    persistent client reference instead of creating a new connection per call.
+
+    The ``client_holder`` dict contains a ``"client"`` key pointing to the
+    active ``fastmcp.Client`` instance. The client lifecycle is managed
+    externally — opened before the multi-turn loop starts, closed after
+    the loop exits (including error/early-exit paths).
+
+    Args:
+        tool_name: Fully-qualified MCP tool name (e.g. ``browser_navigate``).
+        client_holder: Mutable dict ``{"client": Client | None}`` shared
+            across all stateful wrappers for the same session.
+    """
+    async def _call_tool(**kwargs: Any) -> str:
+        client = client_holder.get("client")
+        if client is None:
+            return json.dumps({
+                "ok": False,
+                "error": {
+                    "type": "SessionNotAvailable",
+                    "message": (
+                        f"No persistent MCP session available for stateful "
+                        f"tool '{tool_name}'. The session may have been "
+                        f"closed or was never opened."
+                    ),
+                },
+            })
+        try:
+            result = await client.call_tool(tool_name, kwargs)
+            return _extract_and_normalize(result)
+        except Exception as e:
+            return json.dumps({
+                "ok": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)[:500],
+                },
+            })
+
+    return _call_tool
+
+
 # ---------------------------------------------------------------------------
 # Gateway catalog fetch (cached)
 # ---------------------------------------------------------------------------
@@ -248,6 +311,7 @@ async def register_mcp_tools_on_agent(
     agent: Any,
     gateway_url: str,
     allowed_namespaces: list[str],
+    stateful_client_holder: dict | None = None,
 ) -> int:
     """Fetch live MCP tool schemas from the FastMCP gateway and register
     them on an existing ``ConversableAgent`` with full JSON schemas.
@@ -276,6 +340,13 @@ async def register_mcp_tools_on_agent(
         allowed_namespaces: List of namespace prefixes to filter by
             (e.g. ``["datadog"]``). A tool named ``datadog_get_logs``
             matches the namespace ``"datadog"`` via ``<ns>_`` prefix.
+        stateful_client_holder: Optional mutable dict
+            ``{"client": Client | None}`` for stateful namespaces
+            (e.g. Playwright ``browser_*``). When provided, tools
+            belonging to ``STATEFUL_NAMESPACES`` use a shared
+            persistent client instead of per-call connections. When
+            ``None`` (default), all tools use per-call connections
+            (backward-compatible behavior).
 
     Returns:
         Count of tools successfully registered. Zero when the gateway
@@ -305,7 +376,9 @@ async def register_mcp_tools_on_agent(
         tool_description = getattr(mcp_tool, "description", "") or tool_name
         tool_schema = getattr(mcp_tool, "inputSchema", None)
 
-        if _is_api_based(tool_name):
+        if _is_stateful(tool_name) and stateful_client_holder is not None:
+            wrapper = _make_stateful_tool_wrapper(tool_name, stateful_client_holder)
+        elif _is_api_based(tool_name):
             wrapper = _make_api_tool_wrapper(tool_name, gateway_url)
         else:
             wrapper = _make_code_tool_wrapper(tool_name, gateway_url)

@@ -1485,7 +1485,7 @@ async def _run_mcp_specialist_agent(
         ),
     )
 
-    # ---- Build the specialist agent -----------------------------------
+    # ---- Load agent config early (needed for stateful detection) ------
     import sys
     from pathlib import Path
 
@@ -1495,25 +1495,6 @@ async def _run_mcp_specialist_agent(
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 
-    factory_name = f"build_{agent_name.replace('-', '_')}"
-    factory = getattr(module, factory_name, None)
-    if not callable(factory):
-        envelope["error"] = {
-            "type": "RuntimeError",
-            "message": (
-                f"Specialist module for '{agent_name}' does not export "
-                f"a '{factory_name}()' factory function."
-            ),
-        }
-        return envelope
-
-    try:
-        agent = await asyncio.to_thread(factory)
-    except Exception as exc:
-        log.exception("%s agent build failed for task %s", agent_name, task.task_id)
-        raise RuntimeError(f"{agent_name} agent build failed: {exc}") from exc
-
-    # ---- Load loop config from agent's config.yaml --------------------
     from utils.base_agent import resolve_agent_config_path
 
     agent_dir = framework_dir / "agents" / agent_name
@@ -1528,6 +1509,68 @@ async def _run_mcp_specialist_agent(
 
     max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
     max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
+
+    # ---- Detect stateful namespaces -----------------------------------
+    from utils.mcp_tool_registry import STATEFUL_NAMESPACES
+
+    all_namespaces = list(
+        agent_config.get("mcp_tools", {}).get("allowed_namespaces", [])
+    )
+    playwright_cfg = agent_config.get("playwright_mcp", {})
+    if isinstance(playwright_cfg, dict) and playwright_cfg.get("enabled", True):
+        all_namespaces.append("browser")
+
+    has_stateful = any(ns in STATEFUL_NAMESPACES for ns in all_namespaces)
+    stateful_client_holder: dict | None = {"client": None} if has_stateful else None
+
+    # ---- Build the specialist agent -----------------------------------
+    factory_name = f"build_{agent_name.replace('-', '_')}"
+    factory = getattr(module, factory_name, None)
+    if not callable(factory):
+        envelope["error"] = {
+            "type": "RuntimeError",
+            "message": (
+                f"Specialist module for '{agent_name}' does not export "
+                f"a '{factory_name}()' factory function."
+            ),
+        }
+        return envelope
+
+    try:
+        if stateful_client_holder is not None:
+            agent = await asyncio.to_thread(
+                factory, stateful_client_holder=stateful_client_holder,
+            )
+        else:
+            agent = await asyncio.to_thread(factory)
+    except Exception as exc:
+        log.exception("%s agent build failed for task %s", agent_name, task.task_id)
+        raise RuntimeError(f"{agent_name} agent build failed: {exc}") from exc
+
+    # ---- Open persistent client for stateful tools --------------------
+    stateful_client_ctx = None
+    if has_stateful and stateful_client_holder is not None:
+        resolve_fn = getattr(module, "_resolve_playwright_url", None)
+        playwright_url = resolve_fn(agent_config) if resolve_fn else None
+        if playwright_url:
+            from fastmcp import Client
+
+            try:
+                stateful_client_ctx = Client(playwright_url)
+                stateful_client_holder["client"] = (
+                    await stateful_client_ctx.__aenter__()
+                )
+                log.info(
+                    "Opened persistent MCP client for %s -> %s",
+                    agent_name, playwright_url,
+                )
+            except Exception as exc:
+                log.exception(
+                    "Failed to open persistent MCP client for %s at %s",
+                    agent_name, playwright_url,
+                )
+                stateful_client_ctx = None
+                stateful_client_holder["client"] = None
 
     # ---- Run multi-turn tool execution loop ---------------------------
     try:
@@ -1545,6 +1588,18 @@ async def _run_mcp_specialist_agent(
     except Exception as exc:
         log.exception("%s agent invocation failed for task %s", agent_name, task.task_id)
         raise RuntimeError(f"{agent_name} agent invocation failed: {exc}") from exc
+    finally:
+        if stateful_client_ctx is not None:
+            try:
+                await stateful_client_ctx.__aexit__(None, None, None)
+                log.info("Closed persistent MCP client for %s", agent_name)
+            except Exception:
+                log.warning(
+                    "Failed to cleanly close persistent MCP client for %s",
+                    agent_name,
+                )
+            if stateful_client_holder is not None:
+                stateful_client_holder["client"] = None
 
     await _broadcast(
         task.task_id,

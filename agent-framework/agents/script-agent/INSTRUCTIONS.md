@@ -128,10 +128,27 @@ This request requires multiple steps:
 3. Call `jmeter_get_browser_steps` with the `filename` from step 2 — use either
    the `absolute_path` or `relative_path` returned by `jmeter_get_test_specs`
    (both are accepted; prefer `absolute_path` when running in Docker)
-4. Call `jmeter_capture_network_traffic` to parse Playwright traces and map to spec steps
-5. Call `jmeter_analyze_network_traffic` to identify correlations and auto-generate variable names
-6. Call `jmeter_generate_jmeter_script` to create the JMX
-7. Report to Orchestrator and user the results and output:
+4. **Execute browser steps with Playwright:**
+   a. Call `browser_start_tracing` to begin recording network traffic
+   b. For each step returned by `jmeter_get_browser_steps`:
+      - Call `browser_snapshot` to get the current page state and element refs
+      - Execute the action using the correct tool based on the step instruction:
+        - `browser_navigate` — for URL navigation
+        - `browser_click` — click an element (use ref from snapshot, never guess)
+        - `browser_fill` — clear and type into a form field
+        - `browser_type` — append text to a field
+        - `browser_select_option` — select a dropdown value
+        - `browser_handle_dialog` — accept/dismiss alerts, confirms, prompts
+      - If the action fails (element not found), call `browser_snapshot` again
+        and retry once. If still fails, report the failure and continue to next step.
+      - If this is NOT the final step, call `browser_wait_for` with `time=5`
+        (5 seconds think time between steps). Do NOT wait after the last step.
+   c. Call `browser_stop_tracing` to finalize trace files
+   d. Do NOT close the browser — leave it open for manual inspection
+5. Call `jmeter_capture_network_traffic` to parse Playwright traces and map to spec steps
+6. Call `jmeter_analyze_network_traffic` to identify correlations and auto-generate variable names
+7. Call `jmeter_generate_jmeter_script` to create the JMX
+8. Report to Orchestrator and user the results and output:
 
 - The JMX script was created at `{jmx_path}`
 - `{correlation_count}` correlations were detected and parameterized
