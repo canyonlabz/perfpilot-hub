@@ -1431,6 +1431,8 @@ async def _run_mcp_specialist_agent(
     """
     payload = task.payload if isinstance(task.payload, dict) else {}
     test_run_id = payload.get("test_run_id")
+    if not test_run_id:
+        test_run_id = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
 
     user_message = None
     for key in ("user_message", "message", "text", "prompt"):
