@@ -130,8 +130,24 @@ timeout_seconds: 120
 #   arguments this many times in a row, the loop exits with a "stuck"
 #   warning. Prevents the LLM from retrying a deterministic failure
 #   endlessly. Default: 3.
+#
+# context_limit: Maximum token capacity of the model's context window.
+#   Used to calculate utilization_pct each loop iteration. If the model
+#   is changed (e.g., to gpt-4o with 128k), update this value to match.
+#   Default: 128000 (gpt-4o / gpt-4o-mini).
+#
+# compaction_threshold: Fraction of context_limit at which old tool
+#   results in conversation history are replaced with compact references
+#   (requires tool_call_traces persistence from B2). The most recent N
+#   tool results are always preserved intact. Default: 0.80 (80%).
+#
+# compaction_preserve_recent: Number of most-recent tool results to keep
+#   intact (not compacted) when compaction triggers. Default: 5.
 max_tool_rounds: 25
 max_consecutive_repeats: 3
+context_limit: 128000
+compaction_threshold: 0.80
+compaction_preserve_recent: 5
 
 # =============================================================================
 # 7. A2A discovery metadata

@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -57,6 +58,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from . import task_store
+from . import trace_store
 
 log = logging.getLogger(__name__)
 
@@ -1235,12 +1237,60 @@ async def _execute_tool_on_agent(
     return json.dumps(result, default=str)
 
 
+# ---------------------------------------------------------------------------
+# Token estimation for context pressure tracking (B3)
+# ---------------------------------------------------------------------------
+
+_tiktoken_encoder: Any = None
+_tiktoken_available: Optional[bool] = None
+
+
+def _get_tiktoken_encoder() -> Any:
+    """Lazy-load tiktoken encoder. Returns None if tiktoken is unavailable."""
+    global _tiktoken_encoder, _tiktoken_available
+    if _tiktoken_available is False:
+        return None
+    if _tiktoken_encoder is not None:
+        return _tiktoken_encoder
+    try:
+        import tiktoken
+        _tiktoken_encoder = tiktoken.encoding_for_model("gpt-4o")
+        _tiktoken_available = True
+        return _tiktoken_encoder
+    except (ImportError, Exception):
+        _tiktoken_available = False
+        log.info("tiktoken not available; using character-based token estimation")
+        return None
+
+
+def _estimate_token_count(messages: list[dict]) -> int:
+    """Estimate total tokens in a message list.
+
+    Uses tiktoken for accuracy when available, falls back to
+    character_count / 4 as a rough heuristic.
+    """
+    enc = _get_tiktoken_encoder()
+    total = 0
+    for msg in messages:
+        content = msg.get("content") or ""
+        if not isinstance(content, str):
+            content = json.dumps(content, default=str)
+        if enc is not None:
+            total += len(enc.encode(content))
+        else:
+            total += len(content) // 4
+        # Overhead per message (role, name, structural tokens)
+        total += 4
+    return total
+
+
 async def _run_multi_turn_tool_loop(
     agent: Any,
     messages: list[dict],
     *,
     max_tool_rounds: int,
     max_consecutive_repeats: int,
+    context_limit: int,
     task_id: Any,
     common: dict,
     agent_name: str,
@@ -1261,6 +1311,15 @@ async def _run_multi_turn_tool_loop(
     consecutive_repeats = 0
 
     for round_num in range(1, max_tool_rounds + 1):
+        # ---- Context pressure tracking (B3) -------------------------------
+        token_count = _estimate_token_count(messages)
+        utilization_pct = round(token_count / context_limit, 4) if context_limit > 0 else 0.0
+        log.info(
+            "%s task %s round %d: ~%d tokens, %.1f%% utilization (%d limit)",
+            agent_name, task_id, round_num,
+            token_count, utilization_pct * 100, context_limit,
+        )
+
         # ---- LLM call (sync AG2) ------------------------------------------
         reply = await asyncio.to_thread(_generate_reply_sync, agent, messages)
 
@@ -1321,15 +1380,30 @@ async def _run_multi_turn_tool_loop(
                     return warning, reply, tool_rounds, "consecutive_repeat_limit"
 
                 # ---- Execute the tool -------------------------------------
+                t0 = time.perf_counter_ns()
                 result_str = await _execute_tool_on_agent(agent, fn_name, fn_args)
+                latency_ms = trace_store.measure_latency_ms(t0)
 
                 result_ok = True
+                trace_error = None
                 try:
                     parsed = json.loads(result_str)
                     if isinstance(parsed, dict) and parsed.get("ok") is False:
                         result_ok = False
+                        trace_error = parsed.get("error")
                 except (json.JSONDecodeError, TypeError):
                     pass
+
+                # ---- Persist to tool_call_traces (fire-and-forget) --------
+                trace_store.schedule_trace_insert(
+                    task_id=task_id,
+                    agent_name=agent_name,
+                    tool_name=fn_name,
+                    args=fn_args,
+                    result=result_str,
+                    error=trace_error,
+                    latency_ms=latency_ms,
+                )
 
                 round_audit["results"].append({
                     "tool": fn_name,
@@ -1356,6 +1430,9 @@ async def _run_multi_turn_tool_loop(
                         "round": round_num,
                         "tools_called": tool_names,
                         "agent": agent_name,
+                        "context_tokens": token_count,
+                        "context_utilization_pct": round(utilization_pct * 100, 1),
+                        "context_limit": context_limit,
                     },
                     **common,
                 ),
@@ -1511,6 +1588,7 @@ async def _run_mcp_specialist_agent(
 
     max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
     max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
+    context_limit = int(agent_config.get("context_limit", 128000))
 
     # ---- Detect stateful namespaces -----------------------------------
     from utils.mcp_tool_registry import STATEFUL_NAMESPACES
@@ -1582,6 +1660,7 @@ async def _run_mcp_specialist_agent(
                 messages=messages_for_llm,
                 max_tool_rounds=max_tool_rounds,
                 max_consecutive_repeats=max_consecutive_repeats,
+                context_limit=context_limit,
                 task_id=task.task_id,
                 common=common,
                 agent_name=agent_name,
