@@ -4,24 +4,22 @@
 > test creation to results delivery, with a human at the controls when it
 > matters.**
 
-> ⚠️ **This module is in active development on the `ag2-agent-framework`
-> branch.** APIs, file layouts, configuration schemas, and database DDL
-> may change without notice until the branch merges to `main`.
+> ⚠️ **NOTE:** APIs,
+> configuration schemas, and database DDL are stabilizing but may
+> still change.
 >
 > **Operational today:** the orchestrator agent runs the real AG2
-> `ConversableAgent` with all four delegation tools wired, and the
-> **execution-agent** (BlazeMeter) is the first real specialist —
-> end-to-end proven against a live BlazeMeter test run on 2026-06-14
-> (start → wait → extract through the real MCP stack; all six artifact-
-> extraction steps succeeded; the orchestrator can delegate to it via
-> A2A with zero extra wiring on its end).
->
-> **Next up:** the remaining five specialist scaffolds (script,
-> monitoring, analysis, reporting, notifications) currently respond
-> with a documented `not_available` message while their specialist
-> behavior is being wired in. See the
-> [Current status](#-current-status) table at the bottom of this README
-> for what works today versus what is coming.
+> `ConversableAgent` with all four delegation tools wired, and two
+> real specialists are proven end-to-end: the **execution-agent**
+> (BlazeMeter — start → wait → extract through the real MCP stack;
+> all six artifact-extraction steps succeeded on 2026-06-14) and the
+> **script-agent** (Playwright browser automation — 25-round multi-turn
+> tool loop proven against BlazeDemo on 2026-07-05; Loop Engineering
+> with token counting, compaction, and per-iteration persistence live).
+> The remaining specialists (**monitoring**, **analysis**,
+> **reporting**, **notifications**) are all functional via their
+> respective MCP namespaces. See the
+> [Current status](#-current-status) table for the full breakdown.
 
 ---
 
@@ -180,12 +178,12 @@ to keep in sync — there is one tier with two doors.
 |---|---|
 | `a2a_server.py` | FastAPI entrypoint for the A2A surface on port 8001. Path-routes `/agents/{name}/...` to every enabled agent. |
 | `agui_server.py` | FastAPI entrypoint for the AG-UI / CopilotKit bridge on port 8002. Hosts `/copilotkit/`, `/api/sessions`, `/api/runs`, `/api/events` SSE, `/api/hitl/*`, and (coming) `/api/threads`. Multi-user owner-filtered. |
-| `agents/` | One subfolder per agent following a strict **four-file pattern** (`agent.py`, `agent_card.json`, `INSTRUCTIONS.md`, plus one of `config.yaml` / `config.example.yaml`). One orchestrator (`status: available`) + one specialist live today (`execution-agent` for BlazeMeter, `status: available`); five specialist scaffolds (`script-agent`, `monitoring-agent`, `analysis-agent`, `reporting-agent`, `notifications-agent`) coming next. |
-| `utils/` | Shared agent-layer infrastructure: LLM provider abstraction (OpenAI / Azure OpenAI / Ollama), per-agent loader, async PostgreSQL pool, session + thread + task + checkpoint + HITL stores, identity resolver, ownership guard, **FastMCP `StreamableHttpTransport` client** for routing every agent's tool calls through PerfPilot Hub with per-agent namespace allowlist filtering. |
+| `agents/` | One subfolder per agent following a strict **four-file pattern** (`agent.py`, `agent_card.json`, `INSTRUCTIONS.md`, plus one of `config.yaml` / `config.example.yaml`). One orchestrator + six specialists: **execution-agent** (BlazeMeter), **script-agent** (Playwright/JMeter with multi-turn tool loop and Loop Engineering), **monitoring-agent** (Datadog), **analysis-agent** (PerfAnalysis), **reporting-agent** (PerfReport + Confluence), **notifications-agent** (Teams/SharePoint). |
+| `utils/` | Shared agent-layer infrastructure: LLM provider abstraction (OpenAI / Azure OpenAI / Ollama), per-agent loader, async PostgreSQL pool, session + thread + task + checkpoint + HITL stores, identity resolver, ownership guard, **FastMCP `StreamableHttpTransport` client** for routing every agent's tool calls through PerfPilot Hub with per-agent namespace allowlist filtering, **trace store** for async fire-and-forget persistence of tool-call traces and token-ledger metrics. |
 | `workflows/` | Agent-to-agent Python pipelines (e2e, extraction, analysis-report, comparison). |
 | `frontend/` | CopilotKit React skeleton (`ui-react/`) plus the AG-UI bridge adapter. |
 | `config/` | Runtime YAML: global LLM defaults, per-agent enable/disable, session-cookie tunables. |
-| `sql/` | DDL for the new `perfagent_state` PostgreSQL database (seven JSONB tables: sessions, threads, tasks, checkpoints, conversation messages, tool-call traces, HITL approvals). |
+| `sql/` | DDL for the new `perfagent_state` PostgreSQL database (eight JSONB tables: sessions, threads, tasks, checkpoints, conversation messages, tool-call traces, HITL approvals, token ledger). |
 
 For the deeper folder map, conventions (async-everywhere, lazy heavy
 imports, four-file pattern), and per-agent config schema, see
@@ -306,62 +304,16 @@ function call that specialists invoke when they need a green light.
 
 ## 🛠️ Try it today
 
-> The full Docker-compose-based "one command and it runs" experience
-> is staged for a later milestone. Today, the framework is exercised
-> via Python smoke tests that boot the servers in-process and validate
-> end-to-end behavior.
-
 ### Prerequisites
 
 - Python 3.12+
 - Node.js 25.x and npm 11.x (for the Web UI)
 - Docker Desktop (for the database and MCP gateway containers)
 - PostgreSQL 18 with pgvector + Apache AGE (existing
-  `Dockerfile.pgvector-age.example` image works as-is — Epic 3 adds the
-  `perfagent_state` database additively on the same instance)
+  `Dockerfile.pgvector-age.example` image works as-is — the
+  `perfagent_state` database is provisioned additively on the same instance)
 - An LLM provider: OpenAI API key, Azure OpenAI deployment, or a local
   Ollama instance
-
-### Sanity-check the current build
-
-> **Note:** The `scripts/` folder and all smoke test scripts referenced below
-> are **gitignored** and not committed to the repository. They are local
-> development utilities used by the project maintainer during active
-> development. If you are cloning this branch, you will not see them.
-
-From the repo root:
-
-```bash
-# Start the existing perfmemory-db container (re-uses the existing image)
-docker compose -f docker/docker-compose-windows.yaml up -d perfmemory-db   # or -mac
-# Provision the new perfagent_state database additively
-python agent-framework/sql/provision.py
-
-# --- Foundation smokes (no MCP containers needed) ---
-python scripts/smoke_test_perfagent_state.py         # 25 checks: schema + CRUD + thread isolation
-python scripts/smoke_test_a2a_server.py              # ~73 checks: A2A surface + orchestrator + execution-agent cards + agent discovery
-python scripts/smoke_test_agui_server.py             # 77 checks: AG-UI bridge + multi-user isolation + thread CRUD + real orchestrator round-trip
-python scripts/smoke_test_orchestrator.py            # ~55 checks: full-stack orchestrator + orchestrator → execution-agent E2E (gated on real OPENAI_API_KEY)
-python scripts/smoke_test_llm_providers.py           # LLM provider abstraction
-
-# --- Specialist smokes (require the full docker compose stack with gateway-mcp up) ---
-python scripts/smoke_test_mcp_client.py              # FastMCP StreamableHttpTransport + namespace allowlist (gated on gateway-mcp /health)
-python scripts/smoke_test_execution_agent_tools.py   # 142 checks: mock-driven unit smoke for the 3 execution-agent tools + dispatcher (~5s)
-
-# --- Optional live smoke (real BlazeMeter run; ~5 min wall-clock) ---
-# python scripts/smoke_test_execution_agent.py       # 29 checks: live start → wait → extract against a real BlazeMeter test
-```
-
-A green run on the foundation smokes confirms the platform layer works
-on your machine. A green run on the specialist smokes confirms the
-real MCP wiring + the execution-agent end-to-end.
-
-> **Timing note for the live smoke:** BlazeMeter spins up its load
-> generators on-demand (spun up at test start, spun down when done).
-> A 1-minute test typically reports ~3–5 minutes wall-clock during the
-> load-generator initialization phase. This is expected vendor
-> behavior; the smoke's 300-second `wait_for_completion` timeout is
-> sized for it.
 
 ### Running the Web UI
 
@@ -457,46 +409,38 @@ See `.env.example` for the complete environment template, and
 [`frontend/ui/README.md` — Changing Ports](./frontend/ui/README.md#changing-ports)
 for step-by-step instructions.
 
-### How to follow along
+### Project structure
 
-PerfPilot Agents is being built in small, smoke-tested increments on
-the `ag2-agent-framework` branch. The high-level
-[Current status](#-current-status) table below tracks what works
-today, and the [V2 architecture spec](#-where-to-learn-more) (kept in
-the repository owner's local checkout while the design churns) is
-gradually being distilled into the committed `AGENTS.md` and per-module
-docstrings as features stabilize.
+For the deeper folder map, agent conventions (async-everywhere, lazy heavy
+imports, four-file pattern), and per-agent config schema, see
+[**AGENTS.md**](./AGENTS.md).
 
 ---
 
 ## 📊 Current status
 
-A coarse, public-facing roadmap. Internal feature-level tracking lives
-in the repository owner's local working notes; this table is updated
-as each milestone group stabilizes.
-
 | Area | Status | Notes |
 |---|---|---|
-| `perfagent_state` PostgreSQL database (7 JSONB tables) | ✅ Working | Sessions, threads, tasks, checkpoints, conversation messages, tool-call traces, HITL approvals — all CRUD with smoke coverage |
+| `perfagent_state` PostgreSQL database (8 JSONB tables) | ✅ Working | Sessions, threads, tasks, checkpoints, conversation messages, tool-call traces, HITL approvals, token ledger — all CRUD with smoke coverage |
 | Multi-LLM provider abstraction (OpenAI / Azure OpenAI / Ollama) | ✅ Working | Per-agent override + global fallback + TLS via standard env vars |
-| **A2A server** (port 8001) — discovery, `tasks/send`, SSE, polling, webhooks, cancel | ✅ Working | All three callback patterns operational; orchestrator + execution-agent dispatched as real AG2; remaining specialists return `stub` responses until promoted |
-| **AG-UI / CopilotKit bridge** (port 8002) — `/copilotkit/`, sessions, runs, events, HITL, thread CRUD | ✅ Working | Backend complete with real orchestrator at `/copilotkit/` and DB-loaded conversation history; Next.js + CopilotKit React frontend in progress |
+| **A2A server** (port 8001) — discovery, `tasks/send`, SSE, polling, webhooks, cancel | ✅ Working | All three callback patterns operational; orchestrator dispatches to all specialists via real AG2 `ConversableAgent` instances |
+| **AG-UI / CopilotKit bridge** (port 8002) — `/copilotkit/`, sessions, runs, events, HITL, thread CRUD | ✅ Working | Backend complete with real orchestrator at `/copilotkit/` and DB-loaded conversation history; Next.js + CopilotKit React frontend operational |
 | Multi-user isolation (Alice cannot see Bob's data) | ✅ Working | Owner-filtering on every read endpoint; Bob-vs-Alice isolation blocks across all sessions / runs / events / HITL / thread endpoints |
 | Persistent threads (ChatGPT-style multi-day resumption) | ✅ Working | DB-loaded conversation history wired on BOTH the AG-UI `/copilotkit/` surface AND the A2A `tasks/send` surface; close your browser, come back tomorrow, the conversation continues |
 | Identity resolver (vendor-neutral, Epic 4-ready) | ✅ Working | Four-step chain: upstream-auth → `X-PerfPilot-Token` → `perfpilot_token` cookie → freshly minted token |
 | 🎯 Orchestrator agent | ✅ Working | Real AG2 `ConversableAgent` with all four delegation tools wired (`list_available_specialists`, `delegate_to_specialist`, `check_task_status`, `request_human_approval`); `agent_card.json status: available` (v0.2.0); HITL approval round-trip end-to-end proven |
 | **FastMCP `StreamableHttpTransport` client** (`utils/mcp_client.py`) | ✅ Working | Routes every agent's tool calls through PerfPilot Hub with per-agent namespace allowlist filtering (`PermissionError` raised before network round-trip for out-of-allowlist calls); `<ns>_` prefix matching defends against prefix-collision edge cases |
 | 🚀 Execution agent (BlazeMeter) — first vertical slice | ✅ Working | Three vendor-agnostic tools live (`start_performance_test` / `wait_for_completion` / `extract_test_run_artifacts`); `agent_card.json status: available` (v0.2.0); **first live BlazeMeter end-to-end run proven on 2026-06-14** (all 6 artifact-extraction steps succeeded); orchestrator-to-execution-agent A2A contract proven with **zero orchestrator code changes** |
-| 📝 Script agent (Playwright / HAR / Swagger / existing-JMX input) | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; tool wiring follows once the external Microsoft Playwright MCP container ships |
-| 📊 Monitoring agent (Datadog) | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; runs concurrently with execution to pull metrics during the test window |
-| 🔍 Analysis agent | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; multi-source correlation (BlazeMeter + Datadog), bottleneck identification, SLA verdict |
-| 📄 Reporting agent (with multi-round HITL revision) | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; drafts → human reviews → revises → publishes to Confluence |
-| 📣 Notifications agent (vendor-neutral events) | ⏭ Next (F3.9 scaffold) | Stub scaffold lands in the next milestone; emits `TestRunCompleted` events; Teams / SharePoint / Slack adapters wired in Epic 4 |
-| CopilotKit React frontend (Next.js 15 + AG-UI) | 🟡 In progress | Chat interface, thread management, persistent history, and streaming all working (PBI 3.6.7.1–3.6.7.3 + BUG-02 complete); agent catalog, task streaming, HITL UI, and results display coming next. See [`frontend/ui/README.md`](./frontend/ui/README.md) |
-| Docker compose for the agent stack (`docker-compose-a2a-local-*.yaml`) | ⏭ Planned | Four services: gateway, agents, db, Playwright MCP. Today the agent runtime is exercised via Python smokes that boot servers in-process |
+| 📝 Script agent (Playwright / HAR / Swagger / existing-JMX input) | ✅ Working | Multi-turn tool loop operational (25 rounds proven); Playwright browser automation E2E proven (2026-07-05); Loop Engineering live — tiktoken-based token counting, context compaction at 80% utilization, tool-call trace + token-ledger DB persistence, SSE-broadcast of `context_tokens` / `context_utilization_pct`; 53 tools registered (19 JMeter + 34 Playwright) |
+| 📊 Monitoring agent (Datadog) | ✅ Working | Pulls host metrics, Kubernetes metrics, APM traces, and logs during the test window via the `datadog` MCP namespace; correlates with BlazeMeter results by timestamp |
+| 🔍 Analysis agent | ✅ Working | Multi-source correlation (BlazeMeter + Datadog), bottleneck identification, SLA verdict via the `perfanalysis` MCP namespace |
+| 📄 Reporting agent (with multi-round HITL revision) | ✅ Working | Drafts performance reports via `perfreport` MCP namespace; publishes to Confluence via `confluence` namespace; supports multi-round HITL revision workflow |
+| 📣 Notifications agent (vendor-neutral events) | 🔮 Pending | Emits `TestRunCompleted` events; MS Teams and SharePoint adapters wired via `msteams` and `sharepoint` MCP namespaces |
+| CopilotKit React frontend (Next.js 15 + AG-UI) | 🟡 In progress | Chat interface, thread management, persistent history, and streaming all working; agent catalog, task streaming, HITL UI, token usage indicator, and results display coming next. See [`frontend/ui/README.md`](./frontend/ui/README.md) |
+| Docker compose for the full stack (`docker-compose-full-*.yaml`) | ✅ Working | Three services: PerfMemory DB (PostgreSQL + pgvector + AGE), Gateway MCP, Playwright MCP. Platform variants for Windows and macOS |
 | Auth + OpenTelemetry hooks (default-off, Epic 4-ready) | 🟡 Hooks reserved | Placeholders in place; activation deferred to cloud deployment |
 | Azure Container Apps / EntraID / Key Vault deployment | 🔮 Epic 4 | Vendor-agnostic by design — other clouds and auth providers are first-class targets |
-| End-to-end workflows (`workflows/e2e_perf_pipeline.py` etc.) | 🔮 Later epic | Once the remaining specialists are real |
+| End-to-end workflows (`workflows/e2e_perf_pipeline.py` etc.) | 🟡 In progress | Agent-to-agent pipelines (extraction, analysis-report, comparison) orchestrating multi-specialist handoffs |
 | `Dockerfile.agents` + production-grade container | 🔮 Later epic | Local dev today; container hardening with the cloud-deploy milestone |
 
 **Legend:** ✅ working today · 🟡 in progress · ⏭ next up · 🔮 later
@@ -526,18 +470,14 @@ milestone
 
 ## 📜 License
 
-MIT — see [../LICENSE](../LICENSE). Copyright © 2025 Jason Smallcanyon.
+MIT — see [../LICENSE](../LICENSE). Copyright © 2026 Jason Smallcanyon.
 
 ---
 
 ## 🤝 Contributing
 
-PerfPilot Agents is in the active-construction phase on the
-`ag2-agent-framework` branch. Issues, suggestions, and discussion are
-welcome via GitHub — but be aware that everything in this folder is
-subject to change while the foundation stabilizes. When the branch
-merges to `main` it will arrive with a polished documentation pass, a
-stable A2A + AG-UI contract, and a Docker-compose-based quick-start
-that does not require running smoke tests by hand.
+Issues, suggestions, and pull requests are welcome via GitHub. See
+[AGENTS.md](./AGENTS.md) for coding conventions, the four-file agent
+pattern, and the async-everywhere contract.
 
 Happy testing! ✈️
