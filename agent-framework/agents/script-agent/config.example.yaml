@@ -149,6 +149,16 @@ context_limit: 128000
 compaction_threshold: 0.80
 compaction_preserve_recent: 5
 
+# force_tool_choice: When true, sets tool_choice="required" on the LLM
+#   config, forcing the model to always call a tool rather than generating
+#   conversational filler between steps. This can reduce unnecessary LLM
+#   turns during browser automation but may cause issues if the model needs
+#   to return a text response (e.g., final status report). Only enable
+#   after validating that the A1 autonomous execution directive (Section
+#   2.1 of INSTRUCTIONS.md) alone does not sufficiently reduce filler
+#   turns. Default: false (opt-in).
+force_tool_choice: false
+
 # =============================================================================
 # 7. A2A discovery metadata
 # =============================================================================

@@ -134,3 +134,104 @@ def schedule_trace_insert(
 def measure_latency_ms(start_ns: int) -> int:
     """Convert a `time.perf_counter_ns()` start value to elapsed milliseconds."""
     return int((time.perf_counter_ns() - start_ns) / 1_000_000)
+
+
+# ---------------------------------------------------------------------------
+# Token ledger (B5) — per-iteration context pressure metrics
+# ---------------------------------------------------------------------------
+
+
+async def insert_token_ledger_entry(
+    *,
+    task_id: Any,
+    agent_name: str,
+    loop_iteration: int,
+    prompt_tokens: int,
+    utilization_pct: float,
+    completion_tokens: Optional[int] = None,
+    mcp_overhead_tokens: Optional[int] = None,
+    compaction_triggered: bool = False,
+    compacted_count: int = 0,
+    tokens_freed: int = 0,
+) -> Optional[int]:
+    """Insert a token ledger row and return the row id.
+
+    Args:
+        task_id: UUID of the owning agent_task.
+        agent_name: The agent running the loop.
+        loop_iteration: 1-indexed loop round number.
+        prompt_tokens: Estimated tokens in the messages before LLM call.
+        utilization_pct: Fraction of context window used (0.0–1.0).
+        completion_tokens: Tokens in the LLM response (if available).
+        mcp_overhead_tokens: Estimated tokens from MCP tool results.
+        compaction_triggered: Whether compaction fired this iteration.
+        compacted_count: Number of tool results compacted.
+        tokens_freed: Tokens reclaimed by compaction.
+
+    Returns:
+        The row `id` on success, or None if the insert failed.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO token_ledger
+                (task_id, agent_name, loop_iteration, prompt_tokens,
+                 completion_tokens, mcp_overhead_tokens, utilization_pct,
+                 compaction_triggered, compacted_count, tokens_freed)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+            """,
+            task_id,
+            agent_name,
+            loop_iteration,
+            prompt_tokens,
+            completion_tokens,
+            mcp_overhead_tokens,
+            utilization_pct,
+            compaction_triggered,
+            compacted_count,
+            tokens_freed,
+        )
+    return row["id"] if row else None
+
+
+def schedule_token_ledger_insert(
+    *,
+    task_id: Any,
+    agent_name: str,
+    loop_iteration: int,
+    prompt_tokens: int,
+    utilization_pct: float,
+    completion_tokens: Optional[int] = None,
+    mcp_overhead_tokens: Optional[int] = None,
+    compaction_triggered: bool = False,
+    compacted_count: int = 0,
+    tokens_freed: int = 0,
+) -> None:
+    """Fire-and-forget wrapper for insert_token_ledger_entry()."""
+
+    async def _safe_insert() -> None:
+        try:
+            await insert_token_ledger_entry(
+                task_id=task_id,
+                agent_name=agent_name,
+                loop_iteration=loop_iteration,
+                prompt_tokens=prompt_tokens,
+                utilization_pct=utilization_pct,
+                completion_tokens=completion_tokens,
+                mcp_overhead_tokens=mcp_overhead_tokens,
+                compaction_triggered=compaction_triggered,
+                compacted_count=compacted_count,
+                tokens_freed=tokens_freed,
+            )
+        except Exception:
+            log.warning(
+                "Failed to persist token_ledger entry for %s round %d (task %s)",
+                agent_name,
+                loop_iteration,
+                task_id,
+                exc_info=True,
+            )
+
+    asyncio.create_task(_safe_insert())

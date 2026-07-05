@@ -104,6 +104,9 @@ def build_script_agent(stateful_client_holder: dict | None = None):
 
     llm_config = build_llm_config(agent_config.get("llm_provider"))
 
+    if agent_config.get("force_tool_choice", False):
+        llm_config["tool_choice"] = "required"
+
     agent = ConversableAgent(
         name="script-agent",
         system_message=system_message,

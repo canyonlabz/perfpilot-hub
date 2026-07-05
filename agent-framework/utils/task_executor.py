@@ -1284,6 +1284,73 @@ def _estimate_token_count(messages: list[dict]) -> int:
     return total
 
 
+def _compact_tool_results(
+    messages: list[dict],
+    *,
+    preserve_recent: int = 5,
+) -> tuple[list[dict], int]:
+    """Replace old tool result messages with compact references.
+
+    Preserves:
+    - The most recent `preserve_recent` tool results (chronological order)
+    - Any tool result that appears after the last `browser_navigate` call
+      (current page session safety — the model needs DOM state context)
+    - All non-tool messages (system, user, assistant)
+
+    Args:
+        messages: The conversation messages list (mutated in place).
+        preserve_recent: Number of most-recent tool results to keep intact.
+
+    Returns:
+        Tuple of (compacted messages list, number of messages compacted).
+    """
+    tool_indices = [
+        i for i, m in enumerate(messages) if m.get("role") == "tool"
+    ]
+    if not tool_indices:
+        return messages, 0
+
+    # Find the last browser_navigate call to establish page session boundary
+    last_navigate_idx = -1
+    for i, m in enumerate(messages):
+        if m.get("role") == "assistant" and isinstance(m.get("tool_calls"), list):
+            for tc in m["tool_calls"]:
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {}).get("name", "")
+                    if fn == "browser_navigate":
+                        last_navigate_idx = i
+
+    # Determine which tool results are eligible for compaction
+    protected_indices = set(tool_indices[-preserve_recent:])
+
+    compacted_count = 0
+    for idx in tool_indices:
+        if idx in protected_indices:
+            continue
+        if idx > last_navigate_idx and last_navigate_idx >= 0:
+            continue
+
+        msg = messages[idx]
+        content = msg.get("content", "")
+        # Skip if already compacted
+        if isinstance(content, str) and content.startswith("[Compacted:"):
+            continue
+
+        tool_call_id = msg.get("tool_call_id", "unknown")
+        compact_ref = (
+            f"[Compacted: tool_call_id={tool_call_id}] "
+            f"Result stored in tool_call_traces. "
+            f"Original size: ~{len(content)} chars."
+        )
+        messages[idx] = {
+            **msg,
+            "content": compact_ref,
+        }
+        compacted_count += 1
+
+    return messages, compacted_count
+
+
 async def _run_multi_turn_tool_loop(
     agent: Any,
     messages: list[dict],
@@ -1291,6 +1358,8 @@ async def _run_multi_turn_tool_loop(
     max_tool_rounds: int,
     max_consecutive_repeats: int,
     context_limit: int,
+    compaction_threshold: float,
+    compaction_preserve_recent: int,
     task_id: Any,
     common: dict,
     agent_name: str,
@@ -1318,6 +1387,39 @@ async def _run_multi_turn_tool_loop(
             "%s task %s round %d: ~%d tokens, %.1f%% utilization (%d limit)",
             agent_name, task_id, round_num,
             token_count, utilization_pct * 100, context_limit,
+        )
+
+        # ---- Compaction trigger (B4) --------------------------------------
+        if utilization_pct >= compaction_threshold:
+            messages, compacted_count = _compact_tool_results(
+                messages, preserve_recent=compaction_preserve_recent,
+            )
+            if compacted_count > 0:
+                new_token_count = _estimate_token_count(messages)
+                tokens_freed = token_count - new_token_count
+                log.warning(
+                    "%s task %s round %d: COMPACTION triggered at %.1f%% — "
+                    "compacted %d tool results, freed ~%d tokens (now ~%d)",
+                    agent_name, task_id, round_num,
+                    utilization_pct * 100, compacted_count,
+                    tokens_freed, new_token_count,
+                )
+                token_count = new_token_count
+                utilization_pct = round(token_count / context_limit, 4) if context_limit > 0 else 0.0
+        else:
+            compacted_count = 0
+            tokens_freed = 0
+
+        # ---- Persist token ledger entry (B5, fire-and-forget) -------------
+        trace_store.schedule_token_ledger_insert(
+            task_id=task_id,
+            agent_name=agent_name,
+            loop_iteration=round_num,
+            prompt_tokens=token_count,
+            utilization_pct=utilization_pct,
+            compaction_triggered=compacted_count > 0,
+            compacted_count=compacted_count,
+            tokens_freed=tokens_freed,
         )
 
         # ---- LLM call (sync AG2) ------------------------------------------
@@ -1589,6 +1691,8 @@ async def _run_mcp_specialist_agent(
     max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
     max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
     context_limit = int(agent_config.get("context_limit", 128000))
+    compaction_threshold = float(agent_config.get("compaction_threshold", 0.80))
+    compaction_preserve_recent = int(agent_config.get("compaction_preserve_recent", 5))
 
     # ---- Detect stateful namespaces -----------------------------------
     from utils.mcp_tool_registry import STATEFUL_NAMESPACES
@@ -1661,6 +1765,8 @@ async def _run_mcp_specialist_agent(
                 max_tool_rounds=max_tool_rounds,
                 max_consecutive_repeats=max_consecutive_repeats,
                 context_limit=context_limit,
+                compaction_threshold=compaction_threshold,
+                compaction_preserve_recent=compaction_preserve_recent,
                 task_id=task.task_id,
                 common=common,
                 agent_name=agent_name,
