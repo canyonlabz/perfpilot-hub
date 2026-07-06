@@ -10,8 +10,8 @@
 #      `agents/<name>/config.yaml` does not declare an `llm_provider` block.
 #   2. agents — per-agent enable/disable flags. Disabled agents are skipped
 #      by the orchestrator and return 404 on their A2A `agent_card.json`.
-#   3. web_ui — settings for the AG-UI bridge (port 8002): currently the
-#      `perfpilot_token` session-cookie tunables.
+#   3. web_ui — settings for the AG-UI bridge (port 8002): session-cookie
+#      tunables and optional UI display preferences.
 
 # =============================================================================
 # Default LLM Provider (global fallback)
@@ -68,7 +68,7 @@ default_llm_provider:
 agents:
   orchestrator:        { enabled: true }
   execution-agent:     { enabled: true }
-  script-agent:        { enabled: false }
+  script-agent:        { enabled: true }
   monitoring-agent:    { enabled: true }
   analysis-agent:      { enabled: true }
   reporting-agent:     { enabled: true }
@@ -118,3 +118,16 @@ web_ui:
     #            React UI is served from a fundamentally different origin
     #            than the AG-UI bridge AND both are HTTPS.
     samesite: lax
+
+  # Task-context usage indicator. When enabled, each running task card in
+  # the Tasks panel shows a compact progress bar with the specialist
+  # agent's current token count and context-window utilization percentage
+  # — an FYI "Here is your current task context window % utilization."
+  #
+  # This covers the *task* context (specialist agent tool-loop messages),
+  # not the *conversation* context (orchestrator thread history).
+  #
+  # Defaults to true. Set to false to suppress the indicator entirely;
+  # token data still flows via SSE but is not rendered in the UI.
+  context_indicator:
+    enabled: true

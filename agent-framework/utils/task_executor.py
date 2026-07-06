@@ -1363,7 +1363,7 @@ async def _run_multi_turn_tool_loop(
     task_id: Any,
     common: dict,
     agent_name: str,
-) -> tuple[str, Any, list[dict], str]:
+) -> tuple[str, Any, list[dict], str, dict | None]:
     """Async multi-turn tool-execution loop for specialist agents.
 
     Implements the loop engineering pattern:
@@ -1373,11 +1373,15 @@ async def _run_multi_turn_tool_loop(
       4. Exit conditions: max rounds, consecutive repeats, or errors
 
     Returns:
-        Tuple of (reply_text, raw_reply, tool_rounds_audit, exit_reason).
+        Tuple of (reply_text, raw_reply, tool_rounds_audit, exit_reason,
+        final_context_metrics) where final_context_metrics is a dict with
+        context_tokens, context_utilization_pct, and context_limit (or None
+        if no tool rounds executed).
     """
     tool_rounds: list[dict] = []
     last_tool_signature: str | None = None
     consecutive_repeats = 0
+    final_context_metrics: dict | None = None
 
     for round_num in range(1, max_tool_rounds + 1):
         # ---- Context pressure tracking (B3) -------------------------------
@@ -1427,11 +1431,11 @@ async def _run_multi_turn_tool_loop(
 
         # ---- Exit: text response (success) --------------------------------
         if isinstance(reply, str):
-            return reply, reply, tool_rounds, "text_response"
+            return reply, reply, tool_rounds, "text_response", final_context_metrics
 
         # ---- Exit: None / empty (model failure) ---------------------------
         if reply is None:
-            return "", None, tool_rounds, "null_reply"
+            return "", None, tool_rounds, "null_reply", final_context_metrics
 
         # ---- Dict response: check for tool calls -------------------------
         if isinstance(reply, dict):
@@ -1439,7 +1443,7 @@ async def _run_multi_turn_tool_loop(
             if not tool_calls:
                 content = reply.get("content", "")
                 text = content if isinstance(content, str) else str(content) if content else ""
-                return text, reply, tool_rounds, "text_response"
+                return text, reply, tool_rounds, "text_response", final_context_metrics
 
             # ---- Execute tool calls ---------------------------------------
             messages.append(reply)
@@ -1523,6 +1527,12 @@ async def _run_multi_turn_tool_loop(
 
             # ---- SSE progress broadcast -----------------------------------
             tool_names = [tc["name"] for tc in round_audit["tool_calls"]]
+            final_context_metrics = {
+                "context_tokens": token_count,
+                "context_utilization_pct": round(utilization_pct * 100, 1),
+                "context_limit": context_limit,
+            }
+
             await _broadcast(
                 task_id,
                 TaskEvent(
@@ -1532,9 +1542,7 @@ async def _run_multi_turn_tool_loop(
                         "round": round_num,
                         "tools_called": tool_names,
                         "agent": agent_name,
-                        "context_tokens": token_count,
-                        "context_utilization_pct": round(utilization_pct * 100, 1),
-                        "context_limit": context_limit,
+                        **final_context_metrics,
                     },
                     **common,
                 ),
@@ -1542,7 +1550,7 @@ async def _run_multi_turn_tool_loop(
             continue
 
         # ---- Exit: unexpected reply type ----------------------------------
-        return str(reply), reply, tool_rounds, "unexpected_reply_type"
+        return str(reply), reply, tool_rounds, "unexpected_reply_type", final_context_metrics
 
     # ---- Exit: max rounds reached -----------------------------------------
     log.warning(
@@ -1554,6 +1562,7 @@ async def _run_multi_turn_tool_loop(
         None,
         tool_rounds,
         "max_rounds_reached",
+        final_context_metrics,
     )
 
 
@@ -1758,7 +1767,7 @@ async def _run_mcp_specialist_agent(
 
     # ---- Run multi-turn tool execution loop ---------------------------
     try:
-        reply_text, raw_reply, tool_rounds, exit_reason = (
+        reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
             await _run_multi_turn_tool_loop(
                 agent=agent,
                 messages=messages_for_llm,
@@ -1802,6 +1811,10 @@ async def _run_mcp_specialist_agent(
     envelope["tool_rounds"] = tool_rounds
     envelope["total_rounds"] = len(tool_rounds)
     envelope["exit_reason"] = exit_reason
+    if ctx_metrics:
+        envelope["context_tokens"] = ctx_metrics["context_tokens"]
+        envelope["context_utilization_pct"] = ctx_metrics["context_utilization_pct"]
+        envelope["context_limit"] = ctx_metrics["context_limit"]
     return envelope
 
 

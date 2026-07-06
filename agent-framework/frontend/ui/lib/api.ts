@@ -23,6 +23,28 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return res.json();
 }
 
+// --- Settings API ---
+
+export interface WebUISettings {
+  context_indicator: {
+    enabled: boolean;
+  };
+}
+
+const DEFAULT_SETTINGS: WebUISettings = {
+  context_indicator: { enabled: true },
+};
+
+export async function fetchSettings(): Promise<WebUISettings> {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) return DEFAULT_SETTINGS;
+    return res.json();
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
 // --- Thread API ---
 
 export async function listThreads(

@@ -605,6 +605,18 @@ def _register_routes(app: FastAPI) -> None:
     async def health() -> dict:
         return {"status": "ok", "service": "agui", "version": SERVER_VERSION}
 
+    @app.get("/api/settings", tags=["meta"])
+    async def get_settings() -> dict:
+        """Return frontend-relevant display preferences from agents.yaml.
+
+        Lightweight, no auth required — only non-sensitive UI toggles.
+        """
+        return {
+            "context_indicator": {
+                "enabled": agents_config.get_context_indicator_enabled(FRAMEWORK_DIR),
+            },
+        }
+
     # -- AG-UI SSE event stream (PBI 3.6.2) --------------------------------------
     # Browser clients (typically CopilotKit's React UI) follow a task they
     # already started elsewhere by subscribing to this endpoint with the

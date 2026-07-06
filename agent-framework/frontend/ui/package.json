@@ -13,6 +13,7 @@
     "@copilotkit/react-core": "^1.60.1",
     "@copilotkit/react-ui": "^1.60.1",
     "@copilotkit/runtime": "^1.60.1",
+    "@tailwindcss/typography": "^0.5.20",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "lucide-react": "^0.400.0",

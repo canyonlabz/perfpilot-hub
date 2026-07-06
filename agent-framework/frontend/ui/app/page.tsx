@@ -7,7 +7,7 @@ import { ThreadSidebar } from "@/components/sidebar/thread-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { CatalogPanel } from "@/components/catalog/catalog-panel";
 import { TaskProgressPanel } from "@/components/tasks/task-progress-panel";
-import { fetchCurrentSession, listThreads, createThread } from "@/lib/api";
+import { fetchCurrentSession, fetchSettings, listThreads, createThread } from "@/lib/api";
 import type { Thread } from "@/lib/types";
 
 const STORAGE_KEY = "perfpilot_active_thread_id";
@@ -17,6 +17,7 @@ export default function HomePage() {
   const [initialized, setInitialized] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
+  const [contextIndicatorEnabled, setContextIndicatorEnabled] = useState(true);
 
   useEffect(() => {
     async function init() {
@@ -27,6 +28,9 @@ export default function HomePage() {
         // the browser through that path. This call ensures a consistent
         // token across CopilotKit and all other API calls.
         await fetchCurrentSession().catch(() => {});
+
+        const settings = await fetchSettings();
+        setContextIndicatorEnabled(settings.context_indicator.enabled);
 
         const data = await listThreads();
         const storedId = localStorage.getItem(STORAGE_KEY);
@@ -123,7 +127,10 @@ export default function HomePage() {
         )}
         {showTasks && (
           <aside className="w-80 border-l bg-card flex-shrink-0">
-            <TaskProgressPanel threadId={activeThreadId} />
+            <TaskProgressPanel
+              threadId={activeThreadId}
+              showContextIndicator={contextIndicatorEnabled}
+            />
           </aside>
         )}
       </div>

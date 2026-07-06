@@ -11,9 +11,10 @@ const POLL_INTERVAL_MS = 15_000;
 
 interface TaskProgressPanelProps {
   threadId: string | null;
+  showContextIndicator?: boolean;
 }
 
-export function TaskProgressPanel({ threadId }: TaskProgressPanelProps) {
+export function TaskProgressPanel({ threadId, showContextIndicator = true }: TaskProgressPanelProps) {
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +134,7 @@ export function TaskProgressPanel({ threadId }: TaskProgressPanelProps) {
                 key={task.task_id}
                 taskId={task.task_id}
                 initialSnapshot={task}
+                showContextIndicator={showContextIndicator}
               />
             ))}
           </div>
@@ -149,6 +151,7 @@ export function TaskProgressPanel({ threadId }: TaskProgressPanelProps) {
                 key={task.task_id}
                 taskId={task.task_id}
                 initialSnapshot={task}
+                showContextIndicator={showContextIndicator}
               />
             ))}
           </div>

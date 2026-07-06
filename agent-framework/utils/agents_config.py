@@ -3,10 +3,11 @@
 Provides small helpers used by the A2A server, the AG-UI bridge, and
 the orchestrator:
 
-    load_agents_config()        -> the full parsed dict
-    is_agent_enabled()          -> per-agent on/off bool
-    list_enabled_agents()       -> list of agent names that are enabled
-    get_session_cookie_config() -> AG-UI session-cookie tunables
+    load_agents_config()             -> the full parsed dict
+    is_agent_enabled()               -> per-agent on/off bool
+    list_enabled_agents()            -> list of agent names that are enabled
+    get_session_cookie_config()      -> AG-UI session-cookie tunables
+    get_context_indicator_enabled()  -> context-usage bar on/off bool
 
 The first call caches the parsed YAML in-process. Hot-reload during dev is
 left for future Features; for Epic 3, restarting the server picks up edits.
@@ -187,3 +188,17 @@ def get_session_cookie_config(framework_dir: Optional[Path] = None) -> SessionCo
         secure=secure,
         samesite=samesite,
     )
+
+
+def get_context_indicator_enabled(framework_dir: Optional[Path] = None) -> bool:
+    """Return whether the task-context usage indicator is enabled.
+
+    Reads ``web_ui.context_indicator.enabled`` from ``agents.yaml``.
+    Defaults to ``True`` when the key is missing or the entire
+    ``context_indicator`` block is absent — the indicator is opt-out.
+    """
+    raw = (
+        (load_agents_config(framework_dir).get("web_ui") or {})
+        .get("context_indicator") or {}
+    )
+    return bool(raw.get("enabled", True))

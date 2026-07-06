@@ -56,6 +56,14 @@ export interface AgentCatalogResponse {
   known_agents: string[];
 }
 
+// --- Context Token Metrics (extracted from TaskEvent.result) ---
+
+export interface ContextTokenMetrics {
+  context_tokens: number;
+  context_utilization_pct: number;
+  context_limit: number;
+}
+
 // --- Task Streaming ---
 
 export type TaskStatus =

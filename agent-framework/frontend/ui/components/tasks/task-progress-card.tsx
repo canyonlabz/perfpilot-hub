@@ -15,12 +15,14 @@ import { fetchHitlForTask } from "@/lib/api";
 import { TaskStep } from "./task-step";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { ApprovalStatus } from "@/components/hitl/approval-status";
-import type { TaskSnapshot, TaskEvent, TaskStatus, HitlApproval } from "@/lib/types";
+import type { TaskSnapshot, TaskEvent, TaskStatus, HitlApproval, ContextTokenMetrics } from "@/lib/types";
 import { TERMINAL_STATUSES } from "@/lib/types";
+import { ContextUsageBar } from "./context-usage-bar";
 
 interface TaskProgressCardProps {
   taskId: string;
   initialSnapshot?: TaskSnapshot;
+  showContextIndicator?: boolean;
 }
 
 interface StepEntry {
@@ -153,7 +155,7 @@ function formatErrorSummary(error: Record<string, unknown>): React.ReactNode {
 
 const HITL_POLL_INTERVAL_MS = 3_000;
 
-export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardProps) {
+export function TaskProgressCard({ taskId, initialSnapshot, showContextIndicator = true }: TaskProgressCardProps) {
   const [agentName, setAgentName] = useState(initialSnapshot?.agent_name ?? "");
   const [currentStatus, setCurrentStatus] = useState<TaskStatus>(
     initialSnapshot?.status ?? "pending"
@@ -169,6 +171,18 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
   const [expanded, setExpanded] = useState(true);
   const stepsEndRef = useRef<HTMLDivElement>(null);
   const stepCounterRef = useRef(0);
+
+  const [tokenMetrics, setTokenMetrics] = useState<ContextTokenMetrics | null>(() => {
+    const r = initialSnapshot?.result;
+    if (!r) return null;
+    const ct = r.context_tokens;
+    const cu = r.context_utilization_pct;
+    const cl = r.context_limit;
+    if (typeof ct === "number" && typeof cu === "number" && typeof cl === "number") {
+      return { context_tokens: ct, context_utilization_pct: cu, context_limit: cl };
+    }
+    return null;
+  });
 
   // HITL approval state
   const [hitlApprovals, setHitlApprovals] = useState<HitlApproval[]>([]);
@@ -229,7 +243,15 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
       },
       onStateChange: (event: TaskEvent) => {
         setCurrentStatus(event.status);
-        if (event.result) setResult(event.result);
+        if (event.result) {
+          setResult(event.result);
+          const ct = event.result.context_tokens;
+          const cu = event.result.context_utilization_pct;
+          const cl = event.result.context_limit;
+          if (typeof ct === "number" && typeof cu === "number" && typeof cl === "number") {
+            setTokenMetrics({ context_tokens: ct, context_utilization_pct: cu, context_limit: cl });
+          }
+        }
         if (event.error) setError(event.error);
         setConnectionError(false);
         addStep(event.status, event.progress, event.timestamp);
@@ -372,6 +394,16 @@ export function TaskProgressCard({ taskId, initialSnapshot }: TaskProgressCardPr
               <p>{formatResultSummary(result)}</p>
             </div>
           )}
+        </div>
+      )}
+
+      {showContextIndicator && tokenMetrics && (
+        <div className="border-t px-3 py-1.5">
+          <ContextUsageBar
+            tokens={tokenMetrics.context_tokens}
+            utilizationPct={tokenMetrics.context_utilization_pct}
+            limit={tokenMetrics.context_limit}
+          />
         </div>
       )}
 
