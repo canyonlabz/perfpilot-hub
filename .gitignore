@@ -223,32 +223,43 @@ __marimo__/
 # ignore .sqlite3 database file
 *.sqlite3
 
-# =========================================================
-# Repo: mcp-perf-suite
-# Ignore the following files and directories
-# =========================================================
+# =================================================================================
+# *** New Repo Name: perfpilot-hub ***
+# Original Repo Name: mcp-perf-suite
+# 
+# The following files and directories are ignored to prevent sensitive information, 
+# local configurations, and temporary files from being tracked in version control.
+# =================================================================================
 
-# ignore environment variables & uv.lock files
+#
+# Ignore Environment variables & uv.lock files
+#
 .env
 blazemeter-mcp/.env
 blazemeter-mcp/uv.lock
 datadog-mcp/.env
 datadog-mcp/uv.lock
+confluence-mcp/.env
 perfanalysis-mcp/.env
 perfanalysis-mcp/uv.lock
 perfmemory-mcp/.env
-perfmemory-mcp/taxonomy.yaml
-perfmemory-mcp/tools/logs/*.log
-confluence-mcp/.env
+perfreport-mcp/.env
 msgraph-mcp/.env
-docker/.env
+sharepoint-mcp/.env
 streamlit-ui/.env
+docker/.env
+docker/.env.gateway
 
 # Ignore docker data and local YAML files for Docker Compose, which may contain sensitive information or be specific to individual environments
 docker/data/*
 docker/docker-compose.yaml
+docker/Dockerfile.gateway
 docker/Dockerfile.pgvector-age
 docker/ca-bundle.pem
+docker/certs/jmeter/*.jks
+!docker/certs/jmeter/.gitkeep
+docker/certs/corporate/*
+!docker/certs/corporate/.gitkeep
 
 # ignore performance test results and logs
 artifacts/*
@@ -295,7 +306,8 @@ jmeter-mcp/jmeter_config.yaml
 jmeter-mcp/correlation_config.yaml
 jmeter-mcp/test-specs/*
 jmeter-mcp/test-specs/azure-devops/*.txt
-jmeter-mcp/test-specs/jira/*.txt
+jmeter-mcp/test-specs/azure-devops/*.md
+
 !jmeter-mcp/test-specs/README.md
 !jmeter-mcp/test-specs/web-flows/blazedemo_product_purchase.md
 !jmeter-mcp/test-specs/azure-devops/
@@ -303,12 +315,35 @@ jmeter-mcp/test-specs/jira/*.txt
 !jmeter-mcp/test-specs/jira/
 !jmeter-mcp/test-specs/jira/README.md
 
+# Ignore local BlazeMeter configuration files
+blazemeter-mcp/config.yaml
+
+# Ignore local Confluence configuration files
+confluence-mcp/config.yaml
+
 # Ignore local Datadog environments and custom queries files
+datadog-mcp/config.yaml
 datadog-mcp/environments.json
 datadog-mcp/custom_queries.json
 
+# Ignore local Gateway configuration files
+gateway-mcp/config.yaml
+
+# Ignore the following Microsoft Teams local configuration files
+msteams-mcp/config.yaml
+msteams-mcp/templates/*
+!msteams-mcp/templates/default-notification-*.md
+
 # Ignore local config YAML files for perfanalysis-mcp
+perfanalysis-mcp/config.yaml
 perfanalysis-mcp/slas.yaml
+perfanalysis-mcp/test/**
+perfanalysis-mcp/tests/**
+
+# Ignore local config YAML files for perfmemory-mcp
+perfmemory-mcp/config.yaml
+perfmemory-mcp/taxonomy.yaml
+perfmemory-mcp/tools/logs/*.log
 
 # Ignore all files in perfreport-mcp/templates except the default templates
 perfreport-mcp/templates/*
@@ -318,51 +353,34 @@ perfreport-mcp/config.yaml
 perfreport-mcp/report_config.yaml
 perfreport-mcp/chart_schema.yaml
 perfreport-mcp/chart_colors.yaml
-
-# Ignore all test files in perfanalysis-mcp and perfreport-mcp
-perfanalysis-mcp/test/**
-perfanalysis-mcp/tests/**
 perfreport-mcp/test/**
 perfreport-mcp/tests/**
+
+# Ignore local config YAML files for sharepoint-mcp
+sharepoint-mcp/config.yaml
 
 # Ignore the following Streamlit files and directories
 streamlit-ui/config.yaml
 
-# Ignore the following Microsoft Teams local configuration files
-msteams-mcp/config.yaml
-msteams-mcp/templates/*
-!msteams-mcp/templates/default-notification-*.md
-
-# Ignore the following Microsoft SharePoint local configuration files
-sharepoint-mcp/config.yaml
-
-# Ignore the following PerfPilot Hub (gateway) local configuration files
-gateway-mcp/config.yaml
-
 # Ignore Docker gateway config files (users copy from .example versions)
 docker/config/gateway/config.yaml
 docker/config/blazemeter/config.yaml
+docker/config/confluence/config.yaml
 docker/config/datadog/config.yaml
 docker/config/datadog/environments.json
 docker/config/datadog/custom_queries.json
-docker/config/perfanalysis/config.yaml
-docker/config/perfanalysis/slas.yaml
-docker/config/perfreport/config.yaml
-docker/config/perfreport/report_config.yaml
-docker/config/perfreport/chart_schema.yaml
-docker/config/perfreport/chart_colors.yaml
-docker/config/confluence/config.yaml
 docker/config/jmeter/config.yaml
 docker/config/jmeter/jmeter_config.yaml
 docker/config/jmeter/correlation_config.yaml
 docker/config/jmeter/jmeter-overrides.properties
+docker/config/perfanalysis/config.yaml
+docker/config/perfanalysis/slas.yaml
 docker/config/perfmemory/config.yaml
 docker/config/perfmemory/taxonomy.yaml
-docker/certs/jmeter/*.jks
-!docker/certs/jmeter/.gitkeep
-docker/certs/corporate/*
-!docker/certs/corporate/.gitkeep
-docker/.env.gateway
+docker/config/perfreport/config.yaml
+docker/config/perfreport/report_config.yaml
+docker/config/perfreport/chart_schema.yaml
+docker/config/perfreport/chart_colors.yaml
 
 # Ignore the following AG2 Agent Framework local configuration files (operators
 # copy from .example versions). The .env file is already covered by the global

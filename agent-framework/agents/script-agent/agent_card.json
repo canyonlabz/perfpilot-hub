@@ -1,7 +1,7 @@
 {
   "name": "script-agent",
   "display_name": "PerfPilot Script Agent",
-  "description": "Specialist agent for JMeter script creation, debugging, and iterative refinement in the PerfPilot Agents framework. Owns the full script lifecycle: convert HAR files, Swagger/OpenAPI specs, or Playwright recordings to JMX scripts, edit and analyze script components, run JMeter smoke tests, and iteratively debug with log analysis. Playwright browser automation tools are deferred to F3.12 (pending Playwright MCP container).",
+  "description": "Specialist agent for JMeter script creation, debugging, and iterative refinement in the PerfPilot Agents framework. Owns the full script lifecycle: convert HAR files, Swagger/OpenAPI specs, or Playwright recordings to JMX scripts, edit and analyze script components, run JMeter smoke tests, and iteratively debug with log analysis.",
   "url": "/agents/script-agent",
   "version": "0.2.0",
   "status": "available",
@@ -10,7 +10,8 @@
     "jmeter",
     "har",
     "swagger",
-    "epic-3"
+    "playwright",
+    "performance"
   ],
   "capabilities": {
     "streaming": true,
@@ -19,6 +20,7 @@
     "human_in_the_loop": false
   },
   "skills": [
+    "Convert Playwright recordings to JMeter network capture format",
     "Convert HAR files to JMeter network capture format",
     "Convert Swagger/OpenAPI specs to JMeter network capture format",
     "Generate JMeter JMX scripts from captured network traffic",
@@ -35,19 +37,11 @@
     "feature": "3.10",
     "pbi_scaffolded_at": "3.9.1",
     "pbi_promoted_at": "3.10.6",
-    "promotion_status": "partial (JMeter MCP only; Playwright deferred to F3.12)",
-    "mcp_namespaces": ["jmeter"],
+    "promotion_status": "fully promoted",
+    "mcp_namespaces": ["jmeter","perfmemory","playwright"],
     "mcp_tool_discovery": "auto (register_mcp_tools_on_agent at build time)",
-    "deferred_to_f3_12": {
-      "playwright_mcp": "browser_* tools require Playwright MCP container",
-      "blocked_tools": [
-        "jmeter_capture_network_traffic",
-        "jmeter_get_browser_steps",
-        "jmeter_get_test_specs",
-        "jmeter_archive_playwright_traces"
-      ]
-    },
     "input_modes": [
+      "Playwright recording trace files",
       "HAR file (Chrome DevTools / Fiddler / mitmproxy / Postman export)",
       "Swagger 2.x or OpenAPI 3.x specification (JSON or YAML)",
       "Existing JMeter script reference"
