@@ -1483,7 +1483,7 @@ async def _run_multi_turn_tool_loop(
                     log.warning(
                         "%s task %s: %s", agent_name, task_id, warning,
                     )
-                    return warning, reply, tool_rounds, "consecutive_repeat_limit"
+                    return warning, reply, tool_rounds, "consecutive_repeat_limit", final_context_metrics
 
                 # ---- Execute the tool -------------------------------------
                 t0 = time.perf_counter_ns()
