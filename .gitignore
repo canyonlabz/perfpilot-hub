@@ -239,29 +239,24 @@ __marimo__/
 !.env.example
 !.env.*.example
 
+# Ignore all config.yaml files
+config.yaml
+config.yml
+
+# But keep example config files
+!config.example.yaml
+!config.example.yml
+!*.example.yaml
+!*.example.yml
+
+# ignore config.yaml files for Windows or Mac systems (NOTE: These files are specific to OS, but can be re-enabled by commenting out the following lines)
+**/config.mac.yaml
+**/config.windows.yaml
+
 # Ignore lock files (environment specific, auto-generated)
 uv.lock
 poetry.lock
 package-lock.json
-
-#
-# Ignore Environment variables & uv.lock files
-#
-.env
-blazemeter-mcp/.env
-blazemeter-mcp/uv.lock
-datadog-mcp/.env
-datadog-mcp/uv.lock
-confluence-mcp/.env
-perfanalysis-mcp/.env
-perfanalysis-mcp/uv.lock
-perfmemory-mcp/.env
-perfreport-mcp/.env
-msgraph-mcp/.env
-sharepoint-mcp/.env
-streamlit-ui/.env
-docker/.env
-docker/.env.gateway
 
 # Ignore docker data and local YAML files for Docker Compose, which may contain sensitive information or be specific to individual environments
 docker/data/*
@@ -279,51 +274,6 @@ artifacts/*
 !artifacts/.gitkeep
 !artifacts/README.md
 
-# Ignore all config.yaml files
-config.yaml
-config.yml
-
-# But keep example config files
-!config.example.yaml
-!config.example.yml
-!*.example.yaml
-!*.example.yml
-
-# ignore config.yaml files for Windows or Mac systems (NOTE: These files are specific to OS, but can be re-enabled by commenting out the following lines)
-**/config.mac.yaml
-**/config.windows.yaml
-
-# ignore temp documentation files, but include the main documentation markdown files
-docs/*
-!docs/apache_age_installation_guide.md
-!docs/apache_age_viewer_guide.md
-!docs/report_template_guidelines.md
-!docs/datadog_query_guide.md
-!docs/jmeter_mcp_configuration_guide.md
-!docs/metrics_calculations_and_display.md
-!docs/sla_configuration_guide.md
-!docs/har_adapter_guide.md
-!docs/har_jmx_comparison_guide.md
-!docs/artifacts_guide.md
-!docs/jmeter_hitl_user_guide.md
-!docs/large_file_handling.md
-!docs/correlation_analysis_guide.md
-!docs/perfanalysis_techniques_guide.md
-!docs/perfmemory_user_guide.md
-!docs/pgvector_installation_guide.md
-!docs/playwright_mcp_configuration_guide.md
-!docs/troubleshooting/
-!docs/troubleshooting/age-viewer-fix-on-macbook.md
-!docs/troubleshooting/pgvector-fix-on-macbook.md
-!docs/troubleshooting/rancher-desktop-fix.md
-!docs/README.md
-
-# Re-include the changelogs directory itself
-!docs/changelogs/
-
-# Re-include everything inside changelogs
-!docs/changelogs/**
-
 # Ignore local JMeter configuration files and all custom JMeter MCP test-spec files
 jmeter-mcp/jmeter_config.yaml
 jmeter-mcp/correlation_config.yaml
@@ -338,33 +288,20 @@ jmeter-mcp/test-specs/azure-devops/*.md
 !jmeter-mcp/test-specs/jira/
 !jmeter-mcp/test-specs/jira/README.md
 
-# Ignore local BlazeMeter configuration files
-blazemeter-mcp/config.yaml
-
-# Ignore local Confluence configuration files
-confluence-mcp/config.yaml
-
 # Ignore local Datadog environments and custom queries files
-datadog-mcp/config.yaml
 datadog-mcp/environments.json
 datadog-mcp/custom_queries.json
 
-# Ignore local Gateway configuration files
-gateway-mcp/config.yaml
-
 # Ignore the following Microsoft Teams local configuration files
-msteams-mcp/config.yaml
 msteams-mcp/templates/*
 !msteams-mcp/templates/default-notification-*.md
 
 # Ignore local config YAML files for perfanalysis-mcp
-perfanalysis-mcp/config.yaml
 perfanalysis-mcp/slas.yaml
 perfanalysis-mcp/test/**
 perfanalysis-mcp/tests/**
 
 # Ignore local config YAML files for perfmemory-mcp
-perfmemory-mcp/config.yaml
 perfmemory-mcp/taxonomy.yaml
 perfmemory-mcp/tools/logs/*.log
 
@@ -372,18 +309,11 @@ perfmemory-mcp/tools/logs/*.log
 perfreport-mcp/templates/*
 !perfreport-mcp/templates/default_*.md
 # Ignore local config YAML files for perfreport-mcp
-perfreport-mcp/config.yaml
 perfreport-mcp/report_config.yaml
 perfreport-mcp/chart_schema.yaml
 perfreport-mcp/chart_colors.yaml
 perfreport-mcp/test/**
 perfreport-mcp/tests/**
-
-# Ignore local config YAML files for sharepoint-mcp
-sharepoint-mcp/config.yaml
-
-# Ignore the following Streamlit files and directories
-streamlit-ui/config.yaml
 
 # Ignore Docker gateway config files (users copy from .example versions)
 docker/config/gateway/config.yaml
