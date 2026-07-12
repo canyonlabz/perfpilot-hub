@@ -231,6 +231,19 @@ __marimo__/
 # local configurations, and temporary files from being tracked in version control.
 # =================================================================================
 
+# Ignore all .env files
+.env
+.env.*
+
+# But keep .env example files
+!.env.example
+!.env.*.example
+
+# Ignore lock files (environment specific, auto-generated)
+uv.lock
+poetry.lock
+package-lock.json
+
 #
 # Ignore Environment variables & uv.lock files
 #
@@ -265,6 +278,16 @@ docker/certs/corporate/*
 artifacts/*
 !artifacts/.gitkeep
 !artifacts/README.md
+
+# Ignore all config.yaml files
+config.yaml
+config.yml
+
+# But keep example config files
+!config.example.yaml
+!config.example.yml
+!*.example.yaml
+!*.example.yml
 
 # ignore config.yaml files for Windows or Mac systems (NOTE: These files are specific to OS, but can be re-enabled by commenting out the following lines)
 **/config.mac.yaml
