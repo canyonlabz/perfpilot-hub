@@ -760,26 +760,84 @@ def _extract_thread_id_from_payload(payload: Any) -> Optional[str]:
 def _extract_user_message_from_payload(payload: Any) -> Optional[str]:
     """Pull the user's prompt out of the A2A task body.
 
-    Accepts a handful of common shapes so naive callers do not need to
-    learn one canonical key:
-      - `payload["text"]`
-      - `payload["message"]`
-      - `payload["prompt"]`
-      - whole payload (stringified) as a last resort
+    Resolution order per the A2A Upstream Request Data Contract
+    (Appendix A):
+      1. ``payload["message"]``
+      2. ``payload["text"]``
+      3. ``payload["prompt"]``
+      4. First ``text`` Part in ``payload["parts"]``
+      5. Composed prompt from all Parts (when ``parts[]`` is present)
+      6. Whole payload (stringified) as a last resort
+
+    When ``parts[]`` is present and contains structured content (ADO
+    work items, test cases, test configuration), the Parts parser
+    composes a rich prompt that includes all Parts content formatted
+    for the orchestrator LLM.  The top-level ``message`` field (when
+    present) is prepended as the primary user intent.
     """
     if not isinstance(payload, dict):
         return str(payload) if payload is not None else None
-    for key in ("text", "message", "prompt"):
+
+    # ── Step 1-3: Top-level message fields (contract precedence) ──
+    top_level_message = None
+    for key in ("message", "text", "prompt"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value
-    # Strip metadata keys then stringify the remainder so payload-as-body
-    # callers (e.g. PBI 3.7.9 smoke without a `text` field) still get a
-    # coherent prompt.
+            top_level_message = value
+            break
+
+    # ── Step 4-5: Parts parsing ──
+    from . import a2a_parts_parser
+
+    parsed = a2a_parts_parser.parse_request_body(payload)
+
+    if parsed.has_parts and parsed.prompt:
+        if top_level_message:
+            return f"{top_level_message}\n\n{parsed.prompt}"
+        return parsed.prompt
+
+    if top_level_message:
+        # Append metadata context if available from the request
+        metadata_context = _format_metadata_context(parsed.metadata)
+        if metadata_context:
+            return f"{top_level_message}\n\n{metadata_context}"
+        return top_level_message
+
+    # ── Step 4 fallback: first text Part (no composed prompt) ──
+    fallback = a2a_parts_parser.resolve_user_message(payload)
+    if fallback:
+        return fallback
+
+    # ── Step 6: stringify the public payload ──
     public = {k: v for k, v in payload.items() if not k.startswith("_")}
     if public:
         return json.dumps(public)
     return None
+
+
+def _format_metadata_context(metadata: dict) -> str:
+    """Format extracted upstream metadata as context lines for the LLM.
+
+    Only includes metadata fields that carry actionable context.
+    Returns an empty string when nothing useful is present.
+    """
+    if not metadata:
+        return ""
+
+    lines: list[str] = []
+    context_keys = {
+        "upstream_framework": "Upstream framework",
+        "environment": "Target environment",
+        "requested_workflow": "Requested workflow",
+    }
+    for key, label in context_keys.items():
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            lines.append(f"- {label}: {value}")
+
+    if not lines:
+        return ""
+    return "Upstream context:\n" + "\n".join(lines)
 
 
 # =============================================================================
