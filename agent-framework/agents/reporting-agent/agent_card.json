@@ -3,8 +3,18 @@
   "display_name": "PerfPilot Reporting Agent",
   "description": "Specialist agent for performance report generation, multi-round HITL revision, and Confluence publishing in the PerfPilot Agents framework. Owns the final-mile delivery pipeline: chart generation, Markdown report assembly, AI-driven report revision, and Confluence page creation with chart image attachments.",
   "url": "/agents/reporting-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "status": "available",
+  "supportedInterfaces": [
+    {
+      "url": "https://{host}:{port}/agents/reporting-agent",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "PerfPilot"
+  },
   "tags": [
     "reporting",
     "charts",
@@ -14,20 +24,69 @@
   ],
   "capabilities": {
     "streaming": true,
+    "pushNotifications": true,
+    "extendedAgentCard": false,
     "long_running_tasks": true,
     "webhook_subscribers": true,
     "human_in_the_loop": true
   },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "text/markdown", "application/json"],
   "skills": [
-    "Generate performance charts (response-time, throughput, error-rate, infrastructure PNGs)",
-    "Assemble structured Markdown performance test reports from templates",
-    "Discover revisable report sections and prepare revision context",
-    "AI-driven report section revision with human-in-the-loop feedback",
-    "Generate comparison reports analyzing multiple test runs side-by-side",
-    "Create or update Confluence pages with report content",
-    "Attach chart images to Confluence pages",
-    "Navigate Confluence spaces and search for existing pages",
-    "Manage report templates and chart color configurations"
+    {
+      "id": "generate_performance_charts",
+      "name": "Generate performance charts",
+      "description": "Generates performance chart images (response-time, throughput, error-rate, infrastructure PNGs) from test run data for inclusion in reports.",
+      "tags": ["charts", "visualization", "png", "performance"]
+    },
+    {
+      "id": "assemble_markdown_report",
+      "name": "Assemble structured Markdown performance test reports from templates",
+      "description": "Assembles structured Markdown performance test reports from configurable templates, embedding analysis results, chart references, and metadata.",
+      "tags": ["report", "markdown", "template", "assembly"]
+    },
+    {
+      "id": "discover_revisable_sections",
+      "name": "Discover revisable report sections and prepare revision context",
+      "description": "Discovers which sections of a generated report are revisable and prepares the context needed for AI-driven revision.",
+      "tags": ["report", "revision", "discovery", "hitl"]
+    },
+    {
+      "id": "revise_report_section",
+      "name": "AI-driven report section revision with human-in-the-loop feedback",
+      "description": "Performs AI-driven revision of report sections (executive summary, key observations, issues table) incorporating human-in-the-loop feedback for iterative refinement.",
+      "tags": ["report", "revision", "ai", "hitl"]
+    },
+    {
+      "id": "generate_comparison_report",
+      "name": "Generate comparison reports analyzing multiple test runs side-by-side",
+      "description": "Generates comparison reports that analyze multiple test runs side-by-side, highlighting performance trends, regressions, and improvements.",
+      "tags": ["report", "comparison", "multi-run", "trends"]
+    },
+    {
+      "id": "create_confluence_page",
+      "name": "Create or update Confluence pages with report content",
+      "description": "Creates or updates Confluence wiki pages with the generated report content, handling page creation, content formatting, and versioning.",
+      "tags": ["confluence", "publishing", "wiki"]
+    },
+    {
+      "id": "attach_charts_to_confluence",
+      "name": "Attach chart images to Confluence pages",
+      "description": "Uploads and attaches chart image files to Confluence pages, linking them to the appropriate report sections.",
+      "tags": ["confluence", "charts", "attachments"]
+    },
+    {
+      "id": "navigate_confluence_spaces",
+      "name": "Navigate Confluence spaces and search for existing pages",
+      "description": "Navigates Confluence spaces and searches for existing pages to determine where to publish reports or find prior test results.",
+      "tags": ["confluence", "search", "navigation"]
+    },
+    {
+      "id": "manage_report_templates",
+      "name": "Manage report templates and chart color configurations",
+      "description": "Manages report templates (report_config.yaml), chart schema definitions (chart_schema.yaml), and chart color configurations (chart_colors.yaml).",
+      "tags": ["templates", "configuration", "charts"]
+    }
   ],
   "metadata": {
     "epic": "3",
@@ -46,6 +105,11 @@
       "analysis-agent (artifacts/{test_run_id}/analysis/)",
       "execution-agent (artifacts/{test_run_id}/blazemeter/)",
       "monitoring-agent (artifacts/{test_run_id}/datadog/)"
-    ]
+    ],
+    "perfpilot_capabilities": {
+      "long_running_tasks": true,
+      "webhook_subscribers": true,
+      "human_in_the_loop": true
+    }
   }
 }

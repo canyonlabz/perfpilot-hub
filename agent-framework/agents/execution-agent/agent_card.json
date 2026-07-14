@@ -3,8 +3,18 @@
   "display_name": "PerfPilot Execution Agent",
   "description": "Specialist agent for performance-test execution and post-test artifact extraction in the PerfPilot Agents framework. Owns three agent tools (vendor-agnostic by name; BlazeMeter-only today): `start_performance_test` kicks off a run against a pre-existing test definition; `wait_for_completion` polls the underlying load-testing tool until the run is terminal; `extract_test_run_artifacts` runs the canonical 6-step extractor recipe (results -> artifacts base path -> per-load-generator artifact processing -> public report -> aggregate CSV -> JMeter log analysis) and returns a structured JSON describing the artifact bundle. Artifacts land on the BlazeMeter MCP's configured volume-mount endpoint (host filesystem locally; cloud storage in future ACA-style deployments); the agent never reads or writes those paths itself. The orchestrator opens any required Human-in-the-Loop gates before delegating to this agent; this agent never opens HITL prompts itself. Future features will add JMX upload (gated on the JMeter upload MCP tool) and multi-vendor execution (Gatling / Locust / k6) behind the same agent-tool names. See `agent-framework/agents/execution-agent/INSTRUCTIONS.md` for the runtime system prompt and `agent-framework/AGENTS.md` for framework conventions.",
   "url": "/agents/execution-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "status": "available",
+  "supportedInterfaces": [
+    {
+      "url": "https://{host}:{port}/agents/execution-agent",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "PerfPilot"
+  },
   "tags": [
     "execution",
     "blazemeter",
@@ -13,10 +23,14 @@
   ],
   "capabilities": {
     "streaming": true,
+    "pushNotifications": true,
+    "extendedAgentCard": false,
     "long_running_tasks": true,
     "webhook_subscribers": true,
     "human_in_the_loop": false
   },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"],
   "skills": [
     {
       "id": "start_performance_test",
@@ -28,8 +42,8 @@
         "Kick off a fresh performance run for the kobrakai smoke test.",
         "Launch the load test against test_id=14491287 and give me the run_id."
       ],
-      "inputModes": ["text", "application/json"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
     },
     {
       "id": "wait_for_completion",
@@ -41,8 +55,8 @@
         "Block until run 1234567 is terminal, then tell me how it ended.",
         "Is the load test done yet? Wait for it before extracting artifacts."
       ],
-      "inputModes": ["text", "application/json"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
     },
     {
       "id": "extract_test_run_artifacts",
@@ -54,8 +68,8 @@
         "Run the 6-step BlazeMeter extractor for test_run_id 2026-06-14-smoke.",
         "Pull the JTL, JMeter log, aggregate CSV, and public report URL for the latest run."
       ],
-      "inputModes": ["text", "application/json"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
     }
   ],
   "metadata": {
@@ -71,6 +85,11 @@
     "task_executor_wired_at": "3.8.6",
     "status_flipped_to_available_at": "3.8.7",
     "mcp_namespaces_today": ["blazemeter", "jmeter"],
-    "future_vendor_expansion": "Same agent-tool names will plug into Gatling / Locust / k6 MCPs in a later feature, selected by a per-test vendor config. The agent-tool contract is stable; only internal MCP wiring changes."
+    "future_vendor_expansion": "Same agent-tool names will plug into Gatling / Locust / k6 MCPs in a later feature, selected by a per-test vendor config. The agent-tool contract is stable; only internal MCP wiring changes.",
+    "perfpilot_capabilities": {
+      "long_running_tasks": true,
+      "webhook_subscribers": true,
+      "human_in_the_loop": false
+    }
   }
 }

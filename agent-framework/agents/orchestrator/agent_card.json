@@ -3,8 +3,23 @@
   "display_name": "PerfPilot Orchestrator",
   "description": "Coordinator agent for the PerfPilot performance-testing pipeline. Routes user requests to specialist agents (script, execution, monitoring, analysis, reporting, notifications), supervises long-running tasks, and brokers human-in-the-loop approvals. All four skills enumerated below are now operational: the orchestrator can discover enabled specialists, delegate tasks to them via the local A2A surface, poll their status, and open blocking Human-in-the-Loop approval prompts. Specialist agents themselves are still being scaffolded (most run as documented stubs today); the orchestrator handles that gracefully by surfacing the stub status to the caller honestly. See `agent-framework/agents/orchestrator/INSTRUCTIONS.md` for the runtime system prompt and `agent-framework/AGENTS.md` for framework conventions.",
   "url": "/agents/orchestrator",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "status": "available",
+  "supportedInterfaces": [
+    {
+      "url": "https://{host}:{port}",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    },
+    {
+      "url": "https://{host}:{port}/a2a/v1",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "PerfPilot"
+  },
   "tags": [
     "orchestrator",
     "routing",
@@ -14,10 +29,14 @@
   ],
   "capabilities": {
     "streaming": true,
+    "pushNotifications": true,
+    "extendedAgentCard": false,
     "long_running_tasks": true,
     "webhook_subscribers": true,
     "human_in_the_loop": true
   },
+  "defaultInputModes": ["text/plain", "text/markdown", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"],
   "skills": [
     {
       "id": "list_available_specialists",
@@ -29,8 +48,8 @@
         "List the agents you can delegate to.",
         "Show me the active pipeline."
       ],
-      "inputModes": ["text"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain"],
+      "outputModes": ["text/plain", "application/json"]
     },
     {
       "id": "delegate_to_specialist",
@@ -42,8 +61,8 @@
         "Have the script-agent generate a JMX from this HAR.",
         "Ask the monitoring-agent to start pulling Datadog metrics for run abc123."
       ],
-      "inputModes": ["text", "application/json"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
     },
     {
       "id": "check_task_status",
@@ -55,8 +74,8 @@
         "Status of task abc-123 on execution-agent?",
         "Has the report draft come back from the reporting-agent?"
       ],
-      "inputModes": ["text", "application/json"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
     },
     {
       "id": "request_human_approval",
@@ -68,8 +87,8 @@
         "The report draft is ready for your review.",
         "Specialist failed twice in a row — should I retry or abort?"
       ],
-      "inputModes": ["text", "application/json"],
-      "outputModes": ["text", "application/json"]
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
     }
   ],
   "metadata": {
@@ -84,6 +103,11 @@
       "request_human_approval": "3.7.6"
     },
     "task_executor_wired_at": "3.7.8",
-    "status_flipped_to_available_at": "3.7.6"
+    "status_flipped_to_available_at": "3.7.6",
+    "perfpilot_capabilities": {
+      "long_running_tasks": true,
+      "webhook_subscribers": true,
+      "human_in_the_loop": true
+    }
   }
 }

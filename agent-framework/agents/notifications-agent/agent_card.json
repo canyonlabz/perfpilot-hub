@@ -3,8 +3,18 @@
   "display_name": "PerfPilot Notifications Agent",
   "description": "Specialist agent for vendor-neutral event emission and notification delivery in the PerfPilot Agents framework. Receives structured events from the orchestrator (TestRunStarted, TestRunCompleted, ReportPublished, etc.) and routes them to configured notification channels via vendor-specific adapters. The agent itself emits a canonical event shape; routing to MS Teams, SharePoint, Slack, PagerDuty, email, or webhooks is an adapter concern wired in Epic 4. No MCP namespaces are assigned in Epic 3 — the agent stays a stub for the entire Epic, serving as an honest declaration of the notification capability that will be wired when vendor adapters are ready. Currently in development (F3.9 stub); vendor adapters will be wired in Epic 4.",
   "url": "/agents/notifications-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "status": "in_development",
+  "supportedInterfaces": [
+    {
+      "url": "https://{host}:{port}/agents/notifications-agent",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "PerfPilot"
+  },
   "tags": [
     "notifications",
     "events",
@@ -13,11 +23,46 @@
   ],
   "capabilities": {
     "streaming": true,
+    "pushNotifications": true,
+    "extendedAgentCard": false,
     "long_running_tasks": false,
     "webhook_subscribers": true,
     "human_in_the_loop": false
   },
-  "skills": [],
+  "defaultInputModes": ["application/json"],
+  "defaultOutputModes": ["application/json"],
+  "skills": [
+    {
+      "id": "emit_test_run_started",
+      "name": "Emit TestRunStarted notification",
+      "description": "Emits a TestRunStarted event to configured notification channels when a performance test run begins. Stub in Epic 3; vendor adapters wired in Epic 4.",
+      "tags": ["notification", "event", "test-run", "start"]
+    },
+    {
+      "id": "emit_test_run_completed",
+      "name": "Emit TestRunCompleted notification",
+      "description": "Emits a TestRunCompleted event to configured notification channels when a performance test run finishes. Stub in Epic 3; vendor adapters wired in Epic 4.",
+      "tags": ["notification", "event", "test-run", "completion"]
+    },
+    {
+      "id": "emit_report_published",
+      "name": "Emit ReportPublished notification",
+      "description": "Emits a ReportPublished event to configured notification channels when a performance report is published to Confluence. Stub in Epic 3; vendor adapters wired in Epic 4.",
+      "tags": ["notification", "event", "report", "publishing"]
+    },
+    {
+      "id": "emit_report_revision_requested",
+      "name": "Emit ReportRevisionRequested notification",
+      "description": "Emits a ReportRevisionRequested event to configured notification channels when a human reviewer requests changes to a performance report. Stub in Epic 3; vendor adapters wired in Epic 4.",
+      "tags": ["notification", "event", "report", "revision"]
+    },
+    {
+      "id": "emit_pipeline_error",
+      "name": "Emit PipelineError notification",
+      "description": "Emits a PipelineError event to configured notification channels when an unrecoverable error occurs in the performance testing pipeline. Stub in Epic 3; vendor adapters wired in Epic 4.",
+      "tags": ["notification", "event", "error", "pipeline"]
+    }
+  ],
   "metadata": {
     "epic": "3",
     "feature": "3.9",
@@ -35,6 +80,11 @@
       "MS Teams MCP (msteams_* — adaptive cards, channel/chat delivery)",
       "SharePoint MCP (sharepoint_* — artifact upload to document libraries)",
       "Slack, PagerDuty, email, webhooks (future Epic adapters)"
-    ]
+    ],
+    "perfpilot_capabilities": {
+      "long_running_tasks": false,
+      "webhook_subscribers": true,
+      "human_in_the_loop": false
+    }
   }
 }
