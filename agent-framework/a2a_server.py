@@ -689,6 +689,15 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
     additive alongside the existing legacy ``/agents/{name}/...`` routes.
     """
 
+    from utils.a2a_errors import (
+        http_bad_request,
+        http_internal_error,
+        http_not_found,
+        http_task_not_found,
+        http_unavailable,
+        httpexception_to_a2a,
+    )
+
     # -- Discovery (A2A v1) --------------------------------------------------
     @app.get("/.well-known/agent-card.json", tags=["a2a-v1", "discovery"])
     async def a2a_v1_agent_card() -> JSONResponse:
@@ -698,9 +707,10 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
         ``/.well-known/agent-card.json``.
         """
         if not agents_config.is_agent_enabled(A2A_V1_AGENT_NAME, FRAMEWORK_DIR):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Agent '{A2A_V1_AGENT_NAME}' is not enabled.",
+            return http_not_found(
+                f"Agent '{A2A_V1_AGENT_NAME}' is not enabled.",
+                reason="NOT_FOUND",
+                metadata={"agentName": A2A_V1_AGENT_NAME},
             )
         card = base_agent.read_agent_card(
             AGENTS_DIR / A2A_V1_AGENT_NAME,
@@ -716,10 +726,13 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
         Accepts both A2A v1 ``SendMessageRequest`` envelopes and legacy
         PerfPilot payloads. Returns an A2A v1 ``Task`` object.
         """
-        agent_name = A2A_V1_AGENT_NAME
-        await _require_enabled_agent(agent_name)
-        session_id = _require_session(request)
-        body = await _read_json_body(request)
+        try:
+            agent_name = A2A_V1_AGENT_NAME
+            await _require_enabled_agent(agent_name)
+            session_id = _require_session(request)
+            body = await _read_json_body(request)
+        except HTTPException as exc:
+            return httpexception_to_a2a(exc.status_code, exc.detail)
         body = _normalize_a2a_v1_body(body)
 
         thread = await _resolve_a2a_thread(request, agent_name)
@@ -747,15 +760,18 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
 
     # -- SendStreamingMessage (A2A v1 Section 11) ----------------------------
     @app.post("/message:stream", tags=["a2a-v1", "tasks"])
-    async def a2a_v1_stream_message(request: Request) -> EventSourceResponse:
+    async def a2a_v1_stream_message(request: Request):
         """Submit a message and receive an SSE stream (A2A v1 REST binding).
 
         Returns ``StreamResponse`` events with camelCase A2A v1 shapes.
         """
-        agent_name = A2A_V1_AGENT_NAME
-        await _require_enabled_agent(agent_name)
-        session_id = _require_session(request)
-        body = await _read_json_body(request)
+        try:
+            agent_name = A2A_V1_AGENT_NAME
+            await _require_enabled_agent(agent_name)
+            session_id = _require_session(request)
+            body = await _read_json_body(request)
+        except HTTPException as exc:
+            return httpexception_to_a2a(exc.status_code, exc.detail)
         body = _normalize_a2a_v1_body(body)
 
         thread = await _resolve_a2a_thread(request, agent_name)
@@ -813,12 +829,16 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
         """
         try:
             task_uuid = UUID(task_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
+        except ValueError:
+            return http_bad_request(
+                "Malformed task_id",
+                reason="INVALID_ARGUMENT",
+                metadata={"taskId": task_id},
+            )
 
         task = await task_store.get_task(task_uuid)
         if task is None:
-            raise HTTPException(status_code=404, detail="Task not found")
+            return http_task_not_found(task_id)
 
         return JSONResponse(
             content=_task_to_a2a_v1(task),
@@ -831,12 +851,16 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
         """Cancel a running task (A2A v1 REST binding)."""
         try:
             task_uuid = UUID(task_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
+        except ValueError:
+            return http_bad_request(
+                "Malformed task_id",
+                reason="INVALID_ARGUMENT",
+                metadata={"taskId": task_id},
+            )
 
         task = await task_store.get_task(task_uuid)
         if task is None:
-            raise HTTPException(status_code=404, detail="Task not found")
+            return http_task_not_found(task_id)
 
         await task_store.mark_cancelled(task_uuid, reason="cancelled via A2A v1")
 
