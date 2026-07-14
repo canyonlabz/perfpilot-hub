@@ -5,7 +5,7 @@ One ASGI app exposing all seven agents through path-based routing under
 PerfPilot branding) so off-the-shelf A2A clients integrate without
 adapters. Branding lives only on port 8002 (the AG-UI bridge, F3.6).
 
-Endpoints (matches V2 Section 9.2):
+Legacy PerfPilot endpoints (V2 Section 9.2):
 
     GET  /health                                            - liveness probe
     GET  /agents                                            - list discoverable agents
@@ -14,6 +14,14 @@ Endpoints (matches V2 Section 9.2):
     POST /agents/{name}/tasks/sendSubscribe                 - submit task + SSE stream
     GET  /agents/{name}/tasks/{task_id}                     - poll task state
     POST /agents/{name}/tasks/{task_id}/cancel              - cancel a running task
+
+A2A v1.0.0 HTTP+JSON/REST binding (Spec Section 11):
+
+    GET  /.well-known/agent-card.json                       - orchestrator card (A2A discovery)
+    POST /message:send                                      - send message (returns Task)
+    POST /message:stream                                    - send message + SSE stream
+    GET  /tasks/{task_id}                                   - get task by ID
+    POST /tasks/{task_id}:cancel                            - cancel task
 
 Long-running task model (V2 Section 14):
 
@@ -116,6 +124,7 @@ def create_app() -> FastAPI:
     app.add_middleware(SessionMiddleware, default_source="a2a_external")
 
     _register_routes(app)
+    _register_a2a_v1_routes(app)
     return app
 
 
@@ -470,6 +479,370 @@ def _task_to_dict(task: task_store.AgentTask) -> dict:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
+
+
+# =============================================================================
+# A2A v1.0.0 HTTP+JSON/REST Binding (Spec Section 11)
+# =============================================================================
+# New routes that follow A2A v1 path conventions. All routes implicitly
+# target the orchestrator agent. Legacy routes above remain unchanged.
+# Both route sets share the same internal helpers (task_store,
+# task_executor, _resolve_a2a_thread, etc.).
+
+A2A_V1_AGENT_NAME = "orchestrator"
+A2A_VERSION_HEADER = "1.0"
+
+
+def _a2a_v1_response_headers(
+    thread: Optional[thread_store.AgentThread] = None,
+) -> dict:
+    """Build response headers for A2A v1 routes.
+
+    Always includes ``A2A-Version: 1.0``. Thread headers are added when
+    a thread is available (task-creating endpoints).
+    """
+    headers: dict = {"A2A-Version": A2A_VERSION_HEADER}
+    if thread is not None:
+        headers.update(_thread_response_headers(thread))
+    return headers
+
+
+def _normalize_a2a_v1_body(body: dict) -> dict:
+    """Translate an A2A v1 ``SendMessageRequest`` envelope into the internal
+    payload format that ``task_executor._extract_user_message_from_payload()``
+    and ``a2a_parts_parser`` already understand.
+
+    If the body is already a legacy PerfPilot payload (top-level ``message``
+    string, ``text``, ``prompt``, or ``parts[]``), it is returned unchanged.
+
+    A2A v1 structure::
+
+        {
+          "message": {
+            "messageId": "...",
+            "role": "ROLE_USER",
+            "parts": [{"text": "Hello"}],
+            "contextId": "ctx-001"
+          },
+          "configuration": {...},
+          "metadata": {...}
+        }
+
+    Normalized internal structure::
+
+        {
+          "message": "Hello",          # first text Part -> top-level message
+          "parts": [{"text": "Hello"}], # pass through for a2a_parts_parser
+          "metadata": {...},            # merged from envelope + message metadata
+          "_a2a_v1_envelope": {...},    # stash original envelope for audit
+          "_a2a_v1_context_id": "ctx-001"
+        }
+    """
+    from utils.a2a_models import is_a2a_v1_request
+
+    if not is_a2a_v1_request(body):
+        return body
+
+    msg = body["message"]
+    parts = msg.get("parts") or []
+    context_id = msg.get("contextId") or msg.get("context_id")
+
+    first_text = None
+    normalized_parts: list[dict] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        normalized_parts.append(part)
+        if first_text is None and isinstance(part.get("text"), str):
+            first_text = part["text"]
+
+    result: dict = {}
+
+    if first_text:
+        result["message"] = first_text
+
+    if normalized_parts:
+        result["parts"] = normalized_parts
+
+    envelope_metadata = body.get("metadata")
+    msg_metadata = msg.get("metadata")
+    if isinstance(envelope_metadata, dict) or isinstance(msg_metadata, dict):
+        merged: dict = {}
+        if isinstance(msg_metadata, dict):
+            merged.update(msg_metadata)
+        if isinstance(envelope_metadata, dict):
+            merged.update(envelope_metadata)
+        if merged:
+            result["metadata"] = merged
+
+    if context_id:
+        result["_a2a_v1_context_id"] = context_id
+
+    result["_a2a_v1_envelope"] = body
+
+    config = body.get("configuration")
+    if isinstance(config, dict):
+        result["_a2a_v1_configuration"] = config
+
+    test_run_id = None
+    if isinstance(envelope_metadata, dict):
+        test_run_id = envelope_metadata.get("test_run_id")
+    if test_run_id and isinstance(test_run_id, str):
+        result["test_run_id"] = test_run_id
+
+    return result
+
+
+def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
+    """Convert an ``AgentTask`` DB row to an A2A v1 ``Task`` response dict.
+
+    Returns a camelCase dict suitable for JSON serialization. Uses the
+    Phase 1 Pydantic models for structure and the state mapping for
+    PerfPilot-to-A2A status translation.
+    """
+    from utils.a2a_models import (
+        Artifact,
+        Part,
+        Task,
+        TaskStatus,
+        a2a_timestamp,
+        perfpilot_status_to_a2a,
+    )
+
+    a2a_state = perfpilot_status_to_a2a(task.status)
+
+    status_timestamp = a2a_timestamp()
+    if task.completed_at:
+        status_timestamp = task.completed_at.strftime("%Y-%m-%dT%H:%M:%S.") + \
+            f"{task.completed_at.microsecond // 1000:03d}Z"
+    elif task.started_at:
+        status_timestamp = task.started_at.strftime("%Y-%m-%dT%H:%M:%S.") + \
+            f"{task.started_at.microsecond // 1000:03d}Z"
+    elif task.submitted_at:
+        status_timestamp = task.submitted_at.strftime("%Y-%m-%dT%H:%M:%S.") + \
+            f"{task.submitted_at.microsecond // 1000:03d}Z"
+
+    task_status = TaskStatus(state=a2a_state, timestamp=status_timestamp)
+
+    context_id = None
+    if isinstance(task.payload, dict):
+        context_id = task.payload.get("_a2a_v1_context_id")
+
+    artifacts = None
+    if task.result and isinstance(task.result, dict):
+        reply_text = task.result.get("reply_text")
+        if isinstance(reply_text, str) and reply_text.strip():
+            artifacts = [
+                Artifact(
+                    artifact_id=f"{task.task_id}-result",
+                    parts=[Part(text=reply_text)],
+                    name="Agent response",
+                )
+            ]
+
+    metadata: dict[str, Any] = {
+        "agentName": task.agent_name,
+    }
+    if task.test_run_id:
+        metadata["testRunId"] = task.test_run_id
+    if task.error and isinstance(task.error, dict):
+        metadata["error"] = task.error
+
+    a2a_task = Task(
+        id=str(task.task_id),
+        context_id=context_id,
+        status=task_status,
+        artifacts=artifacts,
+        metadata=metadata if metadata else None,
+    )
+
+    return a2a_task.model_dump(by_alias=True, exclude_none=True)
+
+
+def _task_event_to_a2a_v1_sse(event: task_executor.TaskEvent) -> dict:
+    """Convert a ``TaskEvent`` to an A2A v1 SSE ``data:`` payload.
+
+    Returns a dict suitable for ``json.dumps()`` as an SSE data field,
+    shaped as a ``StreamResponse`` with a ``statusUpdate``.
+    """
+    from utils.a2a_models import TaskStatus, a2a_timestamp, perfpilot_status_to_a2a
+
+    a2a_state = perfpilot_status_to_a2a(event.status)
+    status = TaskStatus(state=a2a_state, timestamp=a2a_timestamp())
+
+    return {
+        "statusUpdate": status.model_dump(by_alias=True, exclude_none=True),
+        "taskId": event.task_id,
+        "progress": event.progress,
+    }
+
+
+def _register_a2a_v1_routes(app: FastAPI) -> None:
+    """Register A2A v1.0.0 HTTP+JSON/REST binding routes.
+
+    All routes implicitly target the orchestrator agent. These are
+    additive alongside the existing legacy ``/agents/{name}/...`` routes.
+    """
+
+    # -- Discovery (A2A v1) --------------------------------------------------
+    @app.get("/.well-known/agent-card.json", tags=["a2a-v1", "discovery"])
+    async def a2a_v1_agent_card() -> JSONResponse:
+        """Return the orchestrator's agent card at the A2A v1 discovery path.
+
+        A2A spec Section 8: public agent card at
+        ``/.well-known/agent-card.json``.
+        """
+        if not agents_config.is_agent_enabled(A2A_V1_AGENT_NAME, FRAMEWORK_DIR):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent '{A2A_V1_AGENT_NAME}' is not enabled.",
+            )
+        card = base_agent.read_agent_card(
+            AGENTS_DIR / A2A_V1_AGENT_NAME,
+            fallback_framework_version=SERVER_VERSION,
+        )
+        return JSONResponse(card, headers=_a2a_v1_response_headers())
+
+    # -- SendMessage (A2A v1 Section 11) -------------------------------------
+    @app.post("/message:send", status_code=202, tags=["a2a-v1", "tasks"])
+    async def a2a_v1_send_message(request: Request) -> JSONResponse:
+        """Submit a message to the orchestrator (A2A v1 REST binding).
+
+        Accepts both A2A v1 ``SendMessageRequest`` envelopes and legacy
+        PerfPilot payloads. Returns an A2A v1 ``Task`` object.
+        """
+        agent_name = A2A_V1_AGENT_NAME
+        await _require_enabled_agent(agent_name)
+        session_id = _require_session(request)
+        body = await _read_json_body(request)
+        body = _normalize_a2a_v1_body(body)
+
+        thread = await _resolve_a2a_thread(request, agent_name)
+        body["_perfpilot_thread"] = {
+            "thread_id": thread.thread_id,
+            "external_thread_id": thread.external_thread_id,
+        }
+
+        task = await task_store.create_task(
+            session_id=session_id,
+            external_session_id=getattr(request.state, "external_session_id", None),
+            agent_name=agent_name,
+            payload=body,
+            test_run_id=body.get("test_run_id"),
+            thread_id=thread.thread_id,
+            subscriber_endpoints=_extract_subscriber_endpoints(body),
+        )
+        asyncio.create_task(task_executor.execute_task(task.task_id))
+
+        return JSONResponse(
+            content=_task_to_a2a_v1(task),
+            status_code=202,
+            headers=_a2a_v1_response_headers(thread),
+        )
+
+    # -- SendStreamingMessage (A2A v1 Section 11) ----------------------------
+    @app.post("/message:stream", tags=["a2a-v1", "tasks"])
+    async def a2a_v1_stream_message(request: Request) -> EventSourceResponse:
+        """Submit a message and receive an SSE stream (A2A v1 REST binding).
+
+        Returns ``StreamResponse`` events with camelCase A2A v1 shapes.
+        """
+        agent_name = A2A_V1_AGENT_NAME
+        await _require_enabled_agent(agent_name)
+        session_id = _require_session(request)
+        body = await _read_json_body(request)
+        body = _normalize_a2a_v1_body(body)
+
+        thread = await _resolve_a2a_thread(request, agent_name)
+        body["_perfpilot_thread"] = {
+            "thread_id": thread.thread_id,
+            "external_thread_id": thread.external_thread_id,
+        }
+
+        task = await task_store.create_task(
+            session_id=session_id,
+            external_session_id=getattr(request.state, "external_session_id", None),
+            agent_name=agent_name,
+            payload=body,
+            test_run_id=body.get("test_run_id"),
+            thread_id=thread.thread_id,
+            subscriber_endpoints=_extract_subscriber_endpoints(body),
+        )
+        queue = await task_executor.subscribe(task.task_id)
+        asyncio.create_task(task_executor.execute_task(task.task_id))
+
+        async def _stream():
+            yield {
+                "event": "task",
+                "data": json.dumps(_task_to_a2a_v1(task)),
+            }
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield {"event": "ping", "data": "{}"}
+                        continue
+                    yield {
+                        "event": "status",
+                        "data": json.dumps(_task_event_to_a2a_v1_sse(event)),
+                    }
+                    if event.status in task_store.TERMINAL_STATUSES:
+                        break
+            finally:
+                await task_executor.unsubscribe(task.task_id, queue)
+
+        return EventSourceResponse(
+            _stream(),
+            headers=_a2a_v1_response_headers(thread),
+        )
+
+    # -- GetTask (A2A v1 Section 11) -----------------------------------------
+    @app.get("/tasks/{task_id}", tags=["a2a-v1", "tasks"])
+    async def a2a_v1_get_task(task_id: str, request: Request) -> JSONResponse:
+        """Retrieve task status by ID (A2A v1 REST binding).
+
+        No ``agent_name`` in the path — looks up by ``task_id`` only.
+        """
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
+
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        return JSONResponse(
+            content=_task_to_a2a_v1(task),
+            headers=_a2a_v1_response_headers(),
+        )
+
+    # -- CancelTask (A2A v1 Section 11) --------------------------------------
+    @app.post("/tasks/{task_id}:cancel", tags=["a2a-v1", "tasks"])
+    async def a2a_v1_cancel_task(task_id: str, request: Request) -> JSONResponse:
+        """Cancel a running task (A2A v1 REST binding)."""
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
+
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        await task_store.mark_cancelled(task_uuid, reason="cancelled via A2A v1")
+
+        refreshed = await task_store.get_task(task_uuid)
+        if refreshed is None:
+            refreshed = task
+
+        return JSONResponse(
+            content=_task_to_a2a_v1(refreshed),
+            headers=_a2a_v1_response_headers(),
+        )
 
 
 # =============================================================================
