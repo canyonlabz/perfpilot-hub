@@ -23,6 +23,10 @@ A2A v1.0.0 HTTP+JSON/REST binding (Spec Section 11):
     GET  /tasks/{task_id}                                   - get task by ID
     POST /tasks/{task_id}:cancel                            - cancel task
 
+A2A v1.0.0 JSON-RPC 2.0 binding (Spec Section 9):
+
+    POST /a2a/v1                                            - JSON-RPC 2.0 dispatcher
+
 Long-running task model (V2 Section 14):
 
     Pattern 1 - Polling: caller submits via tasks/send, polls GET tasks/{id}.
@@ -125,6 +129,7 @@ def create_app() -> FastAPI:
 
     _register_routes(app)
     _register_a2a_v1_routes(app)
+    _register_a2a_v1_jsonrpc_route(app)
     return app
 
 
@@ -843,6 +848,364 @@ def _register_a2a_v1_routes(app: FastAPI) -> None:
             content=_task_to_a2a_v1(refreshed),
             headers=_a2a_v1_response_headers(),
         )
+
+
+# =============================================================================
+# A2A v1.0.0 JSON-RPC 2.0 Binding (Spec Section 9)
+# =============================================================================
+# Single endpoint dispatching all A2A methods via the JSON-RPC ``method``
+# field. Streaming methods (SendStreamingMessage, SubscribeToTask) respond
+# with SSE; all others return a standard JSON-RPC success/error envelope.
+
+
+def _register_a2a_v1_jsonrpc_route(app: FastAPI) -> None:
+    """Register the ``POST /a2a/v1`` JSON-RPC 2.0 endpoint.
+
+    All seven A2A methods are dispatched through this single route.
+    Streaming methods respond with ``Content-Type: text/event-stream``;
+    non-streaming methods respond with ``Content-Type: application/json``.
+    """
+    from utils.a2a_jsonrpc import (
+        JsonRpcError,
+        JsonRpcRequest,
+        a2a_error_data,
+        internal_error,
+        is_streaming_method,
+        jsonrpc_error,
+        jsonrpc_sse_event,
+        jsonrpc_success,
+        parse_jsonrpc_request,
+        task_not_found_error,
+        unsupported_operation_error,
+        JSONRPC_INTERNAL_ERROR,
+        JSONRPC_INVALID_PARAMS,
+        JSONRPC_PARSE_ERROR,
+    )
+
+    async def _handle_send_message(
+        rpc: JsonRpcRequest, request: Request,
+    ) -> dict:
+        """Dispatch ``SendMessage`` — returns a JSON-RPC success with Task."""
+        agent_name = A2A_V1_AGENT_NAME
+        await _require_enabled_agent(agent_name)
+        session_id = _require_session(request)
+
+        body = rpc.params
+        body = _normalize_a2a_v1_body(body)
+
+        thread = await _resolve_a2a_thread(request, agent_name)
+        body["_perfpilot_thread"] = {
+            "thread_id": thread.thread_id,
+            "external_thread_id": thread.external_thread_id,
+        }
+
+        task = await task_store.create_task(
+            session_id=session_id,
+            external_session_id=getattr(request.state, "external_session_id", None),
+            agent_name=agent_name,
+            payload=body,
+            test_run_id=body.get("test_run_id"),
+            thread_id=thread.thread_id,
+            subscriber_endpoints=_extract_subscriber_endpoints(body),
+        )
+        asyncio.create_task(task_executor.execute_task(task.task_id))
+
+        return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(task)})
+
+    async def _handle_get_task(rpc: JsonRpcRequest) -> dict:
+        """Dispatch ``GetTask`` — returns a JSON-RPC success with Task."""
+        task_id = rpc.params.get("id")
+        if not isinstance(task_id, str) or not task_id:
+            return jsonrpc_error(
+                rpc.id,
+                JSONRPC_INVALID_PARAMS,
+                "Invalid parameters",
+                a2a_error_data("INVALID_PARAMS", metadata={
+                    "detail": "Field 'params.id' is required and must be a string",
+                }),
+            )
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError:
+            return jsonrpc_error(
+                rpc.id,
+                JSONRPC_INVALID_PARAMS,
+                "Invalid parameters",
+                a2a_error_data("INVALID_PARAMS", metadata={
+                    "detail": f"Malformed task id: {task_id}",
+                }),
+            )
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            return task_not_found_error(rpc.id, task_id)
+        return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(task)})
+
+    async def _handle_cancel_task(rpc: JsonRpcRequest) -> dict:
+        """Dispatch ``CancelTask`` — cancels and returns updated Task."""
+        task_id = rpc.params.get("id")
+        if not isinstance(task_id, str) or not task_id:
+            return jsonrpc_error(
+                rpc.id,
+                JSONRPC_INVALID_PARAMS,
+                "Invalid parameters",
+                a2a_error_data("INVALID_PARAMS", metadata={
+                    "detail": "Field 'params.id' is required and must be a string",
+                }),
+            )
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError:
+            return jsonrpc_error(
+                rpc.id,
+                JSONRPC_INVALID_PARAMS,
+                "Invalid parameters",
+                a2a_error_data("INVALID_PARAMS", metadata={
+                    "detail": f"Malformed task id: {task_id}",
+                }),
+            )
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            return task_not_found_error(rpc.id, task_id)
+
+        await task_store.mark_cancelled(task_uuid, reason="cancelled via A2A v1 JSON-RPC")
+        refreshed = await task_store.get_task(task_uuid)
+        if refreshed is None:
+            refreshed = task
+        return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(refreshed)})
+
+    async def _stream_send_message(
+        rpc: JsonRpcRequest, request: Request,
+    ):
+        """Dispatch ``SendStreamingMessage`` — yields JSON-RPC-wrapped SSE."""
+        agent_name = A2A_V1_AGENT_NAME
+        await _require_enabled_agent(agent_name)
+        session_id = _require_session(request)
+
+        body = rpc.params
+        body = _normalize_a2a_v1_body(body)
+
+        thread = await _resolve_a2a_thread(request, agent_name)
+        body["_perfpilot_thread"] = {
+            "thread_id": thread.thread_id,
+            "external_thread_id": thread.external_thread_id,
+        }
+
+        task = await task_store.create_task(
+            session_id=session_id,
+            external_session_id=getattr(request.state, "external_session_id", None),
+            agent_name=agent_name,
+            payload=body,
+            test_run_id=body.get("test_run_id"),
+            thread_id=thread.thread_id,
+            subscriber_endpoints=_extract_subscriber_endpoints(body),
+        )
+        queue = await task_executor.subscribe(task.task_id)
+        asyncio.create_task(task_executor.execute_task(task.task_id))
+
+        async def _sse():
+            yield {
+                "event": "task",
+                "data": jsonrpc_sse_event(rpc.id, {"task": _task_to_a2a_v1(task)}),
+            }
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield {"event": "ping", "data": "{}"}
+                        continue
+                    yield {
+                        "event": "status",
+                        "data": jsonrpc_sse_event(
+                            rpc.id,
+                            {"statusUpdate": _task_event_to_a2a_v1_sse(event)},
+                        ),
+                    }
+                    if event.status in task_store.TERMINAL_STATUSES:
+                        break
+            finally:
+                await task_executor.unsubscribe(task.task_id, queue)
+
+        return EventSourceResponse(
+            _sse(), headers=_a2a_v1_response_headers(thread),
+        )
+
+    async def _stream_subscribe_to_task(
+        rpc: JsonRpcRequest, request: Request,
+    ):
+        """Dispatch ``SubscribeToTask`` — SSE for an existing task."""
+        task_id = rpc.params.get("id")
+        if not isinstance(task_id, str) or not task_id:
+            return JSONResponse(
+                content=jsonrpc_error(
+                    rpc.id,
+                    JSONRPC_INVALID_PARAMS,
+                    "Invalid parameters",
+                    a2a_error_data("INVALID_PARAMS", metadata={
+                        "detail": "Field 'params.id' is required and must be a string",
+                    }),
+                ),
+                headers=_a2a_v1_response_headers(),
+            )
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError:
+            return JSONResponse(
+                content=jsonrpc_error(
+                    rpc.id,
+                    JSONRPC_INVALID_PARAMS,
+                    "Invalid parameters",
+                    a2a_error_data("INVALID_PARAMS", metadata={
+                        "detail": f"Malformed task id: {task_id}",
+                    }),
+                ),
+                headers=_a2a_v1_response_headers(),
+            )
+
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            return JSONResponse(
+                content=task_not_found_error(rpc.id, task_id),
+                headers=_a2a_v1_response_headers(),
+            )
+
+        if task.status in task_store.TERMINAL_STATUSES:
+            return JSONResponse(
+                content=unsupported_operation_error(
+                    rpc.id,
+                    "SubscribeToTask",
+                    detail=f"Task is already in terminal state: {task.status}",
+                ),
+                headers=_a2a_v1_response_headers(),
+            )
+
+        queue = await task_executor.subscribe(task.task_id)
+
+        async def _sse():
+            yield {
+                "event": "task",
+                "data": jsonrpc_sse_event(rpc.id, {"task": _task_to_a2a_v1(task)}),
+            }
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield {"event": "ping", "data": "{}"}
+                        continue
+                    yield {
+                        "event": "status",
+                        "data": jsonrpc_sse_event(
+                            rpc.id,
+                            {"statusUpdate": _task_event_to_a2a_v1_sse(event)},
+                        ),
+                    }
+                    if event.status in task_store.TERMINAL_STATUSES:
+                        break
+            finally:
+                await task_executor.unsubscribe(task.task_id, queue)
+
+        return EventSourceResponse(
+            _sse(), headers=_a2a_v1_response_headers(),
+        )
+
+    # -- Route handler --------------------------------------------------------
+    @app.post("/a2a/v1", tags=["a2a-v1", "jsonrpc"])
+    async def a2a_v1_jsonrpc(request: Request):
+        """A2A v1.0.0 JSON-RPC 2.0 endpoint (spec Section 9).
+
+        Dispatches all A2A methods through a single route. The method
+        name is specified in the ``method`` field of the JSON-RPC request
+        body. Streaming methods respond with ``text/event-stream``.
+        """
+        try:
+            raw_body = await request.json()
+        except Exception:
+            return JSONResponse(
+                content=jsonrpc_error(
+                    None,
+                    JSONRPC_PARSE_ERROR,
+                    "Invalid JSON payload",
+                ),
+                headers=_a2a_v1_response_headers(),
+            )
+
+        try:
+            rpc = parse_jsonrpc_request(raw_body)
+        except JsonRpcError as exc:
+            return JSONResponse(
+                content=exc.response,
+                headers=_a2a_v1_response_headers(),
+            )
+
+        try:
+            method = rpc.method
+
+            if method == "SendMessage":
+                result = await _handle_send_message(rpc, request)
+                return JSONResponse(
+                    content=result,
+                    status_code=202 if "result" in result else 200,
+                    headers=_a2a_v1_response_headers(),
+                )
+
+            if method == "SendStreamingMessage":
+                return await _stream_send_message(rpc, request)
+
+            if method == "GetTask":
+                result = await _handle_get_task(rpc)
+                return JSONResponse(
+                    content=result,
+                    headers=_a2a_v1_response_headers(),
+                )
+
+            if method == "CancelTask":
+                result = await _handle_cancel_task(rpc)
+                return JSONResponse(
+                    content=result,
+                    headers=_a2a_v1_response_headers(),
+                )
+
+            if method == "SubscribeToTask":
+                return await _stream_subscribe_to_task(rpc, request)
+
+            if method == "ListTasks":
+                return JSONResponse(
+                    content=unsupported_operation_error(
+                        rpc.id,
+                        "ListTasks",
+                        detail="Filtered task listing is not yet implemented",
+                    ),
+                    headers=_a2a_v1_response_headers(),
+                )
+
+            if method == "GetExtendedAgentCard":
+                return JSONResponse(
+                    content=unsupported_operation_error(
+                        rpc.id,
+                        "GetExtendedAgentCard",
+                        detail="Extended agent cards are not configured",
+                    ),
+                    headers=_a2a_v1_response_headers(),
+                )
+
+        except HTTPException as exc:
+            return JSONResponse(
+                content=internal_error(rpc.id, exc.detail),
+                status_code=exc.status_code,
+                headers=_a2a_v1_response_headers(),
+            )
+        except Exception as exc:
+            log.exception("JSON-RPC dispatch error for method=%s", rpc.method)
+            return JSONResponse(
+                content=internal_error(rpc.id, str(exc)),
+                status_code=500,
+                headers=_a2a_v1_response_headers(),
+            )
 
 
 # =============================================================================
