@@ -572,18 +572,21 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
          agent always receives a coherent prompt).
       3. Load prior conversation history for the thread (when known).
       4. Persist the new user message.
-      5. Run `agent.generate_reply(messages=...)` on a worker thread so
-         the executor's event loop is never blocked by the (synchronous)
-         tool calls the agent may issue.
+      5. Run the multi-turn tool-execution loop via
+         ``_invoke_orchestrator_with_tool_loop()``. The orchestrator's
+         four tools (``delegate_to_specialist``, ``check_task_status``,
+         ``list_available_specialists``, ``request_human_approval``) are
+         executed within the loop. After each tool round, any specialist
+         tasks created by ``delegate_to_specialist`` are started
+         immediately so ``check_task_status`` sees them as running.
       6. Persist the assistant reply.
-      7. Return a structured result dict the A2A response wraps verbatim.
+      7. Return a structured result dict the A2A response wraps verbatim,
+         including the tool rounds audit trail and exit reason.
 
-    The orchestrator's outbound tool calls (delegate_to_specialist,
-    check_task_status) hit `PERFPILOT_A2A_BASE_URL` (default
-    `http://127.0.0.1:8001`). When running INSIDE the A2A server, that
-    URL points back at the same process -- the network round-trip is
-    intentional so the tool surface stays uniform whether the
-    orchestrator runs in-process or in a separate process.
+    A2A identity propagation: ``session_id``, ``thread_id``, and
+    ``user_id`` from the parent orchestrator task are propagated to child
+    specialist tasks via ContextVars (``agent_session_id_var``,
+    ``agent_thread_id_var``, ``agent_user_id_var``).
     """
     thread_id = _extract_thread_id_from_payload(task.payload)
     user_message = _extract_user_message_from_payload(task.payload)
@@ -613,20 +616,21 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
-    # Propagate the task owner's user_id and request source into the
-    # orchestrator's tool execution context so `delegate_to_specialist`
-    # stamps outbound requests correctly. Setting source to "a2a"
-    # tells the orchestrator to delegate via the A2A surface (existing
-    # behaviour) and use X-External-Thread-Id / X-External-Session-Id
-    # headers for OpenTelemetry traceability.
+    # Propagate the task owner's user_id, session_id, thread_id, and
+    # request source into the orchestrator's tool execution context so
+    # `delegate_to_specialist` can create child tasks with the correct
+    # A2A identity chain. Setting source to "a2a" tells the orchestrator
+    # to delegate via the A2A surface.
     from agents.orchestrator.agent import (
         agent_user_id_var,
         agent_thread_id_var,
+        agent_session_id_var,
         agent_request_source_var,
     )
     agent_request_source_var.set("a2a")
 
     if task.session_id:
+        agent_session_id_var.set(str(task.session_id))
         try:
             from . import session_store as _ss
             _session = await _ss.get_session(task.session_id)
@@ -638,8 +642,10 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         agent_thread_id_var.set(thread_id)
 
     try:
-        assistant_text, raw_reply = await asyncio.to_thread(
-            _invoke_orchestrator_sync, messages_for_llm,
+        assistant_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
+            await _invoke_orchestrator_with_tool_loop(
+                messages_for_llm, task.task_id, common,
+            )
         )
     except Exception as exc:
         log.exception("_run_orchestrator: LLM invocation failed")
@@ -659,14 +665,22 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         except Exception:
             log.exception("_run_orchestrator: failed to persist assistant reply; continuing")
 
-    return {
+    result: dict = {
         "agent": ORCHESTRATOR_AGENT_NAME,
         "thread_id": thread_id,
         "messages_processed": len(messages_for_llm),
         "history_loaded": len(history),
         "reply_text": assistant_text,
         "reply_raw": raw_reply,
+        "tool_rounds": tool_rounds,
+        "total_rounds": len(tool_rounds),
+        "exit_reason": exit_reason,
     }
+    if ctx_metrics:
+        result["context_tokens"] = ctx_metrics["context_tokens"]
+        result["context_utilization_pct"] = ctx_metrics["context_utilization_pct"]
+        result["context_limit"] = ctx_metrics["context_limit"]
+    return result
 
 
 def _invoke_orchestrator_sync(messages: list[dict]) -> tuple[str, Any]:
@@ -702,6 +716,123 @@ def _invoke_orchestrator_sync(messages: list[dict]) -> tuple[str, Any]:
             return content, reply
         return str(content) if content is not None else "", reply
     return str(reply) if reply is not None else "", reply
+
+
+async def _invoke_orchestrator_with_tool_loop(
+    messages: list[dict],
+    task_id: Any,
+    common: dict,
+) -> tuple[str, Any, list[dict], str, dict | None]:
+    """Build a fresh orchestrator and run a multi-turn tool-execution loop.
+
+    Replaces the single-shot ``_invoke_orchestrator_sync()`` for the A2A
+    path. The orchestrator's four tools (``list_available_specialists``,
+    ``delegate_to_specialist``, ``check_task_status``,
+    ``request_human_approval``) are executed within the loop so the LLM
+    can delegate to specialists and poll their status to completion.
+
+    An ``after_tool_round`` callback drains
+    ``agents.orchestrator.agent._pending_executions`` after each round
+    and immediately starts the specialist tasks via
+    ``asyncio.create_task(execute_task(...))``. This ensures specialist
+    tasks are *running* when the orchestrator's next LLM round calls
+    ``check_task_status``.
+
+    The orchestrator agent is rebuilt per call (same rationale as
+    ``_invoke_orchestrator_sync``).
+
+    Args:
+        messages: AG2-shaped message list for the LLM.
+        task_id: The orchestrator's own task UUID (for SSE broadcasts).
+        common: SSE broadcast fields (task_id, session_id, etc.).
+
+    Returns:
+        Tuple of (reply_text, raw_reply, tool_rounds_audit, exit_reason,
+        final_context_metrics).
+    """
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    framework_dir = Path(__file__).resolve().parent.parent
+    if str(framework_dir) not in sys.path:
+        sys.path.insert(0, str(framework_dir))
+
+    from agents.orchestrator.agent import build_orchestrator, drain_pending_executions
+    from utils.base_agent import resolve_agent_config_path
+
+    agent = await asyncio.to_thread(build_orchestrator)
+
+    # ---- Load loop config from the orchestrator's config.yaml ----------
+    orchestrator_dir = framework_dir / "agents" / "orchestrator"
+    orch_config: dict = {}
+    config_path = resolve_agent_config_path(orchestrator_dir)
+    if config_path:
+        try:
+            with open(config_path, encoding="utf-8-sig") as fh:
+                orch_config = yaml.safe_load(fh) or {}
+        except Exception:
+            log.warning("Could not load orchestrator config for tool loop; using defaults")
+
+    max_tool_rounds = int(orch_config.get("max_tool_rounds", 10))
+    max_consecutive_repeats = int(orch_config.get("max_consecutive_repeats", 3))
+    raw_polling_tools = orch_config.get("polling_tools", [])
+    polling_tools = frozenset(
+        raw_polling_tools if isinstance(raw_polling_tools, list) else []
+    )
+    polling_max_consecutive_repeats = int(
+        orch_config.get("polling_max_consecutive_repeats", 15)
+    )
+    context_limit = int(orch_config.get("context_limit", 128000))
+    compaction_threshold = float(orch_config.get("compaction_threshold", 0.80))
+    compaction_preserve_recent = int(orch_config.get("compaction_preserve_recent", 5))
+
+    # ---- after_tool_round callback: start delegated specialist tasks ----
+    async def _drain_and_start_pending() -> None:
+        """Drain _pending_executions and fire specialist tasks immediately.
+
+        ``delegate_to_specialist()`` appends task UUIDs to the
+        module-level ``_pending_executions`` list. We drain them here
+        (between tool rounds) so they are *running* when the next LLM
+        round calls ``check_task_status``.
+        """
+        pending = drain_pending_executions()
+        for pending_task_id in pending:
+            log.info(
+                "Orchestrator task %s: starting delegated specialist task %s",
+                task_id, pending_task_id,
+            )
+            asyncio.create_task(execute_task(pending_task_id))
+
+    reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
+        await _run_multi_turn_tool_loop(
+            agent=agent,
+            messages=messages,
+            max_tool_rounds=max_tool_rounds,
+            max_consecutive_repeats=max_consecutive_repeats,
+            polling_tools=polling_tools,
+            polling_max_consecutive_repeats=polling_max_consecutive_repeats,
+            context_limit=context_limit,
+            compaction_threshold=compaction_threshold,
+            compaction_preserve_recent=compaction_preserve_recent,
+            task_id=task_id,
+            common=common,
+            agent_name=ORCHESTRATOR_AGENT_NAME,
+            after_tool_round=_drain_and_start_pending,
+        )
+    )
+
+    # Drain any remaining pending executions from the final round
+    final_pending = drain_pending_executions()
+    for pending_task_id in final_pending:
+        log.info(
+            "Orchestrator task %s: starting remaining delegated task %s",
+            task_id, pending_task_id,
+        )
+        asyncio.create_task(execute_task(pending_task_id))
+
+    return reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics
 
 
 async def _load_thread_history_as_ag2_messages(thread_id: str) -> list[dict]:
@@ -1423,14 +1554,22 @@ async def _run_multi_turn_tool_loop(
     task_id: Any,
     common: dict,
     agent_name: str,
+    after_tool_round: Optional[Any] = None,
 ) -> tuple[str, Any, list[dict], str, dict | None]:
-    """Async multi-turn tool-execution loop for specialist agents.
+    """Async multi-turn tool-execution loop for agents.
 
     Implements the loop engineering pattern:
       1. Call LLM (sync via to_thread)
       2. If text response → exit (success)
       3. If tool calls → execute each tool → feed results back → next round
       4. Exit conditions: max rounds, consecutive repeats, or errors
+
+    Args:
+        after_tool_round: Optional async callback invoked after all tool
+            calls in a round are executed and before the next LLM call.
+            Used by the orchestrator to drain ``_pending_executions`` and
+            start specialist tasks immediately so ``check_task_status``
+            sees them as running in subsequent rounds.
 
     Returns:
         Tuple of (reply_text, raw_reply, tool_rounds_audit, exit_reason,
@@ -1592,6 +1731,10 @@ async def _run_multi_turn_tool_loop(
                 })
 
             tool_rounds.append(round_audit)
+
+            # ---- Post-round callback (e.g. drain pending executions) ------
+            if after_tool_round is not None:
+                await after_tool_round()
 
             # ---- SSE progress broadcast -----------------------------------
             tool_names = [tc["name"] for tc in round_audit["tool_calls"]]

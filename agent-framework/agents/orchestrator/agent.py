@@ -535,15 +535,24 @@ async def delegate_to_specialist(
     # for the INSERT, then fire background execution on the main loop.
     log.debug("delegate_to_specialist: agent=%s", agent_name)
 
-    session_id_str = _caller_identity.get("session_id")
-    thread_id = _caller_identity.get("thread_id")
+    # Resolution order: module-level _caller_identity (set by AG-UI
+    # handler, survives AG2 thread boundary) then ContextVars (set by
+    # A2A task_executor before invoking the orchestrator tool loop).
+    session_id_str = (
+        _caller_identity.get("session_id")
+        or agent_session_id_var.get()
+    )
+    thread_id = (
+        _caller_identity.get("thread_id")
+        or agent_thread_id_var.get()
+    )
 
     if not session_id_str:
         return json.dumps({
             "ok": False,
             "error": {
                 "type": "NoSession",
-                "message": "No browser session available for delegation.",
+                "message": "No session available for delegation.",
             },
         })
 
