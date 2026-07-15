@@ -149,6 +149,20 @@ context_limit: 128000
 compaction_threshold: 0.80
 compaction_preserve_recent: 5
 
+# Polling tool exemptions
+# Tools listed here use a higher consecutive-repeat threshold because
+# identical consecutive calls are expected behavior (status polling).
+# The standard max_consecutive_repeats (above) still applies to all
+# other tools.
+polling_tools:
+  - jmeter_get_jmeter_run_status
+
+# Higher threshold for polling tools. At ~2 seconds per LLM round,
+# 30 repeats ≈ 60 seconds of polling headroom — sufficient for JMeter
+# smoke test startup (5-15s) plus short test execution. These are
+# agent-initiated short-lived runs, not long-running perf tests.
+polling_max_consecutive_repeats: 30
+
 # force_tool_choice: When true, sets tool_choice="required" on the LLM
 #   config, forcing the model to always call a tool rather than generating
 #   conversational filler between steps. This can reduce unnecessary LLM

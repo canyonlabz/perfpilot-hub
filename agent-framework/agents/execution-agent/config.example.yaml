@@ -103,7 +103,21 @@ retries: 3
 timeout_seconds: 60
 
 # =============================================================================
-# 5. A2A discovery metadata
+# 5. Polling tool exemptions (future-proofing)
+# =============================================================================
+# The execution-agent currently uses its own internal polling loop
+# (wait_for_completion) which bypasses the multi-turn tool loop.
+# This list is defined here for forward compatibility in case any
+# future workflow routes blazemeter_check_test_status through the
+# multi-turn loop.
+polling_tools:
+  - blazemeter_check_test_status
+
+# At ~2 seconds per LLM round, 30 repeats ≈ 60 seconds of polling.
+polling_max_consecutive_repeats: 30
+
+# =============================================================================
+# 6. A2A discovery metadata
 # =============================================================================
 # Overrides for the `agent_card.json` fields used by external A2A
 # clients. When absent, sensible defaults are derived from the agent's

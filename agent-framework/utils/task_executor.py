@@ -1415,6 +1415,8 @@ async def _run_multi_turn_tool_loop(
     *,
     max_tool_rounds: int,
     max_consecutive_repeats: int,
+    polling_tools: frozenset[str] = frozenset(),
+    polling_max_consecutive_repeats: int = 30,
     context_limit: int,
     compaction_threshold: float,
     compaction_preserve_recent: int,
@@ -1533,10 +1535,18 @@ async def _run_multi_turn_tool_loop(
                     consecutive_repeats = 1
                     last_tool_signature = tool_sig
 
-                if consecutive_repeats >= max_consecutive_repeats:
+                is_polling = fn_name in polling_tools
+                effective_limit = (
+                    polling_max_consecutive_repeats
+                    if is_polling
+                    else max_consecutive_repeats
+                )
+                if consecutive_repeats >= effective_limit:
+                    limit_label = "polling " if is_polling else ""
                     warning = (
                         f"[Loop exited: tool '{fn_name}' called with identical "
-                        f"arguments {max_consecutive_repeats} times consecutively]"
+                        f"arguments {effective_limit} times consecutively "
+                        f"({limit_label}threshold)]"
                     )
                     log.warning(
                         "%s task %s: %s", agent_name, task_id, warning,
@@ -1757,6 +1767,13 @@ async def _run_mcp_specialist_agent(
 
     max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
     max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
+    raw_polling_tools = agent_config.get("polling_tools", [])
+    polling_tools = frozenset(
+        raw_polling_tools if isinstance(raw_polling_tools, list) else []
+    )
+    polling_max_consecutive_repeats = int(
+        agent_config.get("polling_max_consecutive_repeats", 30)
+    )
     context_limit = int(agent_config.get("context_limit", 128000))
     compaction_threshold = float(agent_config.get("compaction_threshold", 0.80))
     compaction_preserve_recent = int(agent_config.get("compaction_preserve_recent", 5))
@@ -1831,6 +1848,8 @@ async def _run_mcp_specialist_agent(
                 messages=messages_for_llm,
                 max_tool_rounds=max_tool_rounds,
                 max_consecutive_repeats=max_consecutive_repeats,
+                polling_tools=polling_tools,
+                polling_max_consecutive_repeats=polling_max_consecutive_repeats,
                 context_limit=context_limit,
                 compaction_threshold=compaction_threshold,
                 compaction_preserve_recent=compaction_preserve_recent,
