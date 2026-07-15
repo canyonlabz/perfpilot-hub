@@ -557,6 +557,13 @@ def main() -> None:
     except ImportError:
         log.debug("python-dotenv not installed; relying on shell env only")
 
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+        log.info("truststore: injected OS certificate store into ssl module")
+    except ImportError:
+        log.debug("truststore not installed; using certifi CA bundle")
+
     import uvicorn
     uvicorn.run(
         "a2a_server:app",
