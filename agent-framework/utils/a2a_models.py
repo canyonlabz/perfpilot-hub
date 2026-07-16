@@ -15,7 +15,7 @@ Timestamps follow ISO 8601 UTC with ``Z`` suffix and millisecond precision
 (Section 5.5).
 
 This module is **standalone** — it imports only ``pydantic`` and the
-media-type constants from ``a2a_parts_parser``. No database, FastAPI,
+media-type constants from ``a2a_media_types``. No database, FastAPI,
 AG2, or MCP dependencies.
 
 Spec reference: https://a2a-protocol.org/v1.0.0/specification/
@@ -31,18 +31,18 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
 
-from . import a2a_parts_parser
+from . import a2a_media_types
 
 # =============================================================================
-# PerfPilot media type constants (re-exported from a2a_parts_parser)
+# Media type constants (re-exported from a2a_media_types registry)
 # =============================================================================
 
-MEDIA_TEXT_PLAIN = a2a_parts_parser.MEDIA_TEXT_PLAIN
-MEDIA_TEXT_MARKDOWN = a2a_parts_parser.MEDIA_TEXT_MARKDOWN
-MEDIA_JSON = a2a_parts_parser.MEDIA_JSON
-MEDIA_ADO_WORK_ITEM = a2a_parts_parser.MEDIA_ADO_WORK_ITEM
-MEDIA_TEST_CASES = a2a_parts_parser.MEDIA_TEST_CASES
-MEDIA_TEST_CONFIG = a2a_parts_parser.MEDIA_TEST_CONFIG
+MEDIA_TEXT_PLAIN = a2a_media_types.MEDIA_TEXT_PLAIN
+MEDIA_TEXT_MARKDOWN = a2a_media_types.MEDIA_TEXT_MARKDOWN
+MEDIA_JSON = a2a_media_types.MEDIA_JSON
+MEDIA_ADO_PBI = a2a_media_types.MEDIA_ADO_PBI
+MEDIA_ADO_FEATURE = a2a_media_types.MEDIA_ADO_FEATURE
+MEDIA_ADO_TESTCASE = a2a_media_types.MEDIA_ADO_TESTCASE
 
 # =============================================================================
 # Base model
@@ -106,6 +106,7 @@ class Part(A2ABaseModel):
     data: Optional[dict[str, Any]] = None
     metadata: Optional[dict[str, Any]] = None
     filename: Optional[str] = None
+    media_type: Optional[str] = None
 
     @model_validator(mode="after")
     def _exactly_one_content_field(self) -> Part:

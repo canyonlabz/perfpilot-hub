@@ -193,7 +193,7 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
             artifacts = [
                 Artifact(
                     artifact_id=f"{task.task_id}-result",
-                    parts=[Part(text=reply_text)],
+                    parts=[Part(text=reply_text, media_type="text/plain")],
                     name="Agent response",
                 )
             ]

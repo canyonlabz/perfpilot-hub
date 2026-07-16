@@ -1,21 +1,15 @@
-"""Parse upstream A2A request bodies per the Upstream Request Data Contract.
+"""Parse upstream A2A request bodies into orchestrator-ready prompts.
 
 This module handles the ``parts[]`` array, ``metadata`` block, and message
-precedence resolution defined in the A2A Upstream Request Data Contract
-(``A2A-Upstream-Request-Contract.md``).  It converts enriched upstream
-payloads into a single coherent prompt string that the orchestrator LLM
-can reason over, while preserving structured context for downstream use.
+precedence resolution for incoming A2A requests.  It converts enriched
+upstream payloads into a single coherent prompt string that the orchestrator
+LLM can reason over, while preserving structured context for downstream use.
 
-Supported media types (Contract Section 5):
+Supported media types are defined in ``a2a_media_types.py`` (the MIME type
+registry).  This module imports from that registry and uses it for media type
+resolution and validation.
 
-    text/plain                                       - plain text prompt
-    text/markdown                                    - Markdown content (test cases)
-    application/json                                 - generic structured JSON
-    application/vnd.perfpilot.ado-work-item+json     - ADO work item
-    application/vnd.perfpilot.test-cases+json        - structured test case collection
-    application/vnd.perfpilot.test-config+json       - test execution configuration
-
-Message resolution order (Contract Appendix A):
+Message resolution order:
 
     message > text > prompt > first text Part in parts[]
 
@@ -36,23 +30,17 @@ from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
-# ── PerfPilot media type constants ──────────────────────────────────────────
+# ── Media type constants (sourced from the MIME type registry) ──────────────
 
-MEDIA_TEXT_PLAIN = "text/plain"
-MEDIA_TEXT_MARKDOWN = "text/markdown"
-MEDIA_JSON = "application/json"
-MEDIA_ADO_WORK_ITEM = "application/vnd.perfpilot.ado-work-item+json"
-MEDIA_TEST_CASES = "application/vnd.perfpilot.test-cases+json"
-MEDIA_TEST_CONFIG = "application/vnd.perfpilot.test-config+json"
-
-_KNOWN_MEDIA_TYPES = frozenset({
-    MEDIA_TEXT_PLAIN,
-    MEDIA_TEXT_MARKDOWN,
+from .a2a_media_types import (  # noqa: E402
+    MEDIA_ADO_FEATURE,
+    MEDIA_ADO_PBI,
+    MEDIA_ADO_TESTCASE,
     MEDIA_JSON,
-    MEDIA_ADO_WORK_ITEM,
-    MEDIA_TEST_CASES,
-    MEDIA_TEST_CONFIG,
-})
+    MEDIA_TEXT_MARKDOWN,
+    MEDIA_TEXT_PLAIN,
+    SUPPORTED_MEDIA_TYPES,
+)
 
 
 # ── Result dataclass ───────────────────────────────────────────────────────
@@ -146,11 +134,11 @@ def parse_request_body(body: dict) -> ParsedRequest:
             if section:
                 prompt_sections.append(section)
 
-            # Extract test_run_id from test-config if not set at top level
-            if media_type == MEDIA_TEST_CONFIG and result.test_run_id is None:
-                config_trid = data_content.get("test_run_id")
-                if isinstance(config_trid, str) and config_trid.strip():
-                    result.test_run_id = config_trid.strip()
+            # Extract test_run_id from any data Part if not set at top level
+            if result.test_run_id is None:
+                part_trid = data_content.get("test_run_id")
+                if isinstance(part_trid, str) and part_trid.strip():
+                    result.test_run_id = part_trid.strip()
 
         # ── URL Part ──
         elif isinstance(part.get("url"), str):
@@ -173,9 +161,9 @@ def parse_request_body(body: dict) -> ParsedRequest:
 
 
 def resolve_user_message(body: dict) -> Optional[str]:
-    """Resolve the user's primary message per contract precedence rules.
+    """Resolve the user's primary message per precedence rules.
 
-    Resolution order (Appendix A):
+    Resolution order:
         ``message`` > ``text`` > ``prompt`` > first text Part in ``parts[]``
 
     Args:
@@ -210,14 +198,25 @@ def resolve_user_message(body: dict) -> Optional[str]:
 def _resolve_media_type(part: dict) -> str:
     """Determine the effective mediaType for a Part.
 
-    Defaults:
+    If an explicit ``mediaType`` is provided, it is returned as-is (even if
+    unrecognized) for forward compatibility.  A warning is logged when the
+    value is not in ``SUPPORTED_MEDIA_TYPES``.
+
+    Defaults when ``mediaType`` is absent:
         - ``text/plain`` for Parts with ``text``
         - ``application/json`` for Parts with ``data``
         - ``text/plain`` for Parts with ``url``
     """
     explicit = part.get("mediaType")
     if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
+        resolved = explicit.strip()
+        if resolved not in SUPPORTED_MEDIA_TYPES:
+            log.warning(
+                "Unrecognized mediaType '%s'; passing through for "
+                "forward compatibility",
+                resolved,
+            )
+        return resolved
 
     if "text" in part:
         return MEDIA_TEXT_PLAIN
@@ -240,22 +239,26 @@ def _format_text_part(text: str, media_type: str, idx: int) -> str:
 def _format_data_part(data: dict, media_type: str, idx: int) -> str:
     """Format a data Part into a prompt section based on its mediaType."""
 
-    if media_type == MEDIA_ADO_WORK_ITEM:
-        return _format_ado_work_item(data, idx)
+    if media_type == MEDIA_ADO_PBI:
+        return _format_ado_pbi(data, idx)
 
-    if media_type == MEDIA_TEST_CASES:
-        return _format_test_cases(data, idx)
+    if media_type == MEDIA_ADO_FEATURE:
+        return _format_ado_feature(data, idx)
 
-    if media_type == MEDIA_TEST_CONFIG:
-        return _format_test_config(data, idx)
+    if media_type == MEDIA_ADO_TESTCASE:
+        return _format_ado_testcase(data, idx)
 
     # Generic JSON
     return f"[Part {idx + 1} — Structured data ({media_type})]\n{json.dumps(data, indent=2)}"
 
 
-def _format_ado_work_item(data: dict, idx: int) -> str:
-    """Format an ADO work item Part into a readable prompt section."""
-    lines = [f"[Part {idx + 1} — ADO Work Item]"]
+def _format_ado_work_item_fields(data: dict) -> list[str]:
+    """Extract common ADO work item fields into formatted lines.
+
+    Shared by the PBI and Feature formatters since both work item types
+    carry the same field set.
+    """
+    lines: list[str] = []
 
     wi_id = data.get("id")
     wi_type = data.get("type")
@@ -298,12 +301,26 @@ def _format_ado_work_item(data: dict, idx: int) -> str:
         for criterion in ac:
             lines.append(f"    - {criterion}")
 
+    return lines
+
+
+def _format_ado_pbi(data: dict, idx: int) -> str:
+    """Format an ADO Product Backlog Item Part into a readable prompt section."""
+    lines = [f"[Part {idx + 1} — ADO Product Backlog Item]"]
+    lines.extend(_format_ado_work_item_fields(data))
     return "\n".join(lines)
 
 
-def _format_test_cases(data: dict, idx: int) -> str:
-    """Format structured test cases into a readable prompt section."""
-    lines = [f"[Part {idx + 1} — Test Cases (structured)]"]
+def _format_ado_feature(data: dict, idx: int) -> str:
+    """Format an ADO Feature work item Part into a readable prompt section."""
+    lines = [f"[Part {idx + 1} — ADO Feature]"]
+    lines.extend(_format_ado_work_item_fields(data))
+    return "\n".join(lines)
+
+
+def _format_ado_testcase(data: dict, idx: int) -> str:
+    """Format an ADO Test Case Part into a readable prompt section."""
+    lines = [f"[Part {idx + 1} — ADO Test Case (structured)]"]
 
     cases = data.get("test_cases")
     if not isinstance(cases, list):
@@ -334,27 +351,5 @@ def _format_test_cases(data: dict, idx: int) -> str:
         steps = tc.get("steps")
         if isinstance(steps, list):
             lines.append(f"      Steps: {len(steps)}")
-
-    return "\n".join(lines)
-
-
-def _format_test_config(data: dict, idx: int) -> str:
-    """Format test configuration into a readable prompt section."""
-    lines = [f"[Part {idx + 1} — Test Configuration]"]
-
-    for key in ("environment", "blazemeter_test_id", "vusers",
-                "ramp_up_seconds", "duration_seconds", "application_url"):
-        value = data.get(key)
-        if value is not None:
-            lines.append(f"  {key}: {value}")
-
-    # Include any extra keys not in the known set
-    known = {"environment", "blazemeter_test_id", "vusers",
-             "ramp_up_seconds", "duration_seconds", "application_url",
-             "test_run_id"}
-    extras = {k: v for k, v in data.items() if k not in known and v is not None}
-    if extras:
-        for k, v in extras.items():
-            lines.append(f"  {k}: {v}")
 
     return "\n".join(lines)
