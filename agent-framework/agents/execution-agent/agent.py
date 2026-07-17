@@ -191,28 +191,15 @@ def _resolve_provider_config() -> dict:
 
 
 def _load_per_agent_llm_block() -> Optional[dict]:
-    """Parse the resolved per-agent config and return its `llm_provider:` block.
+    """Parse the resolved per-agent config and return its ``llm_provider:`` block.
 
-    Returns None when neither candidate config file exists, the YAML is
-    empty, or the `llm_provider:` key is absent / commented out.
+    Delegates YAML loading to ``config_loader.get_agent_config_section()``
+    Returns None when neither candidate config file exists,
+    the YAML is empty, or the ``llm_provider:`` key is absent / commented out.
     """
-    from utils.base_agent import resolve_agent_config_path
+    from utils.config_loader import get_agent_config_section
 
-    config_path = resolve_agent_config_path(AGENT_DIR)
-    if config_path is None:
-        log.warning(
-            "Execution-agent config not found under %s "
-            "(expected config.yaml or config.example.yaml); "
-            "using default LLM provider.",
-            AGENT_DIR,
-        )
-        return None
-
-    import yaml
-
-    with open(config_path, "r", encoding="utf-8-sig") as f:
-        parsed = yaml.safe_load(f) or {}
-    block = parsed.get("llm_provider")
+    block = get_agent_config_section("execution-agent", "llm_provider")
     if not block or not isinstance(block, dict):
         return None
     return dict(block)

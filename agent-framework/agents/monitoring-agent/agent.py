@@ -66,8 +66,6 @@ def build_monitoring_agent():
     """
     import asyncio
 
-    import yaml
-
     try:
         from autogen import ConversableAgent
     except ImportError:
@@ -76,13 +74,10 @@ def build_monitoring_agent():
     instructions_path = _AGENT_DIR / "INSTRUCTIONS.md"
     system_message = instructions_path.read_text(encoding="utf-8-sig")
 
-    from utils.base_agent import resolve_agent_config_path
+    from utils.config_loader import load_agent_config
     from utils.llm_provider import build_llm_config
 
-    config_path = resolve_agent_config_path(_AGENT_DIR)
-    with open(config_path, encoding="utf-8-sig") as fh:
-        agent_config = yaml.safe_load(fh) or {}
-
+    agent_config = load_agent_config("monitoring-agent")
     llm_config = build_llm_config(agent_config.get("llm_provider"))
 
     agent = ConversableAgent(

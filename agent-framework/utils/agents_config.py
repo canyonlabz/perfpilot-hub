@@ -9,17 +9,14 @@ the orchestrator:
     get_session_cookie_config()      -> AG-UI session-cookie tunables
     get_context_indicator_enabled()  -> context-usage bar on/off bool
 
-The first call caches the parsed YAML in-process. Hot-reload during dev is
-left for future Features; for Epic 3, restarting the server picks up edits.
-
-Heavy import (`yaml`) is deferred into `load_agents_config()` so this module
-can be imported in environments without PyYAML installed.
+YAML loading is delegated to ``config_loader.load_global_config()`` which
+handles candidate resolution, utf-8-sig encoding, caching, and error
+handling centrally.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -60,51 +57,22 @@ class SessionCookieConfig:
     secure: bool
     samesite: str
 
-_cache_lock = threading.Lock()
-_cached: Optional[dict] = None
-_cached_for: Optional[Path] = None
-
-
 def load_agents_config(framework_dir: Optional[Path] = None, *, force_reload: bool = False) -> dict:
     """Return the parsed `agents.yaml` (or `agents.example.yaml`) as a dict.
 
-    Mirrors `utils.llm_provider.load_agents_yaml` but caches the result so
-    repeated lookups are O(1). The cache key is the resolved framework dir;
-    set `force_reload=True` to re-read from disk (useful in tests).
+    Delegates to ``config_loader.load_global_config()`` which handles
+    candidate resolution, utf-8-sig encoding, caching, and error handling.
+    Set ``force_reload=True`` to re-read from disk (useful in tests).
 
     Returns:
         Parsed YAML dict. Empty dict (with warning) if neither file exists.
     """
-    global _cached, _cached_for
-    import yaml  # deferred so module imports without PyYAML installed
+    from . import config_loader
 
-    if framework_dir is None:
-        framework_dir = Path(__file__).resolve().parent.parent
+    if force_reload:
+        config_loader.clear_global_cache()
 
-    with _cache_lock:
-        if not force_reload and _cached is not None and _cached_for == framework_dir:
-            return _cached
-
-        candidates = (
-            framework_dir / "config" / "agents.yaml",
-            framework_dir / "config" / "agents.example.yaml",
-        )
-        for candidate in candidates:
-            if candidate.exists():
-                with open(candidate, "r", encoding="utf-8") as f:
-                    _cached = yaml.safe_load(f) or {}
-                _cached_for = framework_dir
-                log.info("Loaded agents config from %s", candidate)
-                return _cached
-
-        log.warning(
-            "Neither agents.yaml nor agents.example.yaml found under %s/config/. "
-            "All agents will be treated as disabled.",
-            framework_dir,
-        )
-        _cached = {}
-        _cached_for = framework_dir
-        return _cached
+    return config_loader.load_global_config(framework_dir=framework_dir)
 
 
 def is_agent_enabled(agent_name: str, framework_dir: Optional[Path] = None) -> bool:

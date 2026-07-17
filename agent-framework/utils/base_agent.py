@@ -31,8 +31,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 log = logging.getLogger(__name__)
 
 # The four-file pattern (V2 §7.1). `config.yaml` is special: the loader
@@ -168,15 +166,11 @@ def load_agent_definition(agent_folder: Path) -> AgentDefinition:
     instructions_path = agent_folder / "INSTRUCTIONS.md"
     agent_card_path = agent_folder / "agent_card.json"
 
-    # Use utf-8-sig so any BOM (commonly emitted by Windows editors / tools)
-    # is transparently stripped before the parser sees it. PyYAML and the
-    # stdlib json module both reject a leading BOM otherwise.
-    with open(config_path, "r", encoding="utf-8-sig") as f:
-        config = yaml.safe_load(f) or {}
-    if not isinstance(config, dict):
-        raise ValueError(
-            f"Agent '{name}' config file at {config_path.name} must be a YAML mapping"
-        )
+    from . import config_loader
+
+    config = config_loader.load_agent_config(
+        name, framework_dir=agent_folder.parent.parent,
+    )
 
     with open(instructions_path, "r", encoding="utf-8-sig") as f:
         instructions = f.read()

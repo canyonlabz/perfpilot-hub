@@ -48,34 +48,22 @@ DEFAULT_SSL_MODE = "ca_bundle"
 # =============================================================================
 
 def load_agents_yaml(framework_dir: Optional[Path] = None) -> dict:
-    """Load `config/agents.yaml`, falling back to `agents.example.yaml`.
+    """Load ``config/agents.yaml``, falling back to ``agents.example.yaml``.
 
-    Mirrors PerfMemory's `load_taxonomy` candidate-resolution pattern.
+    Delegates to ``config_loader.load_global_config()`` which handles
+    candidate resolution, utf-8-sig encoding, caching, and error handling
+    centrally.
 
     Args:
-        framework_dir: Path to `agent-framework/`. Defaults to the parent of
-            this module's folder.
+        framework_dir: Path to ``agent-framework/``. Defaults to the parent
+            of this module's folder.
 
     Returns:
-        The parsed YAML dict, or `{}` if neither file exists (with a warning).
+        The parsed YAML dict, or ``{}`` if neither file exists (with a warning).
     """
-    import yaml
+    from . import config_loader
 
-    if framework_dir is None:
-        framework_dir = Path(__file__).resolve().parent.parent
-
-    candidates = (
-        framework_dir / "config" / "agents.yaml",
-        framework_dir / "config" / "agents.example.yaml",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            log.debug("Loading agents.yaml from %s", candidate)
-            with open(candidate, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-
-    log.warning("Neither agents.yaml nor agents.example.yaml found under %s/config/", framework_dir)
-    return {}
+    return config_loader.load_global_config(framework_dir=framework_dir)
 
 
 def merge_env_credentials(provider_config: dict, env: Optional[dict] = None) -> dict:

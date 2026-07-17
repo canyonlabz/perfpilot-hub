@@ -469,41 +469,11 @@ _HITL_GATE_RULES: list[HitlGateRule] = [
     ),
 ]
 
-# Orchestrator config cache (loaded once per process)
-_orchestrator_config: Optional[dict] = None
-_orchestrator_config_loaded = False
-
-
 def _load_orchestrator_config() -> dict:
-    """Load the full orchestrator config.yaml (cached after first load)."""
-    global _orchestrator_config, _orchestrator_config_loaded
-    if _orchestrator_config_loaded:
-        return _orchestrator_config or {}
+    """Load the full orchestrator config.yaml (cached by config_loader)."""
+    from . import config_loader
 
-    try:
-        from pathlib import Path
-
-        import yaml
-
-        from .base_agent import resolve_agent_config_path
-
-        orchestrator_dir = Path(__file__).resolve().parent.parent / "agents" / "orchestrator"
-        config_path = resolve_agent_config_path(orchestrator_dir)
-        if config_path is None:
-            log.warning("_load_orchestrator_config: no config found")
-            _orchestrator_config = {}
-        else:
-            with open(config_path, "r", encoding="utf-8-sig") as f:
-                _orchestrator_config = yaml.safe_load(f) or {}
-            if not isinstance(_orchestrator_config, dict):
-                _orchestrator_config = {}
-            log.info("Orchestrator config loaded (hitl=%s)", _orchestrator_config.get("hitl"))
-    except Exception:
-        log.exception("_load_orchestrator_config: failed")
-        _orchestrator_config = {}
-
-    _orchestrator_config_loaded = True
-    return _orchestrator_config or {}
+    return config_loader.load_agent_config("orchestrator")
 
 
 def _get_hitl_config() -> dict:
@@ -753,27 +723,18 @@ async def _invoke_orchestrator_with_tool_loop(
     import sys
     from pathlib import Path
 
-    import yaml
-
     framework_dir = Path(__file__).resolve().parent.parent
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 
     from agents.orchestrator.agent import build_orchestrator, drain_pending_executions
-    from utils.base_agent import resolve_agent_config_path
 
     agent = await asyncio.to_thread(build_orchestrator)
 
     # ---- Load loop config from the orchestrator's config.yaml ----------
-    orchestrator_dir = framework_dir / "agents" / "orchestrator"
-    orch_config: dict = {}
-    config_path = resolve_agent_config_path(orchestrator_dir)
-    if config_path:
-        try:
-            with open(config_path, encoding="utf-8-sig") as fh:
-                orch_config = yaml.safe_load(fh) or {}
-        except Exception:
-            log.warning("Could not load orchestrator config for tool loop; using defaults")
+    from . import config_loader
+
+    orch_config = config_loader.load_agent_config("orchestrator")
 
     max_tool_rounds = int(orch_config.get("max_tool_rounds", 10))
     max_consecutive_repeats = int(orch_config.get("max_consecutive_repeats", 3))
@@ -1890,23 +1851,13 @@ async def _run_mcp_specialist_agent(
     import sys
     from pathlib import Path
 
-    import yaml
-
     framework_dir = Path(__file__).resolve().parent.parent
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 
-    from utils.base_agent import resolve_agent_config_path
+    from utils import config_loader
 
-    agent_dir = framework_dir / "agents" / agent_name
-    agent_config: dict = {}
-    config_path = resolve_agent_config_path(agent_dir)
-    if config_path:
-        try:
-            with open(config_path, encoding="utf-8-sig") as fh:
-                agent_config = yaml.safe_load(fh) or {}
-        except Exception:
-            log.warning("Could not load config for %s, using defaults", agent_name)
+    agent_config = config_loader.load_agent_config(agent_name)
 
     max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
     max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
