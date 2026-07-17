@@ -136,6 +136,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
         }
+        body.setdefault("metadata", {})["request_mode"] = "send"
 
         task = await task_store.create_task(
             session_id=session_id,
@@ -175,6 +176,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
         }
+        body.setdefault("metadata", {})["request_mode"] = "streaming"
 
         task = await task_store.create_task(
             session_id=session_id,
@@ -330,6 +332,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
         }
+        body.setdefault("metadata", {})["request_mode"] = "send"
 
         task = await task_store.create_task(
             session_id=session_id,
@@ -421,6 +424,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
         }
+        body.setdefault("metadata", {})["request_mode"] = "streaming"
 
         task = await task_store.create_task(
             session_id=session_id,

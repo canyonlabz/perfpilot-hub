@@ -217,14 +217,11 @@ def _register_routes(app: FastAPI) -> None:
         body = await _read_json_body(request)
 
         thread = await _resolve_a2a_thread(request, agent_name)
-        # Stamp the resolved thread into the payload so `task_executor.
-        # _run_orchestrator` can load conversation history and persist
-        # the new turns. The `_` prefix keeps it out of the way of
-        # any caller-supplied keys.
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
         }
+        body.setdefault("metadata", {})["request_mode"] = "send"
 
         task = await task_store.create_task(
             session_id=session_id,
@@ -235,7 +232,6 @@ def _register_routes(app: FastAPI) -> None:
             thread_id=thread.thread_id,
             subscriber_endpoints=_extract_subscriber_endpoints(body),
         )
-        # Fire-and-forget background execution.
         asyncio.create_task(task_executor.execute_task(task.task_id))
 
         return JSONResponse(
@@ -263,6 +259,7 @@ def _register_routes(app: FastAPI) -> None:
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
         }
+        body.setdefault("metadata", {})["request_mode"] = "streaming"
 
         task = await task_store.create_task(
             session_id=session_id,
@@ -277,7 +274,6 @@ def _register_routes(app: FastAPI) -> None:
         asyncio.create_task(task_executor.execute_task(task.task_id))
 
         async def _stream():
-            # Emit an initial snapshot so consumers immediately know the task_id.
             yield {
                 "event": "snapshot",
                 "data": json.dumps({

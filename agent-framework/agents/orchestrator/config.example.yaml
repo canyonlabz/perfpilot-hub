@@ -134,3 +134,24 @@ polling_max_consecutive_repeats: 15   # Higher threshold for polling tools
 context_limit: 128000            # Token budget for context pressure tracking
 compaction_threshold: 0.80       # Trigger compaction at 80% utilization
 compaction_preserve_recent: 5    # Keep the 5 most recent tool results intact during compaction
+
+# =============================================================================
+# 9. Streaming-aware task lifecycle
+# =============================================================================
+# When a request arrives via SendStreamingMessage (SSE), the A2A client
+# expects the stream to stay open until the task is fully complete. If the
+# orchestrator's LLM exits with a text reply while delegated specialist
+# tasks are still running, this setting controls whether the executor
+# holds the orchestrator task in 'running' state until all delegated work
+# reaches a terminal state (completed/failed/cancelled).
+#
+# When true (default): executor waits for specialists, keeping the SSE
+#   stream open. The client sees the full lifecycle.
+# When false: executor marks the orchestrator task completed immediately
+#   after the LLM exits (original behavior). The client's SSE stream
+#   closes and must poll for specialist progress separately.
+#
+# The polling interval (seconds) controls how often the executor checks
+# delegated task status during the wait.
+streaming_wait_for_specialists: true
+streaming_wait_poll_interval_seconds: 5

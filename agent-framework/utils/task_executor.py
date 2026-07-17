@@ -615,6 +615,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         assistant_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
             await _invoke_orchestrator_with_tool_loop(
                 messages_for_llm, task.task_id, common,
+                payload=task.payload,
             )
         )
     except Exception as exc:
@@ -692,6 +693,8 @@ async def _invoke_orchestrator_with_tool_loop(
     messages: list[dict],
     task_id: Any,
     common: dict,
+    *,
+    payload: Optional[dict] = None,
 ) -> tuple[str, Any, list[dict], str, dict | None]:
     """Build a fresh orchestrator and run a multi-turn tool-execution loop.
 
@@ -749,6 +752,9 @@ async def _invoke_orchestrator_with_tool_loop(
     compaction_threshold = float(orch_config.get("compaction_threshold", 0.80))
     compaction_preserve_recent = int(orch_config.get("compaction_preserve_recent", 5))
 
+    # ---- Track delegated specialist task IDs for streaming wait ----------
+    delegated_task_ids: list[UUID] = []
+
     # ---- after_tool_round callback: start delegated specialist tasks ----
     async def _drain_and_start_pending() -> None:
         """Drain _pending_executions and fire specialist tasks immediately.
@@ -764,6 +770,7 @@ async def _invoke_orchestrator_with_tool_loop(
                 "Orchestrator task %s: starting delegated specialist task %s",
                 task_id, pending_task_id,
             )
+            delegated_task_ids.append(pending_task_id)
             asyncio.create_task(execute_task(pending_task_id))
 
     reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
@@ -791,7 +798,55 @@ async def _invoke_orchestrator_with_tool_loop(
             "Orchestrator task %s: starting remaining delegated task %s",
             task_id, pending_task_id,
         )
+        delegated_task_ids.append(pending_task_id)
         asyncio.create_task(execute_task(pending_task_id))
+
+    # ---- Streaming-aware task lifecycle ----------------------
+    # When the request arrived via SendStreamingMessage and the config
+    # enables waiting, hold the orchestrator task in 'running' state until
+    # all delegated specialist tasks reach a terminal state. This keeps
+    # the A2A client's SSE stream open for the full lifecycle.
+    request_mode = (payload or {}).get("metadata", {}).get("request_mode")
+    wait_enabled = bool(orch_config.get("streaming_wait_for_specialists", True))
+    poll_interval = float(
+        orch_config.get("streaming_wait_poll_interval_seconds", 5)
+    )
+
+    if (
+        request_mode == "streaming"
+        and wait_enabled
+        and delegated_task_ids
+    ):
+        log.info(
+            "Orchestrator task %s: streaming mode — waiting for %d "
+            "delegated task(s) to reach terminal state",
+            task_id, len(delegated_task_ids),
+        )
+        await _broadcast(
+            task_id,
+            TaskEvent(
+                status="running",
+                progress="waiting_for_specialists",
+                result={"delegated_task_ids": [str(t) for t in delegated_task_ids]},
+                **common,
+            ),
+        )
+
+        remaining = set(delegated_task_ids)
+        while remaining:
+            await asyncio.sleep(poll_interval)
+            settled = set()
+            for child_id in remaining:
+                child = await task_store.get_task(child_id)
+                if child is None or child.status in task_store.TERMINAL_STATUSES:
+                    settled.add(child_id)
+            remaining -= settled
+
+        log.info(
+            "Orchestrator task %s: all %d delegated task(s) have reached "
+            "terminal state",
+            task_id, len(delegated_task_ids),
+        )
 
     return reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics
 
