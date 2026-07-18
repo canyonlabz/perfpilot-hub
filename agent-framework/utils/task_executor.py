@@ -107,6 +107,11 @@ class TaskEvent:
 _subscribers: dict[UUID, list[asyncio.Queue]] = {}
 _subscribers_lock = asyncio.Lock()
 
+# Maps child (specialist) task_id -> parent (orchestrator) task_id so that
+# _broadcast() can forward specialist events to parent SSE subscribers.
+# Populated by _drain_and_start_pending() inside the orchestrator tool loop.
+_parent_task_cache: dict[UUID, UUID] = {}
+
 
 async def subscribe(task_id: UUID) -> asyncio.Queue:
     """Register a queue for state events on `task_id`. Returns the queue."""
@@ -126,15 +131,43 @@ async def unsubscribe(task_id: UUID, queue: asyncio.Queue) -> None:
             _subscribers.pop(task_id, None)
 
 
+def register_parent_task(child_task_id: UUID, parent_task_id: UUID) -> None:
+    """Record a parent-child relationship for SSE event proxying"""
+    _parent_task_cache[child_task_id] = parent_task_id
+
+
 async def _broadcast(task_id: UUID, event: TaskEvent) -> None:
-    """Push `event` to every queue subscribed to `task_id`. Drops on full queue."""
+    """Push `event` to every queue subscribed to `task_id`.
+
+    When the task has a known parent (via ``_parent_task_cache``), the event
+    is also forwarded to all subscribers of the parent task so that SSE
+    consumers on the orchestrator stream see specialist progress in real
+    time.  The forwarded event retains the original specialist
+    ``task_id`` and ``agent_name`` so the consumer can distinguish it from
+    orchestrator-originated events.
+
+    Drops silently on full queues.
+    """
+    parent_id = _parent_task_cache.get(task_id)
+
     async with _subscribers_lock:
         queues = list(_subscribers.get(task_id, ()))
+        parent_queues = list(_subscribers.get(parent_id, ())) if parent_id else []
+
     for queue in queues:
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
             log.warning("Dropping SSE event for task %s; subscriber queue full", task_id)
+
+    for queue in parent_queues:
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            log.warning(
+                "Dropping proxied SSE event for parent task %s (child %s); queue full",
+                parent_id, task_id,
+            )
 
 
 # =============================================================================
@@ -596,8 +629,10 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         agent_thread_id_var,
         agent_session_id_var,
         agent_request_source_var,
+        agent_task_id_var,
     )
     agent_request_source_var.set("a2a")
+    agent_task_id_var.set(str(task.task_id))
 
     if task.session_id:
         agent_session_id_var.set(str(task.session_id))
@@ -755,6 +790,8 @@ async def _invoke_orchestrator_with_tool_loop(
     # ---- Track delegated specialist task IDs for streaming wait ----------
     delegated_task_ids: list[UUID] = []
 
+    proxy_sse_enabled = bool(orch_config.get("proxy_specialist_sse", True))
+
     # ---- after_tool_round callback: start delegated specialist tasks ----
     async def _drain_and_start_pending() -> None:
         """Drain _pending_executions and fire specialist tasks immediately.
@@ -763,6 +800,11 @@ async def _invoke_orchestrator_with_tool_loop(
         module-level ``_pending_executions`` list. We drain them here
         (between tool rounds) so they are *running* when the next LLM
         round calls ``check_task_status``.
+
+        When ``proxy_specialist_sse`` is enabled, registers each child
+        task in ``_parent_task_cache`` so ``_broadcast()`` forwards
+        specialist events to the orchestrator's SSE subscribers
+        (ENH-003B).
         """
         pending = drain_pending_executions()
         for pending_task_id in pending:
@@ -771,6 +813,8 @@ async def _invoke_orchestrator_with_tool_loop(
                 task_id, pending_task_id,
             )
             delegated_task_ids.append(pending_task_id)
+            if proxy_sse_enabled:
+                register_parent_task(pending_task_id, task_id)
             asyncio.create_task(execute_task(pending_task_id))
 
     reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
@@ -799,6 +843,8 @@ async def _invoke_orchestrator_with_tool_loop(
             task_id, pending_task_id,
         )
         delegated_task_ids.append(pending_task_id)
+        if proxy_sse_enabled:
+            register_parent_task(pending_task_id, task_id)
         asyncio.create_task(execute_task(pending_task_id))
 
     # ---- Streaming-aware task lifecycle ----------------------

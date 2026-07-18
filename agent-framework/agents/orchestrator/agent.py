@@ -108,6 +108,15 @@ agent_request_source_var: ContextVar[Optional[str]] = ContextVar(
 agent_session_id_var: ContextVar[Optional[str]] = ContextVar(
     "perfpilot_agent_session_id", default=None
 )
+agent_task_id_var: ContextVar[Optional[str]] = ContextVar(
+    "perfpilot_agent_task_id", default=None
+)
+# NOTE: agent_task_id_var is a *convenience layer* for propagating the
+# orchestrator's task_id within a single async call stack (route -> executor
+# -> tool loop -> delegate_to_specialist). The DB parent_task_id column is
+# the canonical source of truth for parent-child relationships. ContextVars
+# are fragile across thread pools and different async executors. If this value 
+# is ever missing or stale, the child task is still created, just without SSE proxying.
 
 # ── Per-request identity for HTTP header construction ──
 # AG2's thread isolation means tools can't read ContextVars.
@@ -119,6 +128,7 @@ _caller_identity: dict[str, Optional[str]] = {
     "user_id": None,
     "thread_id": None,
     "session_id": None,
+    "task_id": None,
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -142,16 +152,20 @@ def set_caller_identity(
     user_id: Optional[str],
     thread_id: Optional[str],
     session_id: Optional[str],
+    *,
+    task_id: Optional[str] = None,
 ) -> None:
     _caller_identity["user_id"] = user_id
     _caller_identity["thread_id"] = thread_id
     _caller_identity["session_id"] = session_id
+    _caller_identity["task_id"] = task_id
 
 
 def clear_caller_identity() -> None:
     _caller_identity["user_id"] = None
     _caller_identity["thread_id"] = None
     _caller_identity["session_id"] = None
+    _caller_identity["task_id"] = None
 
 
 # =============================================================================
@@ -184,6 +198,7 @@ async def _standalone_create_task(
     payload: dict,
     test_run_id: Optional[str] = None,
     thread_id: Optional[str] = None,
+    parent_task_id: Optional[UUID] = None,
 ) -> dict:
     """INSERT a task row using a standalone connection. Returns a plain dict."""
     conn = await _get_standalone_conn()
@@ -192,23 +207,25 @@ async def _standalone_create_task(
             """
             INSERT INTO agent_tasks (
                 session_id, agent_name, status,
-                test_run_id, thread_id, payload
+                test_run_id, thread_id, payload, parent_task_id
             )
-            VALUES ($1, $2, 'pending', $3, $4, $5::jsonb)
+            VALUES ($1, $2, 'pending', $3, $4, $5::jsonb, $6)
             RETURNING task_id, session_id, agent_name, status,
-                      test_run_id, thread_id, submitted_at
+                      test_run_id, thread_id, parent_task_id, submitted_at
             """,
             session_id,
             agent_name,
             test_run_id,
             thread_id,
             json.dumps(payload),
+            parent_task_id,
         )
         return {
             "task_id": row["task_id"],
             "session_id": row["session_id"],
             "agent_name": row["agent_name"],
             "status": row["status"],
+            "parent_task_id": row["parent_task_id"],
             "submitted_at": row["submitted_at"].isoformat(),
         }
     finally:
@@ -540,6 +557,23 @@ async def delegate_to_specialist(
         or agent_thread_id_var.get()
     )
 
+    # Parent task ID for SSE event proxying.
+    # The ContextVar / _caller_identity are convenience layers; the DB
+    # parent_task_id column is the source of truth. If neither source
+    # provides a value (e.g. called from an unexpected execution context),
+    # the child task is still created -- just without parent linkage.
+    parent_task_id_str = (
+        _caller_identity.get("task_id")
+        or agent_task_id_var.get()
+    )
+    if not parent_task_id_str:
+        log.warning(
+            "delegate_to_specialist: no parent task_id available for agent=%s; "
+            "child task will be created without parent linkage "
+            "(SSE proxying will not apply)",
+            agent_name,
+        )
+
     if not session_id_str:
         return json.dumps({
             "ok": False,
@@ -553,6 +587,8 @@ async def delegate_to_specialist(
     if test_run_id is not None:
         body.setdefault("test_run_id", test_run_id)
 
+    parent_uuid = UUID(parent_task_id_str) if parent_task_id_str else None
+
     try:
         task_row = await _standalone_create_task(
             session_id=UUID(session_id_str),
@@ -560,6 +596,7 @@ async def delegate_to_specialist(
             payload=body,
             test_run_id=test_run_id,
             thread_id=thread_id,
+            parent_task_id=parent_uuid,
         )
     except Exception as exc:
         log.warning("delegate_to_specialist create_task error: %s", exc)

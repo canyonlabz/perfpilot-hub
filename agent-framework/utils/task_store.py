@@ -46,6 +46,7 @@ class AgentTask:
     subscriber_endpoints: list = field(default_factory=list)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    parent_task_id: Optional[UUID] = None
 
 
 def _coerce_jsonb(value: Any) -> Any:
@@ -77,6 +78,7 @@ def _row_to_task(row: Any) -> AgentTask:
         started_at=row["started_at"],
         completed_at=row["completed_at"],
         updated_at=row["updated_at"],
+        parent_task_id=row.get("parent_task_id"),
     )
 
 
@@ -89,6 +91,7 @@ async def create_task(
     test_run_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     subscriber_endpoints: Optional[list[str]] = None,
+    parent_task_id: Optional[UUID] = None,
 ) -> AgentTask:
     """Insert a new `agent_tasks` row in `pending` state and return it."""
     pool = await db.get_pool()
@@ -97,13 +100,14 @@ async def create_task(
             """
             INSERT INTO agent_tasks (
                 session_id, external_session_id, agent_name, status,
-                test_run_id, thread_id, payload, subscriber_endpoints
+                test_run_id, thread_id, payload, subscriber_endpoints,
+                parent_task_id
             )
-            VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb)
+            VALUES ($1, $2, $3, 'pending', $4, $5, $6::jsonb, $7::jsonb, $8)
             RETURNING task_id, session_id, external_session_id, agent_name, status,
                       test_run_id, thread_id, payload, result, error,
                       subscriber_endpoints, submitted_at, started_at,
-                      completed_at, updated_at
+                      completed_at, updated_at, parent_task_id
             """,
             session_id,
             external_session_id,
@@ -112,6 +116,7 @@ async def create_task(
             thread_id,
             json.dumps(payload or {}),
             json.dumps(subscriber_endpoints or []),
+            parent_task_id,
         )
     return _row_to_task(row)
 
@@ -125,7 +130,7 @@ async def get_task(task_id: UUID) -> Optional[AgentTask]:
             SELECT task_id, session_id, external_session_id, agent_name, status,
                    test_run_id, thread_id, payload, result, error,
                    subscriber_endpoints, submitted_at, started_at,
-                   completed_at, updated_at
+                   completed_at, updated_at, parent_task_id
             FROM agent_tasks
             WHERE task_id = $1
             """,
@@ -399,7 +404,7 @@ async def list_tasks_for_run(
                 SELECT task_id, session_id, external_session_id, agent_name, status,
                        test_run_id, thread_id, payload, result, error,
                        subscriber_endpoints, submitted_at, started_at,
-                       completed_at, updated_at
+                       completed_at, updated_at, parent_task_id
                 FROM agent_tasks
                 WHERE test_run_id = $1
                 ORDER BY submitted_at ASC
@@ -412,7 +417,7 @@ async def list_tasks_for_run(
                 SELECT t.task_id, t.session_id, t.external_session_id, t.agent_name,
                        t.status, t.test_run_id, t.thread_id, t.payload, t.result,
                        t.error, t.subscriber_endpoints, t.submitted_at, t.started_at,
-                       t.completed_at, t.updated_at
+                       t.completed_at, t.updated_at, t.parent_task_id
                 FROM agent_tasks t
                 JOIN agent_sessions s ON s.session_id = t.session_id
                 WHERE t.test_run_id = $1
@@ -459,7 +464,7 @@ async def list_tasks_for_thread(
                 SELECT task_id, session_id, external_session_id, agent_name, status,
                        test_run_id, thread_id, payload, result, error,
                        subscriber_endpoints, submitted_at, started_at,
-                       completed_at, updated_at
+                       completed_at, updated_at, parent_task_id
                 FROM agent_tasks
                 WHERE thread_id = $1
                 ORDER BY submitted_at DESC
@@ -475,7 +480,7 @@ async def list_tasks_for_thread(
                 SELECT t.task_id, t.session_id, t.external_session_id, t.agent_name,
                        t.status, t.test_run_id, t.thread_id, t.payload, t.result,
                        t.error, t.subscriber_endpoints, t.submitted_at, t.started_at,
-                       t.completed_at, t.updated_at
+                       t.completed_at, t.updated_at, t.parent_task_id
                 FROM agent_tasks t
                 JOIN agent_sessions s ON s.session_id = t.session_id
                 WHERE t.thread_id = $1

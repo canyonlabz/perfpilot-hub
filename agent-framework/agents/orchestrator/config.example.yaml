@@ -155,3 +155,20 @@ compaction_preserve_recent: 5    # Keep the 5 most recent tool results intact du
 # delegated task status during the wait.
 streaming_wait_for_specialists: true
 streaming_wait_poll_interval_seconds: 5
+
+# =============================================================================
+# 10. Specialist SSE event proxying
+# =============================================================================
+# When true, specialist agent SSE events (status changes, progress updates)
+# are automatically forwarded to the parent orchestrator task's SSE
+# subscribers. This gives clients subscribed to the orchestrator's
+# sendSubscribe stream real-time visibility into specialist progress
+# without needing separate subscriptions per specialist task.
+#
+# The forwarded events retain the specialist's task_id and agent_name so
+# clients can distinguish them from orchestrator-originated events.
+#
+# When false, specialist events are only visible on their own task streams.
+# Clients must subscribe to each specialist task individually or use
+# check_task_status polling to monitor progress.
+proxy_specialist_sse: true
