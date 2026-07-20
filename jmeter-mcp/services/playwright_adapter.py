@@ -92,14 +92,17 @@ def run_playwright_capture_pipeline(spec_path: str, run_id: str) -> str:
 def archive_existing_traces() -> Optional[str]:
     """
     If the Playwright MCP output directory contains previous run artifacts,
-    move the traces directory and any verbose output files (console logs,
-    page YAML snapshots) to a timestamped backup folder, then recreate an
-    empty traces directory.
+    copy trace contents to a timestamped backup folder, then delete the
+    originals from the traces directory. Verbose output files (console logs,
+    page YAML snapshots) are moved into the same backup folder.
+
+    Uses copy + delete instead of os.rename() so that Docker named-volume
+    mount points (which cannot be renamed) are preserved intact.
 
     Archived files:
-      - traces/          — network trace files and resources (moved as-is)
-      - console-*.log    — Playwright MCP console log
-      - page-*.yml       — Playwright MCP page snapshots (one per browser step)
+      - traces/*          — network trace files and resources (copied, then deleted)
+      - console-*.log     — Playwright MCP console log (moved)
+      - page-*.yml        — Playwright MCP page snapshots (moved)
 
     All files are placed side-by-side in the backup folder:
       .playwright-mcp/traces_<YYYYMMDD_HHMMSS>/
@@ -114,7 +117,6 @@ def archive_existing_traces() -> Optional[str]:
     traces_dir = PLAYWRIGHT_TRACES_DIR
     parent_dir = os.path.dirname(traces_dir)
 
-    # Collect verbose output files from the parent .playwright-mcp/ directory
     verbose_files = (
         glob.glob(os.path.join(parent_dir, "console-*.log"))
         + glob.glob(os.path.join(parent_dir, "page-*.yml"))
@@ -128,19 +130,28 @@ def archive_existing_traces() -> Optional[str]:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = os.path.basename(traces_dir.rstrip(os.sep))
     archived_dir = os.path.join(parent_dir, f"{base_name}_{timestamp}")
+    os.makedirs(archived_dir, exist_ok=True)
 
     if traces_exist:
-        os.rename(traces_dir, archived_dir)
-    else:
-        os.makedirs(archived_dir, exist_ok=True)
+        for item in os.listdir(traces_dir):
+            src = os.path.join(traces_dir, item)
+            dst = os.path.join(archived_dir, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
 
-    # Move verbose output files into the backup folder
+        for item in os.listdir(traces_dir):
+            item_path = os.path.join(traces_dir, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+
     for file_path in verbose_files:
         dest = os.path.join(archived_dir, os.path.basename(file_path))
         shutil.move(file_path, dest)
 
-    # Recreate empty traces directory for the next run
-    os.makedirs(traces_dir, exist_ok=True)
     return archived_dir
 
 def parse_network_trace_to_step_map(

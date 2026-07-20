@@ -34,7 +34,7 @@ DEFAULT_AZURE_DEPLOYMENT = "gpt-4o"
 DEFAULT_OLLAMA_MODEL = "llama3.1"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_AZURE_API_VERSION = "2024-02-15-preview"
-DEFAULT_TEMPERATURE = 0.2
+DEFAULT_TEMPERATURE = 1.0
 
 # SSL verification modes - mirrors the pattern used by blazemeter-mcp,
 # datadog-mcp, and confluence-mcp so operators have one mental model
