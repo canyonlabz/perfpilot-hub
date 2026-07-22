@@ -143,6 +143,21 @@ This directive reduces filler turns where the LLM narrates intent instead
 of acting, and avoids unnecessary snapshot calls that inject 2,000–8,000
 tokens of accessibility tree data into the context window per call.
 
+### A2A-Provided Test Spec File
+
+When the orchestrator provides a `test_spec_file` in the delegation context, a
+normalized test spec has already been saved to disk from the incoming A2A request.
+In this case:
+
+- **Skip** calling `jmeter_get_test_specs` (step 2 below) — the spec is already on disk
+- **Use** the `test_spec_file` path directly when calling `jmeter_get_browser_steps`
+  (step 3 below) and `jmeter_capture_network_traffic` (step 5 below)
+- Proceed with the rest of the workflow as normal
+
+This applies to requests arriving via A2A (JSON-RPC / REST) where the upstream
+client sends test case content inline. The framework normalizes and persists it
+before delegation so you can use it directly.
+
 ### Example 1: "Create a JMeter script from test specs"
 
 This workflow bridges **Playwright browser automation** with **JMeter script generation**.
@@ -152,9 +167,11 @@ generated during that session, and converts it into a parameterized JMeter load 
 This request requires multiple steps:
 1. Call `jmeter_archive_playwright_traces` to archive old traces before a new run
 2. Call `jmeter_get_test_specs` to find available spec files
+   *(skip if `test_spec_file` is provided in context — see above)*
 3. Call `jmeter_get_browser_steps` with the `filename` from step 2 — use either
    the `absolute_path` or `relative_path` returned by `jmeter_get_test_specs`
-   (both are accepted; prefer `absolute_path` when running in Docker)
+   (both are accepted; prefer `absolute_path` when running in Docker).
+   If `test_spec_file` is provided, use that path directly instead.
 4. **Execute browser steps with Playwright:**
    a. Call `browser_start_tracing` to begin recording network traffic
    b. For each step returned by `jmeter_get_browser_steps`:

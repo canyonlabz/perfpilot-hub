@@ -118,6 +118,14 @@ agent_task_id_var: ContextVar[Optional[str]] = ContextVar(
 # are fragile across thread pools and different async executors. If this value 
 # is ever missing or stale, the child task is still created, just without SSE proxying.
 
+agent_spec_file_var: ContextVar[Optional[str]] = ContextVar(
+    "agent_test_spec_file", default=None
+)
+# NOTE: agent_spec_file_var propagates the path to a normalized test spec
+# file saved during orchestrator processing. When set, delegate_to_specialist
+# auto-injects the path into the child task's payload so the Script Agent
+# can use it directly for browser automation.
+
 # ── Per-request identity for HTTP header construction ──
 # AG2's thread isolation means tools can't read ContextVars.
 # The AG-UI handler sets these before dispatch so that
@@ -586,6 +594,13 @@ async def delegate_to_specialist(
     body = dict(payload or {})
     if test_run_id is not None:
         body.setdefault("test_run_id", test_run_id)
+
+    # Auto-inject the normalized test spec file path into the child
+    # task's payload so the specialist agent can use it directly for
+    # browser automation without calling get_test_specs.
+    spec_file = agent_spec_file_var.get()
+    if spec_file and "test_spec_file" not in body:
+        body["test_spec_file"] = spec_file
 
     parent_uuid = UUID(parent_task_id_str) if parent_task_id_str else None
 

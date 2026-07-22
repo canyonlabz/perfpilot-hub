@@ -20,19 +20,29 @@ THINK_TIME = BROWSER_CONFIG.get("think_time", 5000)  # milliseconds
 # ===================================================================================
 
 def _get_test_specs_roots(test_run_id: Optional[str] = None) -> List[str]:
-    """Return ordered list of test-specs root directories from config."""
+    """Return ordered list of test-specs root directories from config.
+
+    Search priority (first match wins):
+      1. ``artifacts/{test_run_id}/test-specs/`` — run-scoped specs
+         (e.g. A2A-provided test cases normalized and saved per run)
+      2. ``test-specs/azure-devops/`` — ADO-originated test cases
+      3. ``test-specs/web-flows/`` — browser automation specs
+      4. ``test-specs/api-flows/`` — API test specs
+      5. ``test-specs/examples/`` — example/demo specs
+    """
     roots = []
     test_specs_cfg = CONFIG.get("test_specs", {})
 
-    for key in ("web_flows_path", "api_flows_path", "examples_path"):
-        path = test_specs_cfg.get(key)
-        if path:
-            roots.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", path)))
-
+    # Run-scoped specs take highest priority
     if test_run_id:
         run_root = os.path.join(ARTIFACTS_PATH, str(test_run_id), "test-specs")
         if os.path.isdir(run_root):
             roots.append(run_root)
+
+    for key in ("azure_devops_path", "web_flows_path", "api_flows_path", "examples_path"):
+        path = test_specs_cfg.get(key)
+        if path:
+            roots.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", path)))
 
     return roots
 

@@ -39,6 +39,7 @@ jmeter:
   jmeter_stop_exe: "stoptest.cmd"                                       # Command to stop JMeter (e.g., stoptest.cmd for Windows, stoptest.sh for Linux/Mac)
 
 test_specs:
+  azure_devops_path: "test-specs\\azure-devops"
   web_flows_path: "test-specs\\web-flows"
   api_flows_path: "test-specs\\api-flows"
   examples_path: "test-specs\\examples"

@@ -619,6 +619,14 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
+    # ── Normalize and persist test spec from A2A parts ──────────────
+    # If the incoming payload contains parts[] with test case content,
+    # normalize it to the step-based Markdown format and save it under
+    # artifacts/{test_run_id}/test-specs/. The file path is propagated
+    # to specialist agents via the agent_spec_file_var ContextVar so
+    # delegate_to_specialist auto-injects it into child task payloads.
+    _persist_test_spec_from_parts(task)
+
     # Propagate the task owner's user_id, session_id, thread_id, and
     # request source into the orchestrator's tool execution context so
     # `delegate_to_specialist` can create child tasks with the correct
@@ -929,6 +937,80 @@ def _coerce_message_text(content: Any) -> str:
             return content["content"]
         return json.dumps(content)
     return str(content)
+
+
+def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
+    """Normalize and persist test spec content from A2A parts to disk.
+
+    When an incoming A2A request contains test case content in
+    ``parts[]`` (Markdown or structured JSON), normalize it to the
+    step-based Markdown format and save it under
+    ``artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md``.
+
+    The saved file path is set on ``agent_spec_file_var`` so
+    ``delegate_to_specialist()`` can auto-inject it into child task
+    payloads. This ensures the Script Agent can use the file directly
+    for browser automation without calling ``jmeter_get_test_specs``.
+
+    Skips silently when:
+      - No test_run_id is available on the task
+      - No ``parts[]`` array in the payload
+      - Normalizer finds no test spec content in the parts
+    """
+    from pathlib import Path
+
+    if not isinstance(task.payload, dict):
+        return
+
+    test_run_id = getattr(task, "test_run_id", None)
+    if not test_run_id:
+        test_run_id = task.payload.get("test_run_id")
+    if not isinstance(test_run_id, str) or not test_run_id.strip():
+        return
+
+    parts = task.payload.get("parts")
+    if not isinstance(parts, list) or not parts:
+        return
+
+    from . import a2a_spec_normalizer
+
+    spec_content = a2a_spec_normalizer.normalize_parts_to_spec(parts)
+    if not spec_content:
+        log.debug(
+            "_persist_test_spec_from_parts: no test spec content found "
+            "in parts[] for test_run_id=%s",
+            test_run_id,
+        )
+        return
+
+    # Resolve artifacts path: {repo_root}/artifacts/{test_run_id}/test-specs/
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    spec_dir = repo_root / "artifacts" / test_run_id / "test-specs"
+
+    try:
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_file = spec_dir / f"{test_run_id}_test_spec.md"
+        spec_file.write_text(spec_content, encoding="utf-8")
+        spec_path = str(spec_file)
+
+        log.info(
+            "_persist_test_spec_from_parts: saved normalized test spec "
+            "to %s (%d bytes)",
+            spec_path,
+            len(spec_content),
+        )
+
+        # Propagate the file path via ContextVar so delegate_to_specialist
+        # auto-injects it into child task payloads.
+        from agents.orchestrator.agent import agent_spec_file_var
+        agent_spec_file_var.set(spec_path)
+
+    except OSError:
+        log.exception(
+            "_persist_test_spec_from_parts: failed to save test spec "
+            "for test_run_id=%s",
+            test_run_id,
+        )
 
 
 def _extract_thread_id_from_payload(payload: Any) -> Optional[str]:
