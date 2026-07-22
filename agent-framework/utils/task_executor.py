@@ -947,30 +947,45 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     step-based Markdown format and save it under
     ``artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md``.
 
+    If no ``test_run_id`` is provided in the request (typical for
+    script creation workflows where no BlazeMeter test has been
+    executed yet), one is minted using the ``YYYY-MM-DD-HH-MM-SS``
+    timestamp format and set on the task payload so it flows
+    downstream to specialist agents.
+
     The saved file path is set on ``agent_spec_file_var`` so
     ``delegate_to_specialist()`` can auto-inject it into child task
     payloads. This ensures the Script Agent can use the file directly
     for browser automation without calling ``jmeter_get_test_specs``.
 
     Skips silently when:
-      - No test_run_id is available on the task
       - No ``parts[]`` array in the payload
       - Normalizer finds no test spec content in the parts
     """
+    from datetime import datetime
     from pathlib import Path
 
     if not isinstance(task.payload, dict):
         return
 
+    parts = task.payload.get("parts")
+    if not isinstance(parts, list) or not parts:
+        return
+
+    # Resolve or mint a test_run_id. For script creation requests
+    # arriving via A2A, the upstream client typically does not provide
+    # one since no BlazeMeter test has been executed yet.
     test_run_id = getattr(task, "test_run_id", None)
     if not test_run_id:
         test_run_id = task.payload.get("test_run_id")
     if not isinstance(test_run_id, str) or not test_run_id.strip():
-        return
-
-    parts = task.payload.get("parts")
-    if not isinstance(parts, list) or not parts:
-        return
+        test_run_id = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        task.payload["test_run_id"] = test_run_id
+        log.info(
+            "_persist_test_spec_from_parts: no test_run_id provided; "
+            "minted %s",
+            test_run_id,
+        )
 
     from . import a2a_spec_normalizer
 
