@@ -1,0 +1,48 @@
+# Notifications Agent - Per-Agent Configuration (PBI 3.9.5)
+# ---------------------------------------------------------
+# See `agent-framework/AGENTS.md` -> "Per-agent `config.yaml` schema"
+# for the full schema reference and the candidate-resolution convention.
+
+# =============================================================================
+# 1. LLM provider override
+# =============================================================================
+# The notifications-agent is primarily a message router, not a
+# generator. Low temperature for deterministic event formatting.
+#
+# llm_provider:
+#   provider: openai
+#   openai_model: gpt-4o-mini
+#   temperature: 0.1
+
+# =============================================================================
+# 2. MCP namespace allowlist (gateway-mcp tools)
+# =============================================================================
+# Empty in Epic 3. MS Teams MCP and SharePoint MCP are standalone
+# stdio servers today (not in the gateway-mcp container). Epic 4
+# will populate this list when vendor adapters are wired.
+mcp_tools:
+  allowed_namespaces: []
+
+# =============================================================================
+# 3. Retries
+# =============================================================================
+# Notification delivery retries. When adapters are wired (Epic 4),
+# API-based adapters (Teams, Slack) will retry up to 3 times.
+retries: 3
+
+# =============================================================================
+# 4. Timeouts
+# =============================================================================
+# Notification delivery should be fast.
+timeout_seconds: 30
+
+# =============================================================================
+# 5. A2A discovery metadata
+# =============================================================================
+a2a:
+  display_name: "PerfPilot Notifications Agent"
+  description: "Vendor-neutral event emission and notification routing. Currently in development (stub for all of Epic 3; vendor adapters wire in Epic 4)."
+  tags:
+    - notifications
+    - events
+    - vendor-agnostic

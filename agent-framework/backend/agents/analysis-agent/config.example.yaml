@@ -1,0 +1,72 @@
+# Analysis Agent - Per-Agent Configuration (PBI 3.9.3)
+# ----------------------------------------------------
+# See `agent-framework/AGENTS.md` -> "Per-agent `config.yaml` schema"
+# for the full schema reference and the candidate-resolution convention.
+
+# =============================================================================
+# 1. LLM provider override
+# =============================================================================
+# The analysis-agent produces structured verdicts, not creative text.
+# Low temperature (0.1) keeps output deterministic and reproducible.
+#
+# llm_provider:
+#   provider: openai
+#   openai_model: gpt-4o-mini
+#   temperature: 0.1
+
+# =============================================================================
+# 2. MCP namespace allowlist (gateway-mcp tools)
+# =============================================================================
+# The analysis-agent accesses one namespace through the gateway-mcp:
+#
+# - `perfanalysis` — SLA validation (P90 vs slas.yaml thresholds),
+#   bottleneck detection (BlazeMeter + Datadog correlation), log-error
+#   analysis (root-cause bucketing), comparative analysis. Full tool
+#   list includes: perfanalysis_analyze_performance,
+#   perfanalysis_analyze_logs, perfanalysis_analyze_bottlenecks, etc.
+mcp_tools:
+  allowed_namespaces:
+    - perfanalysis
+
+# =============================================================================
+# 3. Retries
+# =============================================================================
+# PerfAnalysis MCP is code-based. Per `mcp-error-handling`: do NOT
+# retry on failure.
+retries: 0
+
+# =============================================================================
+# 4. Timeouts
+# =============================================================================
+# Analysis operations (especially bottleneck correlation across large
+# datasets) can take time. 120 seconds is generous.
+timeout_seconds: 120
+
+# =============================================================================
+# 5. Multi-turn loop engineering
+# =============================================================================
+# Controls the autonomous tool-execution loop that allows the agent to
+# chain multiple MCP tool calls to fulfill a high-level objective.
+#
+# max_tool_rounds: Maximum number of LLM → tool → LLM cycles before the
+#   loop exits with a warning. Prevents infinite loops. Higher values
+#   allow more complex multi-step workflows. Default: 7.
+#
+# max_consecutive_repeats: If the LLM calls the same tool with identical
+#   arguments this many times in a row, the loop exits with a "stuck"
+#   warning. Prevents the LLM from retrying a deterministic failure
+#   endlessly. Default: 3.
+max_tool_rounds: 7
+max_consecutive_repeats: 3
+
+# =============================================================================
+# 6. A2A discovery metadata
+# =============================================================================
+a2a:
+  display_name: "PerfPilot Analysis Agent"
+  description: "Post-test SLA validation, bottleneck attribution, and log-error analysis. Currently in development."
+  tags:
+    - analysis
+    - sla
+    - bottleneck
+    - correlation

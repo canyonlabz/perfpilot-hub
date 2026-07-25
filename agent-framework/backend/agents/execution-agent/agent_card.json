@@ -1,0 +1,95 @@
+{
+  "name": "execution-agent",
+  "display_name": "PerfPilot Execution Agent",
+  "description": "Specialist agent for performance-test execution and post-test artifact extraction in the PerfPilot Agents framework. Owns three agent tools (vendor-agnostic by name; BlazeMeter-only today): `start_performance_test` kicks off a run against a pre-existing test definition; `wait_for_completion` polls the underlying load-testing tool until the run is terminal; `extract_test_run_artifacts` runs the canonical 6-step extractor recipe (results -> artifacts base path -> per-load-generator artifact processing -> public report -> aggregate CSV -> JMeter log analysis) and returns a structured JSON describing the artifact bundle. Artifacts land on the BlazeMeter MCP's configured volume-mount endpoint (host filesystem locally; cloud storage in future ACA-style deployments); the agent never reads or writes those paths itself. The orchestrator opens any required Human-in-the-Loop gates before delegating to this agent; this agent never opens HITL prompts itself. Future features will add JMX upload (gated on the JMeter upload MCP tool) and multi-vendor execution (Gatling / Locust / k6) behind the same agent-tool names. See `agent-framework/agents/execution-agent/INSTRUCTIONS.md` for the runtime system prompt and `agent-framework/AGENTS.md` for framework conventions.",
+  "url": "/agents/execution-agent",
+  "version": "0.3.0",
+  "status": "available",
+  "supportedInterfaces": [
+    {
+      "url": "https://{host}:{port}/agents/execution-agent",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "PerfPilot"
+  },
+  "tags": [
+    "execution",
+    "blazemeter",
+    "extraction",
+    "epic-3"
+  ],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": true,
+    "extendedAgentCard": false,
+    "long_running_tasks": true,
+    "webhook_subscribers": true,
+    "human_in_the_loop": false
+  },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"],
+  "skills": [
+    {
+      "id": "start_performance_test",
+      "name": "Start performance test",
+      "description": "Launches a pre-existing performance test against the configured load-testing vendor (BlazeMeter today). Wraps the underlying `blazemeter_start_test` MCP tool 1:1 and returns the dynamic vendor-side run identifier the rest of the pipeline correlates against. NOT idempotent: each call provisions fresh load generators and consumes the vendor's quota, so the agent makes a single attempt and surfaces transport / 4xx / 5xx errors verbatim — the caller decides whether to retry. Caller must have already created the test definition in the vendor UI / API; uploading a JMX is out of scope for F3.8 (gated on the future JMeter upload MCP tool). The agent-tool name is vendor-agnostic on purpose: a future feature can swap the MCP wiring to Gatling / Locust / k6 without breaking this skill's contract.",
+      "tags": ["execution", "start", "blazemeter", "non-idempotent"],
+      "examples": [
+        "Start the BlazeMeter test 14491287.",
+        "Kick off a fresh performance run for the kobrakai smoke test.",
+        "Launch the load test against test_id=14491287 and give me the run_id."
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
+    },
+    {
+      "id": "wait_for_completion",
+      "name": "Wait for run completion",
+      "description": "Polls the load-testing vendor (BlazeMeter today) for a previously-started run_id until it reaches a terminal state. Defaults: poll every 60 seconds, hard timeout at 300 seconds; both are caller-overridable for short smoke runs or longer soak tests. Idempotent and safe to retry — multiple concurrent waiters on the same run_id never alter vendor state. Transient single-poll failures are absorbed (up to 3 consecutive MCP failures); only a hard run-of-three returns `ok=False`. Returns `ok=True` for all expected terminal outcomes — successful `ENDED`, vendor-side `has_error`, and caller-side `timed_out` are reported via the structured `final_status` field, NOT by raising or returning `ok=False`. This keeps the orchestrator's narration logic identical regardless of how the run actually finished.",
+      "tags": ["execution", "polling", "blazemeter", "idempotent", "long-running"],
+      "examples": [
+        "Wait for BlazeMeter run 1234567 to finish (poll every 60s, timeout 5 min).",
+        "Block until run 1234567 is terminal, then tell me how it ended.",
+        "Is the load test done yet? Wait for it before extracting artifacts."
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
+    },
+    {
+      "id": "extract_test_run_artifacts",
+      "name": "Extract test-run artifacts",
+      "description": "Runs the canonical 6-step post-test extractor recipe (INSTRUCTIONS.md §3.3 / §6) against a completed BlazeMeter run and returns the Return Format JSON describing the artifact bundle: (1) `blazemeter_get_run_results` -> timing window + load-generator ids; (2) `blazemeter_get_artifacts_path` -> volume-mount base (diagnostic only, never read directly); (3) `blazemeter_process_session_artifacts` -> per-load-generator JTL / log download + multi-LG merge; (4) `blazemeter_get_public_report_url` -> link surfaced in the final Confluence report; (5) `blazemeter_fetch_aggregate_report` -> aggregate CSV consumed downstream by `perfanalysis-mcp` for P90 SLA validation; (6) `jmeter_analyze_jmeter_log` -> structured log diagnostics consumed by the analysis / reporting agents. Steps 1-3 are CRITICAL — failure short-circuits the recipe and the run is marked `status: failed`. Steps 4-6 are IMPORTANT — individual failures are recorded but the recipe continues, with the run marked `status: partial` so downstream consumers know to expect degraded output. BlazeMeter steps retry 3x with 5s back-off per the api-MCP error policy; the code-based jmeter step never retries per `mcp-error-handling`. The agent never inspects the filesystem itself — all path information comes from MCP responses.",
+      "tags": ["execution", "extraction", "blazemeter", "jmeter", "post-test", "artifacts"],
+      "examples": [
+        "Extract artifacts for the test run that just finished.",
+        "Run the 6-step BlazeMeter extractor for test_run_id 2026-06-14-smoke.",
+        "Pull the JTL, JMeter log, aggregate CSV, and public report URL for the latest run."
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["text/plain", "application/json"]
+    }
+  ],
+  "metadata": {
+    "epic": "3",
+    "feature": "3.8",
+    "pbi_scaffolded_at": "3.8.1",
+    "skills_contract_defined_at": "3.8.7",
+    "tools_added_at": {
+      "start_performance_test":        "3.8.3 (wired)",
+      "wait_for_completion":           "3.8.4 (wired)",
+      "extract_test_run_artifacts":    "3.8.5 (wired)"
+    },
+    "task_executor_wired_at": "3.8.6",
+    "status_flipped_to_available_at": "3.8.7",
+    "mcp_namespaces_today": ["blazemeter", "jmeter"],
+    "future_vendor_expansion": "Same agent-tool names will plug into Gatling / Locust / k6 MCPs in a later feature, selected by a per-test vendor config. The agent-tool contract is stable; only internal MCP wiring changes.",
+    "perfpilot_capabilities": {
+      "long_running_tasks": true,
+      "webhook_subscribers": true,
+      "human_in_the_loop": false
+    }
+  }
+}
