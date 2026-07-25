@@ -1,0 +1,42 @@
+# PerfPilot Agents - Python dependencies
+#
+# Mirror of pyproject.toml dependencies for environments that prefer pip-style
+# requirements files (Docker, virtual envs, CI). Floor versions only; pinning
+# strategy matches the rest of the suite (e.g. perfmemory-mcp/requirements.txt).
+#
+# Starlette pinned to >=1.2.1 to mitigate CVE-2026-48710 (host header injection
+# / authentication bypass) - same pin as docker/requirements.gateway.txt.
+
+# AG2 framework. `[ag-ui]` extra pulls in `ag-ui-protocol` so AG2 can expose
+# the AG-UI endpoint at /copilotkit (consumed by CopilotKit React in F3.6.7).
+ag2[ag-ui]>=0.13.3,<0.14
+
+# MCP client
+fastmcp>=3.4.2,<4
+
+# Web servers (A2A on port 8001, AG-UI on port 8002)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+starlette>=1.2.1
+
+# SSE responses for A2A `tasks/sendSubscribe` and AG-UI event stream
+sse-starlette>=2.1.3
+
+# Database (perfagent_state pool)
+asyncpg>=0.30.0
+
+# Models / validation
+pydantic>=2.10.0
+
+# HTTP / async
+httpx>=0.28.1
+
+# LLM provider SDKs
+openai>=2.30.0
+
+# Config / utilities
+pyyaml>=6.0.2
+python-dotenv>=1.2.1
+
+# Token counting (context window tracking in multi-turn tool loop)
+tiktoken>=0.12.0
