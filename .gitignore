@@ -275,18 +275,18 @@ artifacts/*
 !artifacts/README.md
 
 # Ignore local JMeter configuration files and all custom JMeter MCP test-spec files
-jmeter-mcp/jmeter_config.yaml
-jmeter-mcp/correlation_config.yaml
-jmeter-mcp/test-specs/*
-jmeter-mcp/test-specs/azure-devops/*.txt
-jmeter-mcp/test-specs/azure-devops/*.md
+mcp-perf-suite/jmeter-mcp/jmeter_config.yaml
+mcp-perf-suite/jmeter-mcp/correlation_config.yaml
+mcp-perf-suite/jmeter-mcp/test-specs/*
+mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/*.txt
+mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/*.md
 
-!jmeter-mcp/test-specs/README.md
-!jmeter-mcp/test-specs/web-flows/blazedemo_product_purchase.md
-!jmeter-mcp/test-specs/azure-devops/
-!jmeter-mcp/test-specs/azure-devops/README.md
-!jmeter-mcp/test-specs/jira/
-!jmeter-mcp/test-specs/jira/README.md
+!mcp-perf-suite/jmeter-mcp/test-specs/README.md
+!mcp-perf-suite/jmeter-mcp/test-specs/web-flows/blazedemo_product_purchase.md
+!mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/
+!mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/README.md
+!mcp-perf-suite/jmeter-mcp/test-specs/jira/
+!mcp-perf-suite/jmeter-mcp/test-specs/jira/README.md
 
 # Ignore local Datadog environments and custom queries files
 datadog-mcp/environments.json

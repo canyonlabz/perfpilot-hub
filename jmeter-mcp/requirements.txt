@@ -1,7 +1,0 @@
-fastmcp>=3.4.2,<4
-httpx>=0.28.1
-python-dotenv>=1.0.0
-PyYAML>=6.0
-
-# Optional: uncomment for Swagger/OpenAPI sample data generation
-# faker>=33.0.0
