@@ -223,9 +223,3 @@ All state lives in the `perfagent_state` PostgreSQL database, not in browser mem
 ## Getting Started
 
 For setup instructions, prerequisites, and how to run the backend alongside the database, MCP gateway, and Web UI, see the [Agent Framework README](../README.md#-try-it-today).
-
----
-
-## License
-
-MIT — see [LICENSE](../../LICENSE).

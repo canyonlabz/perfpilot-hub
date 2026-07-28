@@ -4,8 +4,6 @@ The browser-based chat interface for PerfPilot Agents. Built with Next.js 15,
 CopilotKit, and Tailwind CSS — connects to the AG-UI bridge on port 8002 for
 real-time streaming conversations with the PerfPilot orchestrator agent.
 
-> **Branch:** `ag2-agent-framework` — actively developed as part of Epic 3 F3.6.7.
-
 ---
 
 ## Prerequisites
@@ -152,18 +150,18 @@ Stop in reverse order:
 
 ## Current State
 
-### What's working (as of 2026-06-18)
+### What's working
 
-| Feature | Status | PBI |
-|---------|--------|-----|
-| Project scaffold, health probe | Done | 3.6.7.1 |
-| Chat interface with streaming responses | Done | 3.6.7.2 |
-| Thread management sidebar (create, rename, archive, delete, switch) | Done | 3.6.7.3 |
-| Persistent chat history across restarts (PostgreSQL + localStorage) | Done | BUG-02 |
-| Markdown rendering for agent responses (react-markdown + remark-gfm) | Done | BUG-02 |
-| Real-time streaming with inline "thinking" indicator | Done | BUG-02 |
-| Single unified chat pane (no dual-pane split) | Done | BUG-02 |
-| Stop generation button | Done | BUG-02 |
+| Feature | Status | 
+|---------|--------|
+| Project scaffold, health probe | Done | 
+| Chat interface with streaming responses | Done |
+| Thread management sidebar (create, rename, archive, delete, switch) | Done | 
+| Persistent chat history across restarts (PostgreSQL + localStorage) | Done |
+| Markdown rendering for agent responses (react-markdown + remark-gfm) | Done | 
+| Real-time streaming with inline "thinking" indicator | Done |
+| Single unified chat pane (no dual-pane split) | Done | 
+| Stop generation button | Done | 
 
 ### Architecture
 
@@ -202,15 +200,13 @@ Browser (localhost:3000)
 
 ## Planned UI Enhancements
 
-| Feature | PBI | Status |
-|---------|-----|--------|
-| Agent catalog panel (cards with status, skills) | 3.6.7.4 | Not started |
-| SSE task streaming (real-time progress display) | 3.6.7.5 | Not started |
-| HITL approve/reject inline cards | 3.6.7.6 | Not started |
-| Test-run results display (`/runs` pages) | 3.6.7.7 | Not started |
-| Polish — dark/light mode, responsive layout, skeletons, error boundaries | 3.6.7.8 | Not started |
-
-See `docs/plans/Epic-3-F3.6.7-Implementation-Plan.md` for full PBI details.
+| Feature | Status |
+|---------|--------|
+| Agent catalog panel (cards with status, skills) | Completed |
+| SSE task streaming (real-time progress display) | Completed |
+| HITL approve/reject inline cards | Completed |
+| Test-run results display (`/runs` pages) | In Progress |
+| Polish — dark/light mode, responsive layout, skeletons, error boundaries | Not started |
 
 ---
 
@@ -287,16 +283,3 @@ AGUI_CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
 > falling back to defaults only if unset. The `.env` file in `agent-framework/`
 > is the single place to configure them — see `.env.example` for the full
 > template.
-
----
-
-## Troubleshooting
-
-See the Troubleshooting section in `docs/plans/Epic-3-F3.6.7-Implementation-Plan.md`
-for solutions to common issues including:
-
-- TLS / SSL `CERTIFICATE_VERIFY_FAILED` with httpx (Norton/Zscaler)
-- CopilotKit agent not found errors
-- `INCOMPLETE_STREAM` / terminal event errors
-- `runtime_info_fetch_failed` (400)
-- AG2 `AssertionError: Wrong content format`

@@ -7,24 +7,11 @@
 > ⚠️ **NOTE:** APIs,
 > configuration schemas, and database DDL are stabilizing but may
 > still change.
->
-> **Operational today:** the orchestrator agent runs the real AG2
-> `ConversableAgent` with all four delegation tools wired, and two
-> real specialists are proven end-to-end: the **execution-agent**
-> (BlazeMeter — start → wait → extract through the real MCP stack;
-> all six artifact-extraction steps succeeded on 2026-06-14) and the
-> **script-agent** (Playwright browser automation — 25-round multi-turn
-> tool loop proven against BlazeDemo on 2026-07-05; Loop Engineering
-> with token counting, compaction, and per-iteration persistence live).
-> The remaining specialists (**monitoring**, **analysis**,
-> **reporting**, **notifications**) are all functional via their
-> respective MCP namespaces. See the
-> [Current status](#-current-status) table for the full breakdown.
 
 ---
 
 PerfPilot Agents is the **AG2-based AI agent layer** of the MCP Perf
-Suite. It pairs with [**PerfPilot Hub**](../gateway-mcp/) (the unified
+Suite. It pairs with [**PerfPilot Hub**](../mcp-perf-suite/gateway-mcp/) (the unified
 MCP gateway that exposes every performance-testing tool through a single
 endpoint) to deliver the first open-source attempt at a fully-agentic,
 end-to-end Performance Testing Lifecycle (PTLC) automation system —
@@ -468,16 +455,8 @@ milestone
 
 ---
 
-## 📜 License
-
-MIT — see [../LICENSE](../LICENSE). Copyright © 2026 Jason Smallcanyon.
-
----
-
 ## 🤝 Contributing
 
-Issues, suggestions, and pull requests are welcome via GitHub. See
-[AGENTS.md](./AGENTS.md) for coding conventions, the four-file agent
-pattern, and the async-everywhere contract.
+Issues, suggestions, and pull requests are welcome via GitHub. 
 
 Happy testing! ✈️
