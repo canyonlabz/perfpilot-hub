@@ -293,8 +293,8 @@ datadog-mcp/environments.json
 datadog-mcp/custom_queries.json
 
 # Ignore the following Microsoft Teams local configuration files
-msteams-mcp/templates/*
-!msteams-mcp/templates/default-notification-*.md
+mcp-perf-suite/msteams-mcp/templates/*
+!mcp-perf-suite/msteams-mcp/templates/default-notification-*.md
 
 # Ignore local config YAML files for perfanalysis-mcp
 perfanalysis-mcp/slas.yaml
