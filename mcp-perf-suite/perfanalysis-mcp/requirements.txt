@@ -1,0 +1,28 @@
+# Performance Analysis MCP Server Dependencies
+# Generated from pyproject.toml
+
+# Core MCP framework
+fastmcp>=3.4.2,<4
+
+# HTTP client for API calls
+httpx>=0.28.1
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Data analysis and processing
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Configuration and file handling
+pyyaml>=6.0
+aiofiles>=23.0.0
+
+# AI/ML capabilities
+openai>=1.65.2
+
+# Additional dependencies found in code
+# (These are part of Python standard library, no additional packages needed)
+# - os, json, csv, pathlib, datetime, math, typing
+# - platform (for OS detection)
