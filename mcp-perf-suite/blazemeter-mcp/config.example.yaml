@@ -1,0 +1,45 @@
+server:
+  name: "blazemeter-mcp"
+  version: "0.9.0-rc.1"
+  description: "BlazeMeter MCP Server for performance test execution and results retrieval"
+  build:
+    date: "2026-04-19"
+
+general:
+  enable_debug: False   # Enable/disable debug mode
+  enable_logging: True  # Enable/disable logging
+
+artifacts:
+  # Dynamically resolved to {repo_root}/artifacts when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  artifacts_path: ""
+
+blazemeter:
+  ssl_verification: "disabled"     # Options: "ca_bundle" (use certs from env vars) or "disabled" (skip verification)
+  http_timeout_seconds: 60         # Default timeout for BlazeMeter API calls (seconds). Increase if you see timeouts on start_test.
+  polling_interval_seconds: 30
+  polling_max_retries: 3
+  polling_timeout_seconds: 600
+  pagination_limit: 150
+  artifact_download_max_retries: 3   # Max download attempts per session artifact ZIP
+  artifact_download_retry_delay: 2   # Seconds to wait between download retry attempts
+  cleanup_session_folders: false     # If true, remove sessions/ subfolder after combining artifacts
+  shared_folders:
+    # Allowlist of file extensions permitted for upload to BlazeMeter shared folders.
+    # Files with extensions not in this list will be skipped during upload.
+    # Add or remove extensions based on your team's JMeter test data requirements.
+    allowed_extensions:
+      - .csv
+      - .xlsx
+      - .xls
+      - .pdf
+      - .jmx
+      - .properties
+      - .jks          # Java KeyStore
+      - .p12          # PKCS12 certificate
+      - .pem          # PEM certificate
+      - .json
+      - .xml
+      - .txt
+      - .jar          # JMeter plugins / custom libraries
+      - .groovy        # Groovy scripts
