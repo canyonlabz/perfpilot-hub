@@ -270,9 +270,9 @@ docker/certs/corporate/*
 !docker/certs/corporate/.gitkeep
 
 # ignore performance test results and logs
-artifacts/*
-!artifacts/.gitkeep
-!artifacts/README.md
+mcp-perf-suite/artifacts/*
+!mcp-perf-suite/artifacts/.gitkeep
+!mcp-perf-suite/artifacts/README.md
 
 # Ignore local JMeter configuration files and all custom JMeter MCP test-spec files
 mcp-perf-suite/jmeter-mcp/jmeter_config.yaml
