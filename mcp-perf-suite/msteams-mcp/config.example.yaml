@@ -1,0 +1,58 @@
+server:
+  name: "msteams-mcp"
+  version: "0.1.0"
+  description: "Microsoft Teams MCP Server for performance testing team notifications, search, and channel discovery"
+
+general:
+  enable_debug: false
+  enable_logging: true
+
+artifacts:
+  artifacts_path: ""
+
+teams:
+  # Browser for login: "chrome", "msedge", or "chromium"
+  browser_channel: "chrome"
+  session_expiry_hours: 12
+  token_refresh_threshold_sec: 600
+  http_request_timeout_sec: 30
+  retry_max_attempts: 3
+  retry_base_delay_sec: 1
+  retry_max_delay_sec: 10
+  default_page_size: 25
+  max_page_size: 100
+  default_people_limit: 10
+  default_channel_limit: 10
+
+  # Path to notification templates (default: ./templates)
+  templates_path: "./templates"
+
+  # Named notification targets — auto-resolved by teams_send_message
+  notification_targets:
+    channels:
+      # Example: teams_send_message(target="perf-channel", ...)
+      perf-channel:
+        conversation_id: "19:abc123@thread.tacv2"
+        description: "Performance testing notifications"
+        # Optional per-channel template override
+        # template: "custom-notification-start-test.md"
+        # Emails to @mention on every notification to this channel
+        mentions:
+          - "homer.simpson@company.com"
+          - "marge.simpson@company.com"
+      # release-channel:
+      #   conversation_id: "19:def456@thread.tacv2"
+      #   description: "Release notifications"
+      #   mentions:
+      #     - "mr.burns@company.com"
+
+    chats:
+      # Default chat target — used with target="default_chat"
+      default_chat:
+        conversation_id: ""
+        description: "Default 1:1 or group chat for notifications"
+      # stakeholder-triage:
+      #   conversation_id: "19:xyz789@thread.v2"
+      #   description: "Performance triage group chat"
+      #   mentions:
+      #     - "bart.simpson@company.com"
