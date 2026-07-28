@@ -302,8 +302,8 @@ mcp-perf-suite/perfanalysis-mcp/test/**
 mcp-perf-suite/perfanalysis-mcp/tests/**
 
 # Ignore local config YAML files for perfmemory-mcp
-perfmemory-mcp/taxonomy.yaml
-perfmemory-mcp/tools/logs/*.log
+mcp-perf-suite/perfmemory-mcp/taxonomy.yaml
+mcp-perf-suite/perfmemory-mcp/tools/logs/*.log
 
 # Ignore all files in perfreport-mcp/templates except the default templates
 mcp-perf-suite/perfreport-mcp/templates/*
