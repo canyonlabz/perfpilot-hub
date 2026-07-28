@@ -1,0 +1,23 @@
+server:
+  name: "perfpilot-hub"
+  transport: "stdio"
+  host: "0.0.0.0"
+  port: 8000
+  # Optional: Path to a custom CA certificate file for SSL verification.
+  # Set this if your environment uses a proxy/antivirus that intercepts HTTPS
+  # (e.g., Norton 360, Zscaler, corporate proxies).
+  # Leave commented out if not needed.
+  # ssl_cert_file: "C:\\Users\\yourname\\.ssl\\ca-bundle.pem"
+
+servers:
+  # Core servers (always enabled)
+  jmeter: true
+  blazemeter: true
+  datadog: true
+  perfanalysis: true
+  perfreport: true
+  confluence: true
+  perfmemory: true
+  # Local-only servers
+  msteams: true
+  sharepoint: true
