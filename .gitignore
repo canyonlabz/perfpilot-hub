@@ -306,14 +306,14 @@ perfmemory-mcp/taxonomy.yaml
 perfmemory-mcp/tools/logs/*.log
 
 # Ignore all files in perfreport-mcp/templates except the default templates
-perfreport-mcp/templates/*
-!perfreport-mcp/templates/default_*.md
+mcp-perf-suite/perfreport-mcp/templates/*
+!mcp-perf-suite/perfreport-mcp/templates/default_*.md
 # Ignore local config YAML files for perfreport-mcp
-perfreport-mcp/report_config.yaml
-perfreport-mcp/chart_schema.yaml
-perfreport-mcp/chart_colors.yaml
-perfreport-mcp/test/**
-perfreport-mcp/tests/**
+mcp-perf-suite/perfreport-mcp/report_config.yaml
+mcp-perf-suite/perfreport-mcp/chart_schema.yaml
+mcp-perf-suite/perfreport-mcp/chart_colors.yaml
+mcp-perf-suite/perfreport-mcp/test/**
+mcp-perf-suite/perfreport-mcp/tests/**
 
 # Ignore Docker gateway config files (users copy from .example versions)
 docker/config/gateway/config.yaml
