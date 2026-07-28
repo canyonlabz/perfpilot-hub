@@ -1,0 +1,37 @@
+[project]
+name = "jmeter-mcp"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastmcp>=3.4.2,<4",
+  "httpx>=0.28.1",
+  "python-dotenv>=1.0.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+faker = ["faker>=33.0.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# 👇 Tell hatch which files belong in the wheel
+[tool.hatch.build.targets.wheel]
+packages = ["services", "services.jmx", "utils"]          # include the services/ package and jmx subpackage
+include = ["jmeter.py"]      # also include the top-level script
+
+# (optional, but tidy)
+[tool.hatch.build.targets.sdist]
+include = [
+  "services", 
+  "utils",
+  "jmeter.py", 
+  "pyproject.toml", 
+  "README.md",
+  "jmeter_config.yaml",
+  "config.example.yaml",
+  "config.windows.yaml",
+  "config.mac.yaml"
+]
