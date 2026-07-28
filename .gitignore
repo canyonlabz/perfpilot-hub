@@ -339,14 +339,14 @@ docker/config/perfreport/chart_colors.yaml
 # copy from .example versions). The .env file is already covered by the global
 # `.env` rule above; the explicit entry here makes the agent-framework section
 # self-documenting. The committed templates live at:
-#   - `agent-framework/config/agents.example.yaml`            (global)
-#   - `agent-framework/agents/<agent-name>/config.example.yaml` (per-agent)
+#   - `agent-framework/backend/config/agents.example.yaml`              (global)
+#   - `agent-framework/backend/agents/<agent-name>/config.example.yaml` (per-agent)
 # Each operator-side `config.yaml` is a local override; the loader (see
 # `utils/base_agent.py::CANDIDATE_CONFIG_FILES`) walks both candidates in
 # priority order and uses whichever exists.
-agent-framework/.env
-agent-framework/config/agents.yaml
-agent-framework/agents/*/config.yaml
+agent-framework/backend/.env
+agent-framework/backend/config/agents.yaml
+agent-framework/backend/agents/*/config.yaml
 
 # Re-include the Next.js frontend lib/ directory (excluded by the bare `lib/`
 # rule in the Python packaging section which matches recursively)
@@ -358,7 +358,7 @@ agent-framework/agents/*/config.yaml
 # wipe a developer's local database with a single `--yes` flag and is not
 # intended for end-users. Recreate from the in-repo development notes if
 # the file is ever needed again on a fresh clone.
-agent-framework/sql/drop_perfagent_state.py
+agent-framework/backend/sql/drop_perfagent_state.py
 
 # Ignore all Playwright output files
 .playwright-mcp/*
