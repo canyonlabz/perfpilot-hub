@@ -1,0 +1,34 @@
+# Performance Report MCP Server Dependencies
+# Generated from pyproject.toml
+
+# Core MCP framework
+fastmcp>=3.4.2,<4
+
+# HTTP client for API calls
+httpx>=0.28.1
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Document generation
+pypandoc>=1.13
+pyandoc>=0.2.0
+
+# Configuration and data handling
+pyyaml>=6.0
+pandas>=2.0.0
+
+# Numerical computing
+numpy>=1.24.0
+
+# Chart and visualization
+matplotlib>=3.8.0
+seaborn>=0.13.2
+
+# Timezone handling
+pytz>=2025.2
+
+# Additional dependencies found in code
+# (These are part of Python standard library, no additional packages needed)
+# - os, json, pathlib, datetime, typing, asyncio
+# - platform (for OS detection)
