@@ -297,9 +297,9 @@ mcp-perf-suite/msteams-mcp/templates/*
 !mcp-perf-suite/msteams-mcp/templates/default-notification-*.md
 
 # Ignore local config YAML files for perfanalysis-mcp
-perfanalysis-mcp/slas.yaml
-perfanalysis-mcp/test/**
-perfanalysis-mcp/tests/**
+mcp-perf-suite/perfanalysis-mcp/slas.yaml
+mcp-perf-suite/perfanalysis-mcp/test/**
+mcp-perf-suite/perfanalysis-mcp/tests/**
 
 # Ignore local config YAML files for perfmemory-mcp
 perfmemory-mcp/taxonomy.yaml
