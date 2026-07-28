@@ -1,0 +1,41 @@
+server:
+  name: "sharepoint-mcp"
+  version: "0.1.0"
+  description: "SharePoint MCP Server for performance testing artifact management"
+
+general:
+  enable_debug: false
+  enable_logging: true
+
+artifacts:
+  artifacts_path: ""
+
+sharepoint:
+  # Tenant is auto-detected from the browser URL after login.
+  # Only set this if auto-detection fails for your environment.
+  # Example: "contoso" (for contoso.sharepoint.com)
+  tenant: ""
+
+  # No default site or library — the user must always specify the destination.
+  # This prevents accidental uploads to the wrong location.
+
+  # Browser for login: "chrome", "msedge", or "chromium"
+  browser_channel: "chrome"
+  session_expiry_hours: 12
+  token_refresh_threshold_sec: 600
+  http_request_timeout_sec: 60
+  retry_max_attempts: 3
+  retry_base_delay_sec: 1
+  retry_max_delay_sec: 10
+  max_upload_size_mb: 250
+  chunk_size_mb: 10
+
+  # Optional: notify via MS Teams MCP after upload completes.
+  # Requires msteams-mcp to be configured and running.
+  notification_on_upload:
+    enabled: false
+    # Named target from msteams-mcp config (e.g. "perf-channel")
+    target: ""
+    # Template filename in msteams-mcp/templates/ (custom or default)
+    # Falls back to "default-notification-sharepoint-upload.md"
+    template: ""
