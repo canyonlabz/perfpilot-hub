@@ -1,0 +1,47 @@
+# MCP Performance Suite - Streamlit UI Configuration
+# Copy this file to config.yaml and adjust values for your environment.
+
+general:
+  # Path to the MCP suite root directory (parent of streamlit-ui/)
+  # If not set, auto-detected from the streamlit-ui/ location
+  mcp_suite_root: ""
+
+  # Path to the artifacts directory
+  # If not set, defaults to {mcp_suite_root}/artifacts
+  artifacts_path: ""
+
+  # Enable debug mode (shows additional diagnostic info in UI)
+  enable_debug: false
+
+ui:
+  # Streamlit server port
+  port: 8501
+
+  # Page title shown in browser tab
+  page_title: "MCP Performance Suite"
+
+  # Theme: "light" or "dark" (follows Streamlit's theme setting)
+  theme: "dark"
+
+migration:
+  # Keys that contain environment-specific IDs and should be flagged
+  # during migration for manual review (not auto-copied)
+  flagged_keys:
+    - site_id
+    - drive_id
+    - team_id
+    - channel_id
+
+  # Keys that contain filesystem paths and need automatic adjustment
+  # when migrating between repo instances
+  path_keys:
+    - log_path
+    - artifacts_path
+    - jmeter_home
+    - jmeter_bin_path
+    - templates_path
+    - environments_json_path
+    - custom_queries_json_path
+    - web_flows_path
+    - api_flows_path
+    - examples_path
