@@ -289,8 +289,8 @@ mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/*.md
 !mcp-perf-suite/jmeter-mcp/test-specs/jira/README.md
 
 # Ignore local Datadog environments and custom queries files
-datadog-mcp/environments.json
-datadog-mcp/custom_queries.json
+mcp-perf-suite/datadog-mcp/environments.json
+mcp-perf-suite/datadog-mcp/custom_queries.json
 
 # Ignore the following Microsoft Teams local configuration files
 mcp-perf-suite/msteams-mcp/templates/*
