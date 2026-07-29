@@ -1,0 +1,19 @@
+server:
+  name: "confluence-mcp"
+  version: "0.8.0-rc.1"
+  description: "Confluence MCP Server for publishing performance reports to Confluence (Cloud and Data Center)"
+  build:
+    date: "2026-04-19"
+
+general:
+  enable_debug: False   # Enable/disable debug mode
+  enable_logging: True  # Enable/disable logging
+
+artifacts:
+  # Dynamically resolved to {repo_root}/artifacts when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  artifacts_path: ""
+
+confluence:
+  ssl_verification: "disabled"     # Options: "ca_bundle" (use certs from env vars) or "disabled" (skip verification)
+  pagination_limit: 150
