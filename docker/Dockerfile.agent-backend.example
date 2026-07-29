@@ -1,0 +1,66 @@
+# =============================================================================
+# PerfPilot Hub — Agent Backend Docker Image
+#
+# Single-stage build for the Python backend (A2A server + AG-UI server).
+# Docker-compose creates two resources from this image, each
+# with a different CMD:
+#
+#   A2A Server:  CMD ["python", "a2a_server.py"]     → port 8001
+#   AG-UI Server: CMD ["python", "agui_server.py"]   → port 8002
+#
+# Build (from repo root):
+#   docker build -f docker/Dockerfile.agent-backend -t perf-agent-backend .
+#
+# Run A2A server:
+#   docker run -p 8001:8001 perf-agent-backend
+#
+# Run AG-UI server:
+#   docker run -p 8002:8002 perf-agent-backend python agui_server.py
+# =============================================================================
+
+FROM python:3.12-slim
+
+# System dependencies:
+#   curl       — health check probe
+#   libpq-dev  — asyncpg (PostgreSQL async driver) build requirement
+#   ca-certificates — OS certificate store management
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── Corporate CA certificate ─────────────────────────────────────────
+# Required for HTTPS-intercepting proxy environments (e.g. corporate internal, Norton security, etc.).
+# Same pattern as Dockerfile.gateway.
+COPY docker/certs/corporate/ca-bundle.pem /usr/local/share/ca-certificates/corporate-ca.crt
+RUN update-ca-certificates
+
+# Point Python/httpx at the combined CA bundle (OS store + corporate cert)
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+# ── Python dependencies ──────────────────────────────────────────────
+COPY agent-framework/backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt truststore
+
+# ── Application source ───────────────────────────────────────────────
+COPY agent-framework/backend/ ./
+
+# ── Environment defaults ─────────────────────────────────────────────
+ENV PERFPILOT_DOCKER=true
+
+# Ports: A2A server (8001), AG-UI server (8002)
+# Only one runs per container instance; both are exposed for flexibility.
+EXPOSE 8001 8002
+
+# Health check probes the A2A server by default.
+# Override HEALTHCHECK_PORT for AG-UI containers.
+ENV HEALTHCHECK_PORT=8001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+    CMD curl -f http://localhost:${HEALTHCHECK_PORT}/health || exit 1
+
+# Default: A2A server. Aspire overrides CMD for AG-UI instances.
+CMD ["python", "a2a_server.py"]
