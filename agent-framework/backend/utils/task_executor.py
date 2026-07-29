@@ -998,9 +998,9 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
         )
         return
 
-    # Resolve artifacts path: {repo_root}/artifacts/{test_run_id}/test-specs/
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    spec_dir = repo_root / "artifacts" / test_run_id / "test-specs"
+    from .paths import get_artifacts_base
+
+    spec_dir = get_artifacts_base() / test_run_id / "test-specs"
 
     try:
         spec_dir.mkdir(parents=True, exist_ok=True)
