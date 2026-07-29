@@ -263,6 +263,8 @@ docker/data/*
 docker/docker-compose.yaml
 docker/Dockerfile.gateway
 docker/Dockerfile.pgvector-age
+docker/Dockerfile.agent-backend
+docker/Dockerfile.agent-frontend
 docker/ca-bundle.pem
 docker/certs/jmeter/*.jks
 !docker/certs/jmeter/.gitkeep
