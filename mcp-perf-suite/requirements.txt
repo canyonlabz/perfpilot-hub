@@ -1,0 +1,43 @@
+# Combined Dependencies for All MCP Servers
+# This requirements.txt represents the combined dependency libraries that need to be 
+# installed for all MCP servers in this repository.
+# 
+# If you prefer to install dependencies per MCP server, you can use the individual
+# requirements.txt files in each MCP server directory:
+# - blazemeter-mcp/requirements.txt
+# - datadog-mcp/requirements.txt  
+# - perfanalysis-mcp/requirements.txt
+# - perfreport-mcp/requirements.txt
+
+# Core MCP framework
+fastmcp>=2.11.2
+
+# HTTP client for API calls
+httpx>=0.28.1
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Data analysis and processing (perfanalysis-mcp)
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Configuration and file handling (perfanalysis-mcp, perfreport-mcp)
+pyyaml>=6.0
+aiofiles>=23.0.0
+
+# AI/ML capabilities (perfanalysis-mcp)
+openai>=1.65.2
+
+# Document generation (perfreport-mcp)
+pypandoc>=1.13
+pyandoc>=0.2.0
+
+# Chart and visualization (perfreport-mcp)
+matplotlib>=3.8.0
+seaborn>=0.13.2
+
+# Legacy dependencies (keeping for backward compatibility)
+fastapi
+uvicorn
