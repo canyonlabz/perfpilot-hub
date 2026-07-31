@@ -265,6 +265,7 @@ docker/Dockerfile.gateway
 docker/Dockerfile.pgvector-age
 docker/Dockerfile.agent-backend
 docker/Dockerfile.agent-frontend
+docker/Dockerfile.playwright-mcp
 docker/ca-bundle.pem
 docker/certs/jmeter/*.jks
 !docker/certs/jmeter/.gitkeep
