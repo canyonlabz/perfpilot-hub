@@ -2,7 +2,7 @@
 
 Provides one shared `asyncpg` pool per agent process. Used by the runtime
 data-access modules (`session_store.py`, future `task_store.py`,
-`checkpointer.py`, etc.). DDL provisioning lives in `agent-framework/sql/`
+``checkpointer.py``, etc.). DDL provisioning lives in ``backend/sql/``
 and uses the synchronous `psycopg2` driver instead - this module is for the
 hot path only.
 
@@ -15,7 +15,7 @@ Design choices:
   lifetime of the process. Concurrent `get_pool()` calls are guarded by an
   `asyncio.Lock` so we do not race-create two pools.
 - **Environment-driven config.** Connection settings come from the
-  PERFAGENT_STATE_* variables in `agent-framework/.env`. No hardcoded
+  PERFAGENT_STATE_* variables in ``backend/.env``. No hardcoded
   hostnames or credentials.
 - **Clean shutdown.** `close_pool()` releases all connections and resets the
   module-level state so the next `get_pool()` re-creates the pool. Called
@@ -63,13 +63,13 @@ class DbSettings:
 def load_settings_from_env(env_file: Optional[Path] = None) -> DbSettings:
     """Build `DbSettings` from `PERFAGENT_STATE_*` environment variables.
 
-    Optionally loads `agent-framework/.env` first so this works whether the
+    Optionally loads ``backend/.env`` first so this works whether the
     caller already loaded the file or not. Existing env vars are not
-    overridden by the .env file (`override=False`).
+    overridden by the .env file (``override=False``).
 
     Args:
-        env_file: Explicit path to a `.env` file. Defaults to
-            `agent-framework/.env` resolved from this module's location.
+        env_file: Explicit path to a ``.env`` file. Defaults to
+            ``backend/.env`` resolved via ``paths.get_framework_dir()``.
 
     Returns:
         Frozen `DbSettings` instance.
@@ -78,7 +78,8 @@ def load_settings_from_env(env_file: Optional[Path] = None) -> DbSettings:
         RuntimeError: If a required PERFAGENT_STATE_* variable is missing.
     """
     if env_file is None:
-        env_file = Path(__file__).resolve().parent.parent / ".env"
+        from .paths import get_framework_dir
+        env_file = get_framework_dir() / ".env"
     if env_file.exists():
         try:
             from dotenv import load_dotenv

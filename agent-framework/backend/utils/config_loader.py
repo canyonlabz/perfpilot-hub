@@ -11,10 +11,9 @@ All loads use ``utf-8-sig`` encoding for Windows BOM tolerance, cache
 results per-process, and return ``{}`` on any error (missing file, parse
 failure) with a WARNING-level log.
 
-The ``framework_dir`` parameter on every function defaults to auto-detect
-(``Path(__file__).resolve().parent.parent``), but can be overridden to
-support the upcoming ``backend/`` architecture split without code changes
-at call sites.
+The ``framework_dir`` parameter on every function defaults to
+``paths.get_framework_dir()`` (``agent-framework/backend/``), but can be
+overridden by the caller if needed.
 
 Heavy import (``yaml``) is deferred into the functions that need it so
 this module can be imported in environments without PyYAML installed
@@ -40,13 +39,9 @@ _global_config_framework_dir: Optional[Path] = None
 
 
 def _default_framework_dir() -> Path:
-    """Return the framework root via auto-detect.
-
-    Currently ``utils/`` lives directly under the framework root, so
-    ``Path(__file__).parent.parent`` resolves correctly. When the
-    ``backend/`` split lands, only this function needs updating.
-    """
-    return Path(__file__).resolve().parent.parent
+    """Return the framework root (``agent-framework/backend/``)."""
+    from .paths import get_framework_dir
+    return get_framework_dir()
 
 
 # ---------------------------------------------------------------------------

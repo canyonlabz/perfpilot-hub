@@ -1,21 +1,19 @@
-"""Provision the `perfagent_state` database (Feature 3.3 - PBI 3.3.3).
+"""Provision the ``perfagent_state`` database.
 
 Connects to the existing PostgreSQL instance (the same one that hosts
-`perfmemory`), creates the `perfagent_state` database if it does not exist,
-and applies the six table-creation scripts in order.
+``perfmemory``), creates the ``perfagent_state`` database if it does not
+exist, and applies the table-creation scripts in order.
 
 Idempotent: safe to re-run against an already-provisioned instance. Existing
 data is never modified or dropped.
 
-Usage from the repo root:
+Usage from the repo root::
 
-    python agent-framework/sql/provision.py
+    python agent-framework/backend/sql/provision.py
 
-Reads connection settings from `agent-framework/.env` (PERFAGENT_STATE_HOST,
-PERFAGENT_STATE_PORT, PERFAGENT_STATE_USER, PERFAGENT_STATE_PASSWORD,
-PERFAGENT_STATE_DB). The user / password must have CREATE DATABASE privileges
-on the cluster (Epic 3 testing typically uses the same `postgres` superuser
-that perfmemory-mcp uses). Epic 4 will split these into least-privilege roles.
+Reads connection settings from ``agent-framework/backend/.env``
+(PERFAGENT_STATE_HOST, PERFAGENT_STATE_PORT, PERFAGENT_STATE_USER,
+PERFAGENT_STATE_PASSWORD, PERFAGENT_STATE_DB).
 
 Synchronous psycopg2 is used here (not asyncpg) because:
 
@@ -36,7 +34,7 @@ from pathlib import Path
 import psycopg2
 from psycopg2 import sql
 
-# python-dotenv is in agent-framework/requirements.txt.
+# python-dotenv is in agent-framework/backend/requirements.txt.
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
@@ -59,22 +57,26 @@ TARGET_DB_NAME = "perfagent_state"
 
 
 def _repo_paths() -> tuple[Path, Path, Path]:
-    """Resolve repo root, agent-framework dir, and sql dir from this file's location."""
-    sql_dir = Path(__file__).resolve().parent
-    framework_dir = sql_dir.parent
-    repo_root = framework_dir.parent
+    """Resolve repo root, framework dir, and sql dir from this file's location.
+
+    ``sql/`` lives under ``backend/``, which lives under
+    ``agent-framework/``, which lives under the repo root.
+    """
+    sql_dir = Path(__file__).resolve().parent          # backend/sql/
+    framework_dir = sql_dir.parent                     # backend/
+    repo_root = framework_dir.parent.parent            # repo root
     return repo_root, framework_dir, sql_dir
 
 
 def _load_env(framework_dir: Path) -> dict[str, str]:
-    """Load `agent-framework/.env` and pull the PERFAGENT_STATE_* variables out.
+    """Load ``backend/.env`` and pull the PERFAGENT_STATE_* variables out.
 
     Raises:
         SystemExit: if the .env file does not exist or required variables are missing.
     """
     env_path = framework_dir / ".env"
     if not env_path.exists():
-        log.error("agent-framework/.env not found at %s", env_path)
+        log.error("backend/.env not found at %s", env_path)
         log.error("Copy .env.example to .env and fill in values, then re-run.")
         raise SystemExit(2)
 

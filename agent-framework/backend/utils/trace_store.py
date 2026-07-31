@@ -16,7 +16,7 @@ Design choices:
   appropriately.
 - **Lazy heavy imports.** Consistent with the rest of `utils/`.
 
-Schema reference: `agent-framework/sql/006_create_tool_call_traces.sql`
+Schema reference: ``backend/sql/006_create_tool_call_traces.sql``
 """
 
 import asyncio

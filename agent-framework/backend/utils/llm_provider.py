@@ -55,8 +55,8 @@ def load_agents_yaml(framework_dir: Optional[Path] = None) -> dict:
     centrally.
 
     Args:
-        framework_dir: Path to ``agent-framework/``. Defaults to the parent
-            of this module's folder.
+        framework_dir: Path to ``agent-framework/backend/``. Defaults to the
+            parent of this module's folder.
 
     Returns:
         The parsed YAML dict, or ``{}`` if neither file exists (with a warning).

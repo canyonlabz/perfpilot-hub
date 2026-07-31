@@ -1,12 +1,11 @@
 """Shared path resolution for the agent framework.
 
 Provides environment-aware helpers that return correct paths whether
-running locally on disk, inside Docker containers (Aspire or
-docker-compose), or in a future cloud deployment (Azure Container
-Apps with blob-backed mounts).
+running locally on disk or inside Docker containers
+(``docker-compose``).
 
 The Docker bind-mount target ``/app/artifacts`` is shared by both the
-agent-backend and gateway containers (configured in ``apphost.cs`` and
+agent-backend and gateway containers (configured in
 ``docker-compose-full-*.yaml``).  Absolute paths returned by
 ``get_artifacts_base()`` are therefore valid across containers.
 
@@ -14,6 +13,7 @@ Public API
 ----------
     is_docker()            -> bool
     get_framework_dir()    -> Path   (agent-framework/backend/)
+    get_repo_root()        -> Path   (repository root)
     get_artifacts_base()   -> Path   (/app/artifacts or local equivalent)
 """
 
@@ -44,19 +44,26 @@ def get_framework_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def get_repo_root() -> Path:
+    """Return the repository root directory.
+
+    From ``backend/utils/paths.py``, the repo root is two directories
+    above the framework dir: ``backend/`` -> ``agent-framework/`` ->
+    repo root.
+    """
+    return get_framework_dir().parent.parent
+
+
 def get_artifacts_base() -> Path:
     """Return the artifacts base directory.
 
     In Docker (``PERFPILOT_DOCKER=true``), the bind-mount target is
-    ``/app/artifacts`` — matching both ``apphost.cs`` and
-    ``docker-compose-full-*.yaml``.  Both the agent-backend and
-    gateway containers mount the same host directory here, so
-    absolute paths are valid across containers.
+    ``/app/artifacts`` (configured in ``docker-compose-full-*.yaml``).
+    Both the agent-backend and gateway containers mount the same host
+    directory here, so absolute paths are valid across containers.
 
-    Locally, resolves to ``{framework_parent}/artifacts/`` where
-    *framework_parent* is the directory above ``backend/`` (typically
-    ``agent-framework/``).
+    Locally, resolves to ``{repo_root}/artifacts/``.
     """
     if is_docker():
         return _DOCKER_ARTIFACTS_PATH
-    return get_framework_dir().parent / "artifacts"
+    return get_repo_root() / "artifacts"

@@ -62,10 +62,12 @@ from uuid import UUID
 
 log = logging.getLogger(__name__)
 
+from utils.paths import get_framework_dir
+
 AGENT_DIR = Path(__file__).resolve().parent
 AGENT_NAME = "orchestrator"
-FRAMEWORK_DIR = AGENT_DIR.parent.parent  # agent-framework/
-AGENTS_ROOT = AGENT_DIR.parent  # agent-framework/agents/
+FRAMEWORK_DIR = get_framework_dir()  # agent-framework/backend/
+AGENTS_ROOT = FRAMEWORK_DIR / "agents"  # agent-framework/backend/agents/
 
 INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
 AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"

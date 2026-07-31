@@ -50,7 +50,7 @@ from typing import Optional
 from uuid import UUID
 
 if __package__ is None:
-    # Allow `python agui_server.py` from inside agent-framework/.
+    # Allow `python agui_server.py` from inside backend/.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import asyncio
@@ -73,11 +73,12 @@ from utils import (
     task_store,
     thread_store,
 )
+from utils.paths import get_framework_dir
 from utils.session_middleware import SessionMiddleware
 
 log = logging.getLogger(__name__)
 
-FRAMEWORK_DIR = Path(__file__).resolve().parent
+FRAMEWORK_DIR = get_framework_dir()
 SERVER_VERSION = "0.1.0"
 SERVER_TITLE = "PerfPilot Agents - AG-UI Bridge"
 
@@ -224,7 +225,7 @@ def _mount_copilotkit(app: FastAPI) -> None:
     except Exception:
         log.exception(
             "Failed to build the stub orchestrator (likely missing/invalid LLM "
-            "credentials in agent-framework/.env); /copilotkit will be unavailable."
+            "credentials in backend/.env); /copilotkit will be unavailable."
         )
         return
 

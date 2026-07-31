@@ -68,7 +68,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 if __package__ is None:
-    # Allow `python a2a_server.py` from inside agent-framework/.
+    # Allow `python a2a_server.py` from inside backend/.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI, HTTPException, Request
@@ -76,11 +76,12 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from utils import agents_config, base_agent, db, task_executor, task_store, thread_store
+from utils.paths import get_framework_dir
 from utils.session_middleware import SessionMiddleware
 
 log = logging.getLogger(__name__)
 
-FRAMEWORK_DIR = Path(__file__).resolve().parent
+FRAMEWORK_DIR = get_framework_dir()
 AGENTS_DIR = FRAMEWORK_DIR / "agents"
 SERVER_VERSION = "0.1.0"
 SERVER_TITLE = "PerfPilot Agents - A2A Surface"

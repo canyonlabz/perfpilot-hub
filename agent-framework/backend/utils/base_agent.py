@@ -8,7 +8,7 @@ agent-specific behavior on top of the shared factory.
 
 Per-agent config files follow the same `<file>.yaml` / `<file>.example.yaml`
 override-vs-template split that the MCP servers and the global
-`agent-framework/config/agents.yaml` already use. The loader walks
+``backend/config/agents.yaml`` already use. The loader walks
 `CANDIDATE_CONFIG_FILES` (`config.yaml` -> `config.example.yaml`) in
 priority order so operator-side overrides win without ever being committed.
 See `resolve_agent_config_path()` for the helper.
@@ -42,8 +42,8 @@ REQUIRED_AGENT_FILES = ("agent.py", "agent_card.json", "INSTRUCTIONS.md")
 # Per-agent config-file candidates, in priority order. The first one that
 # exists on disk is used. Mirrors the same pattern that the MCP servers
 # in this repo follow (`config.yaml` -> `config.example.yaml`) and that
-# the global `agent-framework/config/agents.yaml` / `agents.example.yaml`
-# pair uses in `utils/llm_provider.py::load_agents_yaml`.
+# the global ``backend/config/agents.yaml`` / ``agents.example.yaml``
+# pair uses in ``utils/llm_provider.py::load_agents_yaml``.
 CANDIDATE_CONFIG_FILES = ("config.yaml", "config.example.yaml")
 
 
@@ -202,7 +202,7 @@ def discover_agents(agents_root: Path) -> list[AgentDefinition]:
     real agents in F3.7+.
 
     Args:
-        agents_root: Path to `agent-framework/agents/`.
+        agents_root: Path to ``backend/agents/``.
 
     Returns:
         List of fully loaded `AgentDefinition` instances, sorted by name.

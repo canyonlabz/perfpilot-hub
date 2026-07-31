@@ -713,7 +713,8 @@ def _invoke_orchestrator_sync(messages: list[dict]) -> tuple[str, Any]:
     # Make `agents.orchestrator.agent` importable when the executor runs
     # from a context that did not put the framework dir on sys.path
     # (e.g. unit tests invoking utils/task_executor.py directly).
-    framework_dir = Path(__file__).resolve().parent.parent
+    from .paths import get_framework_dir
+    framework_dir = get_framework_dir()
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 
@@ -767,9 +768,9 @@ async def _invoke_orchestrator_with_tool_loop(
         final_context_metrics).
     """
     import sys
-    from pathlib import Path
 
-    framework_dir = Path(__file__).resolve().parent.parent
+    from .paths import get_framework_dir
+    framework_dir = get_framework_dir()
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 
@@ -1176,10 +1177,11 @@ async def _load_specialist_module(agent_name: str) -> Any:
 
         import importlib.util
         import sys
-        from pathlib import Path
+
+        from .paths import get_framework_dir
 
         module_path = (
-            Path(__file__).resolve().parent.parent
+            get_framework_dir()
             / "agents"
             / agent_name
             / "agent.py"
@@ -2047,9 +2049,9 @@ async def _run_mcp_specialist_agent(
 
     # ---- Load agent config early (needed for stateful detection) ------
     import sys
-    from pathlib import Path
 
-    framework_dir = Path(__file__).resolve().parent.parent
+    from .paths import get_framework_dir
+    framework_dir = get_framework_dir()
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 

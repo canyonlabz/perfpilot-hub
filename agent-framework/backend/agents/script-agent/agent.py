@@ -64,7 +64,8 @@ def _resolve_playwright_url(agent_config: dict) -> str | None:
         return cfg_url
 
     # Auto-detect Docker vs local
-    if os.environ.get("PERFPILOT_DOCKER", "").lower() in ("true", "1"):
+    from utils.paths import is_docker
+    if is_docker():
         return _DEFAULT_PLAYWRIGHT_URL_DOCKER
     return _DEFAULT_PLAYWRIGHT_URL_LOCAL
 

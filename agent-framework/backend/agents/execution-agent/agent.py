@@ -83,9 +83,11 @@ from typing import Annotated, Any, Optional
 
 log = logging.getLogger(__name__)
 
+from utils.paths import get_framework_dir
+
 AGENT_DIR = Path(__file__).resolve().parent
 AGENT_NAME = "execution-agent"
-FRAMEWORK_DIR = AGENT_DIR.parent.parent  # agent-framework/
+FRAMEWORK_DIR = get_framework_dir()  # agent-framework/backend/
 
 INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
 AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"

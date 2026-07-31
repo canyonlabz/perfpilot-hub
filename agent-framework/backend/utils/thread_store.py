@@ -1,9 +1,8 @@
 """CRUD over the `agent_threads` table.
 
 Threads are the persistent conversation containers. A thread survives across
-sessions, devices, and days. See `agent-framework/sql/008_create_agent_threads.sql`
-for the full DDL rationale and the F3.7 plan in
-`docs/plans/Epic-3-Implementation-Status.md` Section 5 for the lifetime model.
+sessions, devices, and days. See ``backend/sql/008_create_agent_threads.sql``
+for the full DDL rationale.
 
 Ownership is one of two flavours, enforced by the table's CHECK constraint:
 
