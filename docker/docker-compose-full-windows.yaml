@@ -103,7 +103,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.playwright-mcp
-    image: playwright-mcp-corp:latest
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: playwright-mcp:latest
     container_name: playwright-mcp
     user: "0:0"
     ports:

@@ -336,7 +336,7 @@ async def register_mcp_tools_on_agent(
             pattern where the specialist plays both LLM and executor
             roles).
         gateway_url: URL of the FastMCP gateway (e.g.
-            ``http://localhost:8000/mcp/``).
+            ``http://localhost:8888/mcp/``).
         allowed_namespaces: List of namespace prefixes to filter by
             (e.g. ``["datadog"]``). A tool named ``datadog_get_logs``
             matches the namespace ``"datadog"`` via ``<ns>_`` prefix.

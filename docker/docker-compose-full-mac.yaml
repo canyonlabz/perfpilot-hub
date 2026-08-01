@@ -23,20 +23,20 @@ services:
     image: perfpilot-hub-full:latest
     container_name: perf-gateway
     ports:
-      - "8000:8000"
+      - "8888:8888"
     env_file:
       - .env.gateway
     environment:
       - PERFPILOT_DOCKER=true
       - GATEWAY_TRANSPORT=http
-      - GATEWAY_PORT=8000
+      - GATEWAY_PORT=8888
       - FASTMCP_CHECK_FOR_UPDATES=off
       # Override POSTGRES_HOST to use the internal Docker network service name
       - POSTGRES_HOST=perfmemory-db
       - POSTGRES_PORT=5432
     volumes:
       # Artifacts (persisted on host)
-      - ../artifacts:/app/artifacts
+      - ../mcp-perf-suite/artifacts:/app/artifacts
       # Gateway config
       - ./config/gateway/config.yaml:/app/gateway-mcp/config.yaml:ro
       # BlazeMeter config
@@ -105,12 +105,17 @@ services:
       - perf-network
 
   playwright-mcp:
-    image: mcp/playwright:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.playwright-mcp
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: playwright-mcp:latest
     container_name: playwright-mcp
     user: "0:0"
     ports:
       - "8931:8931"
-    command: ["--port", "8931", "--host", "0.0.0.0", "--caps", "devtools", "--config", "/app/config.json"]
+    command: ["--port", "8931", "--host", "0.0.0.0", "--caps", "devtools", "--ignore-https-errors", "--config", "/app/config.json"]
     volumes:
       - ../.playwright-mcp:/home/node/output
       - ./config/playwright/config.json:/app/config.json:ro

@@ -2,7 +2,7 @@
 
 Each agent uses this module to reach MCP tools (BlazeMeter, JMeter, Datadog,
 PerfAnalysis, PerfReport, Confluence, PerfMemory, MSTeams, SharePoint)
-through the `gateway-mcp` aggregator at `http://localhost:8000/mcp/` (local)
+through the `gateway-mcp` aggregator at `http://localhost:8888/mcp/` (local)
 or whatever URL `GATEWAY_MCP_URL` resolves to (production). The script-agent
 additionally reaches the Microsoft Playwright MCP container via the
 separate URL resolved by `resolve_playwright_url()`.
@@ -47,7 +47,7 @@ from typing import Any, Iterable
 
 log = logging.getLogger(__name__)
 
-DEFAULT_GATEWAY_URL = "http://localhost:8000/mcp/"
+DEFAULT_GATEWAY_URL = "http://localhost:8888/mcp/"
 DEFAULT_PLAYWRIGHT_URL = "http://localhost:8931/mcp"
 
 # FastMCP namespace separator. `gateway.mount(..., namespace="blazemeter")`

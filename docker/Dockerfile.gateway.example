@@ -117,14 +117,14 @@ ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}
 ENV PATH="${JMETER_HOME}/bin:${JAVA_HOME}/bin:${PATH}"
 
 # Copy MCP server source directories (7 Docker-eligible servers + gateway)
-COPY jmeter-mcp/ ./jmeter-mcp/
-COPY blazemeter-mcp/ ./blazemeter-mcp/
-COPY datadog-mcp/ ./datadog-mcp/
-COPY perfanalysis-mcp/ ./perfanalysis-mcp/
-COPY perfreport-mcp/ ./perfreport-mcp/
-COPY confluence-mcp/ ./confluence-mcp/
-COPY perfmemory-mcp/ ./perfmemory-mcp/
-COPY gateway-mcp/ ./gateway-mcp/
+COPY mcp-perf-suite/jmeter-mcp/ ./jmeter-mcp/
+COPY mcp-perf-suite/blazemeter-mcp/ ./blazemeter-mcp/
+COPY mcp-perf-suite/datadog-mcp/ ./datadog-mcp/
+COPY mcp-perf-suite/perfanalysis-mcp/ ./perfanalysis-mcp/
+COPY mcp-perf-suite/perfreport-mcp/ ./perfreport-mcp/
+COPY mcp-perf-suite/confluence-mcp/ ./confluence-mcp/
+COPY mcp-perf-suite/perfmemory-mcp/ ./perfmemory-mcp/
+COPY mcp-perf-suite/gateway-mcp/ ./gateway-mcp/
 
 # Install all Python dependencies (consolidated from all servers)
 COPY docker/requirements.gateway.txt ./requirements.txt
@@ -137,16 +137,16 @@ RUN chmod +x /app/entrypoint.sh
 # Environment: Docker mode + gateway defaults
 ENV PERFPILOT_DOCKER=true
 ENV GATEWAY_TRANSPORT=http
-ENV GATEWAY_PORT=8000
+ENV GATEWAY_PORT=8888
 ENV GATEWAY_HOST=0.0.0.0
 
 # Artifacts volume mount point
 VOLUME /app/artifacts
 
-EXPOSE 8000
+EXPOSE 8888
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-    CMD curl -f http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=60s --timeout=5s --start-period=15s \
+    CMD curl -f http://localhost:8888/health || exit 1
 
 WORKDIR /app/gateway-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]
