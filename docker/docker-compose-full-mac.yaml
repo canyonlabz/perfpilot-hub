@@ -1,13 +1,18 @@
 # =============================================================================
-# PerfPilot Hub — Full Stack: Gateway + PerfMemory DB (macOS)
+# PerfPilot Hub — Full Stack (macOS)
+#   Gateway + PerfMemory DB + Playwright MCP + Agent Backend (A2A + AG-UI)
 # =============================================================================
 # Usage:
 #   1. Copy .env.gateway.example to .env.gateway and fill in your values
 #   2. Copy config/*.example.yaml files to their non-example counterparts
 #   3. Run: docker compose -f docker-compose-full-mac.yaml up --build
 #
-# This compose file includes the PerfMemory PostgreSQL database (pgvector + AGE).
-# The gateway waits for the database to be healthy before starting.
+# Services:
+#   perf-gateway    — MCP gateway aggregator (port 8888)
+#   perfmemory-db   — PostgreSQL with pgvector + AGE (port 5432)
+#   playwright-mcp  — Microsoft Playwright MCP for browser automation (port 8931)
+#   agent-a2a       — A2A protocol server (port 8001)
+#   agent-agui      — AG-UI protocol server for the web frontend (port 8002)
 #
 # macOS note: The perfmemory-db service uses explicit user/PGDATA settings
 # to avoid file permission issues with Docker Desktop on macOS.
@@ -119,6 +124,63 @@ services:
     volumes:
       - ../.playwright-mcp:/home/node/output
       - ./config/playwright/config.json:/app/config.json:ro
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+  agent-a2a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-backend
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perf-agent-backend:latest
+    container_name: agent-a2a
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env.gateway
+    environment:
+      - PERFPILOT_DOCKER=true
+      - GATEWAY_MCP_URL=http://perf-gateway:8888/mcp
+      - PLAYWRIGHT_MCP_URL=http://playwright-mcp:8931/mcp
+      - PERFAGENT_STATE_HOST=perfmemory-db
+      - PERFAGENT_STATE_PORT=5432
+      - HEALTHCHECK_PORT=8001
+    depends_on:
+      perfmemory-db:
+        condition: service_healthy
+      perf-gateway:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+  agent-agui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-backend
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perf-agent-backend:latest
+    container_name: agent-agui
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env.gateway
+    environment:
+      - PERFPILOT_DOCKER=true
+      - GATEWAY_MCP_URL=http://perf-gateway:8888/mcp
+      - PLAYWRIGHT_MCP_URL=http://playwright-mcp:8931/mcp
+      - PERFAGENT_STATE_HOST=perfmemory-db
+      - PERFAGENT_STATE_PORT=5432
+      - HEALTHCHECK_PORT=8002
+    command: ["python", "agui_server.py"]
+    depends_on:
+      perfmemory-db:
+        condition: service_healthy
+      perf-gateway:
+        condition: service_started
     restart: unless-stopped
     networks:
       - perf-network
