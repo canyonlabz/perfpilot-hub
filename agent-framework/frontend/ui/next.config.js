@@ -1,18 +1,22 @@
 /** @type {import('next').NextConfig} */
+
+const aguiBackend = process.env.AGUI_BACKEND_URL || "http://localhost:8002";
+const a2aBackend = process.env.A2A_BACKEND_URL || "http://localhost:8001";
+
 const nextConfig = {
   async rewrites() {
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:8002/api/:path*",
+        destination: `${aguiBackend}/api/:path*`,
       },
       {
         source: "/health",
-        destination: "http://localhost:8002/health",
+        destination: `${aguiBackend}/health`,
       },
       {
         source: "/a2a/:path*",
-        destination: "http://localhost:8001/:path*",
+        destination: `${a2aBackend}/:path*`,
       },
     ];
   },
