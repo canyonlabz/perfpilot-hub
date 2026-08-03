@@ -128,17 +128,29 @@ agent_spec_file_var: ContextVar[Optional[str]] = ContextVar(
 # auto-injects the path into the child task's payload so the Script Agent
 # can use it directly for browser automation.
 
+agent_test_run_id_var: ContextVar[Optional[str]] = ContextVar(
+    "agent_test_run_id", default=None
+)
+# NOTE: agent_test_run_id_var propagates the framework-resolved (or minted)
+# test_run_id so delegate_to_specialist auto-injects it into child tasks.
+# Prefer a caller-supplied ID (metadata / payload / tool arg); mint only
+# when the delegated work needs an ID and none was provided.
+
 # ── Per-request identity for HTTP header construction ──
 # AG2's thread isolation means tools can't read ContextVars.
 # The AG-UI handler sets these before dispatch so that
 # _agent_outbound_headers() can build the correct HTTP headers
 # for calls to /api/delegate and /api/tasks/{id}.
 # Only identity values -- no event loops, no DB connections.
+# ``test_run_id`` is set at AG-UI / A2A ingress via
+# ``ensure_test_run_id_for_inbound`` so delegate_to_specialist prefers the
+# framework-resolved ID over any LLM-invented tool argument.
 _caller_identity: dict[str, Optional[str]] = {
     "user_id": None,
     "thread_id": None,
     "session_id": None,
     "task_id": None,
+    "test_run_id": None,
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -164,11 +176,13 @@ def set_caller_identity(
     session_id: Optional[str],
     *,
     task_id: Optional[str] = None,
+    test_run_id: Optional[str] = None,
 ) -> None:
     _caller_identity["user_id"] = user_id
     _caller_identity["thread_id"] = thread_id
     _caller_identity["session_id"] = session_id
     _caller_identity["task_id"] = task_id
+    _caller_identity["test_run_id"] = test_run_id
 
 
 def clear_caller_identity() -> None:
@@ -176,6 +190,7 @@ def clear_caller_identity() -> None:
     _caller_identity["thread_id"] = None
     _caller_identity["session_id"] = None
     _caller_identity["task_id"] = None
+    _caller_identity["test_run_id"] = None
 
 
 # =============================================================================
@@ -594,8 +609,6 @@ async def delegate_to_specialist(
         })
 
     body = dict(payload or {})
-    if test_run_id is not None:
-        body.setdefault("test_run_id", test_run_id)
 
     # Auto-inject the normalized test spec file path into the child
     # task's payload so the specialist agent can use it directly for
@@ -604,6 +617,38 @@ async def delegate_to_specialist(
     if spec_file and "test_spec_file" not in body:
         body["test_spec_file"] = spec_file
 
+    # Framework-authoritative test_run_id resolution (A2A + Web UI):
+    #   1. ContextVar / _caller_identity (minted or reused at ingress)
+    #   2. For script-agent: mint if still missing — do NOT honor an
+    #      LLM-invented tool-arg timestamp (e.g. 2023-10-07-12-00-00)
+    #   3. For other specialists: allow tool arg / body (BlazeMeter IDs)
+    from utils.test_run_id import mint_test_run_id, resolve_test_run_id
+
+    framework_id = resolve_test_run_id(
+        agent_test_run_id_var.get(),
+        _caller_identity.get("test_run_id"),
+    )
+    if framework_id:
+        resolved_test_run_id = framework_id
+    elif agent_name == "script-agent":
+        resolved_test_run_id = mint_test_run_id()
+        log.info(
+            "delegate_to_specialist: script-agent with no framework "
+            "test_run_id; minted %s (ignoring LLM tool arg)",
+            resolved_test_run_id,
+        )
+    else:
+        resolved_test_run_id = resolve_test_run_id(
+            test_run_id,
+            body.get("test_run_id"),
+            payload=body,
+        )
+
+    if resolved_test_run_id:
+        body["test_run_id"] = resolved_test_run_id
+        agent_test_run_id_var.set(resolved_test_run_id)
+        _caller_identity["test_run_id"] = resolved_test_run_id
+
     parent_uuid = UUID(parent_task_id_str) if parent_task_id_str else None
 
     try:
@@ -611,7 +656,7 @@ async def delegate_to_specialist(
             session_id=UUID(session_id_str),
             agent_name=agent_name,
             payload=body,
-            test_run_id=test_run_id,
+            test_run_id=resolved_test_run_id,
             thread_id=thread_id,
             parent_task_id=parent_uuid,
         )

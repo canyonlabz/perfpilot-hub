@@ -523,6 +523,7 @@ from utils.a2a_v1_helpers import (  # noqa: F401 — re-exported for backward co
     _normalize_a2a_v1_body,
     _task_to_a2a_v1,
     _task_event_to_a2a_v1_sse,
+    _task_event_to_a2a_v1_artifact_sse,
 )
 
 

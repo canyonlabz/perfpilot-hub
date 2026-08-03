@@ -638,9 +638,26 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         agent_session_id_var,
         agent_request_source_var,
         agent_task_id_var,
+        agent_test_run_id_var,
     )
     agent_request_source_var.set("a2a")
     agent_task_id_var.set(str(task.task_id))
+
+    # Shared A2A + Web UI ingress: reuse metadata/payload/text ID when
+    # present; mint only for pre-script-creation (parts[] test specs or
+    # script-creation prose). Do NOT mint for unrelated chat turns.
+    from .test_run_id import ensure_test_run_id_for_inbound
+
+    inbound_payload = task.payload if isinstance(task.payload, dict) else None
+    if inbound_payload is not None and getattr(task, "test_run_id", None):
+        inbound_payload.setdefault("test_run_id", task.test_run_id)
+    ensured_test_run_id = ensure_test_run_id_for_inbound(
+        payload=inbound_payload,
+        user_text=user_message,
+        parts=(inbound_payload.get("parts") if inbound_payload else None),
+    )
+    if ensured_test_run_id:
+        agent_test_run_id_var.set(ensured_test_run_id)
 
     if task.session_id:
         agent_session_id_var.set(str(task.session_id))
@@ -951,8 +968,10 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     If no ``test_run_id`` is provided in the request (typical for
     script creation workflows where no BlazeMeter test has been
     executed yet), one is minted using the ``YYYY-MM-DD-HH-MM-SS``
-    timestamp format and set on the task payload so it flows
-    downstream to specialist agents.
+    UTC timestamp format and set on the task payload so it flows
+    downstream to specialist agents. When the caller supplies an
+    existing ID via the task column, payload, or ``metadata.test_run_id``,
+    that value is reused.
 
     The saved file path is set on ``agent_spec_file_var`` so
     ``delegate_to_specialist()`` can auto-inject it into child task
@@ -963,8 +982,7 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
       - No ``parts[]`` array in the payload
       - Normalizer finds no test spec content in the parts
     """
-    from datetime import datetime
-    from pathlib import Path
+    from .test_run_id import resolve_or_mint_test_run_id
 
     if not isinstance(task.payload, dict):
         return
@@ -973,20 +991,18 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     if not isinstance(parts, list) or not parts:
         return
 
-    # Resolve or mint a test_run_id. For script creation requests
-    # arriving via A2A, the upstream client typically does not provide
-    # one since no BlazeMeter test has been executed yet.
-    test_run_id = getattr(task, "test_run_id", None)
+    # Script-creation with parts[] needs a test_run_id for the artifact
+    # folder. Reuse a caller-supplied ID; mint only when absent.
+    test_run_id = resolve_or_mint_test_run_id(
+        getattr(task, "test_run_id", None),
+        payload=task.payload,
+        mint_if_missing=True,
+    )
     if not test_run_id:
-        test_run_id = task.payload.get("test_run_id")
-    if not isinstance(test_run_id, str) or not test_run_id.strip():
-        test_run_id = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        task.payload["test_run_id"] = test_run_id
-        log.info(
-            "_persist_test_spec_from_parts: no test_run_id provided; "
-            "minted %s",
-            test_run_id,
-        )
+        return
+
+    from agents.orchestrator.agent import agent_test_run_id_var
+    agent_test_run_id_var.set(test_run_id)
 
     from . import a2a_spec_normalizer
 
@@ -1990,9 +2006,18 @@ async def _run_mcp_specialist_agent(
         agent_name: The specialist's name (e.g. ``"monitoring-agent"``).
     """
     payload = task.payload if isinstance(task.payload, dict) else {}
-    test_run_id = payload.get("test_run_id")
-    if not test_run_id:
-        test_run_id = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+    # Reuse a caller-supplied ID; mint only when the specialist still
+    # has none so MCP tool calls share one artifact folder. Write the
+    # value into a mutable payload copy BEFORE prompt composition so
+    # the LLM sees the authoritative ID.
+    from .test_run_id import resolve_or_mint_test_run_id
+
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    test_run_id = resolve_or_mint_test_run_id(
+        getattr(task, "test_run_id", None),
+        payload=payload,
+        mint_if_missing=True,
+    )
 
     user_message = None
     for key in ("user_message", "message", "text", "prompt"):

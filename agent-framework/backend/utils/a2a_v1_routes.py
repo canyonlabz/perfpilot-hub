@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request
@@ -47,11 +47,66 @@ from .a2a_v1_helpers import (
     A2A_V1_AGENT_NAME,
     _a2a_v1_response_headers,
     _normalize_a2a_v1_body,
+    _task_event_to_a2a_v1_artifact_sse,
     _task_event_to_a2a_v1_sse,
     _task_to_a2a_v1,
 )
 
 log = logging.getLogger(__name__)
+
+# Sentinel: REST SSE path (not JSON-RPC)
+_SSE_REST = object()
+
+
+def _payload_context_id(payload: Any) -> Optional[str]:
+    """Return ``_a2a_v1_context_id`` from a task payload when present."""
+    if isinstance(payload, dict):
+        cid = payload.get("_a2a_v1_context_id")
+        if isinstance(cid, str) and cid:
+            return cid
+    return None
+
+
+def _yield_task_event_sse(
+    event: Any,
+    *,
+    context_id: Optional[str],
+    jsonrpc_id: Any = _SSE_REST,
+) -> list[dict]:
+    """Build SSE yield dicts for one TaskEvent (artifact then status).
+
+    On completed events with ``reply_text``, emits an A2A ``artifactUpdate``
+    immediately before the terminal ``statusUpdate``.
+    """
+    frames: list[dict] = []
+    artifact_payload = _task_event_to_a2a_v1_artifact_sse(
+        event, context_id=context_id,
+    )
+    status_payload = _task_event_to_a2a_v1_sse(event, context_id=context_id)
+
+    if jsonrpc_id is _SSE_REST:
+        if artifact_payload:
+            frames.append({
+                "event": "artifact",
+                "data": json.dumps(artifact_payload),
+            })
+        frames.append({
+            "event": "status",
+            "data": json.dumps(status_payload),
+        })
+    else:
+        from .a2a_jsonrpc import jsonrpc_sse_event
+
+        if artifact_payload:
+            frames.append({
+                "event": "artifact",
+                "data": jsonrpc_sse_event(jsonrpc_id, artifact_payload),
+            })
+        frames.append({
+            "event": "status",
+            "data": jsonrpc_sse_event(jsonrpc_id, status_payload),
+        })
+    return frames
 
 
 # =============================================================================
@@ -191,6 +246,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         asyncio.create_task(task_executor.execute_task(task.task_id))
 
         async def _stream():
+            context_id = _payload_context_id(task.payload)
             yield {
                 "event": "task",
                 "data": json.dumps(_task_to_a2a_v1(task)),
@@ -204,10 +260,10 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
                     except asyncio.TimeoutError:
                         yield {"event": "ping", "data": "{}"}
                         continue
-                    yield {
-                        "event": "status",
-                        "data": json.dumps(_task_event_to_a2a_v1_sse(event)),
-                    }
+                    for frame in _yield_task_event_sse(
+                        event, context_id=context_id,
+                    ):
+                        yield frame
                     if event.status in task_store.TERMINAL_STATUSES:
                         break
             finally:
@@ -439,6 +495,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         asyncio.create_task(task_executor.execute_task(task.task_id))
 
         async def _sse():
+            context_id = _payload_context_id(task.payload)
             yield {
                 "event": "task",
                 "data": jsonrpc_sse_event(rpc.id, {"task": _task_to_a2a_v1(task)}),
@@ -452,13 +509,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
                     except asyncio.TimeoutError:
                         yield {"event": "ping", "data": "{}"}
                         continue
-                    yield {
-                        "event": "status",
-                        "data": jsonrpc_sse_event(
-                            rpc.id,
-                            {"statusUpdate": _task_event_to_a2a_v1_sse(event)},
-                        ),
-                    }
+                    for frame in _yield_task_event_sse(
+                        event, context_id=context_id, jsonrpc_id=rpc.id,
+                    ):
+                        yield frame
                     if event.status in task_store.TERMINAL_STATUSES:
                         break
             finally:
@@ -520,6 +574,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         queue = await task_executor.subscribe(task.task_id)
 
         async def _sse():
+            context_id = _payload_context_id(task.payload)
             yield {
                 "event": "task",
                 "data": jsonrpc_sse_event(rpc.id, {"task": _task_to_a2a_v1(task)}),
@@ -533,13 +588,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
                     except asyncio.TimeoutError:
                         yield {"event": "ping", "data": "{}"}
                         continue
-                    yield {
-                        "event": "status",
-                        "data": jsonrpc_sse_event(
-                            rpc.id,
-                            {"statusUpdate": _task_event_to_a2a_v1_sse(event)},
-                        ),
-                    }
+                    for frame in _yield_task_event_sse(
+                        event, context_id=context_id, jsonrpc_id=rpc.id,
+                    ):
+                        yield frame
                     if event.status in task_store.TERMINAL_STATUSES:
                         break
             finally:

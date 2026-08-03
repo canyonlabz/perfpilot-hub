@@ -27,14 +27,25 @@ registered on you with full JSON schemas. You currently have access to
 the `jmeter_*` namespace.
 
 **IMPORTANT:** When the user requests running any JMeter or Playwright
-browser automation, the requirement is a `test_run_id` by default, however
-there is not official `test_run_id` as this assumes that a BlazeMeter 
-test has completed with an official `test_run_id`. As such, we need to 
-dynamically generated an ID value in the form `YYYY-MM-DD-HH-MM-SS`.
-This test_run_id should be communicated back to the user and Orchestrator.
-As a requirement, any `test_run_id` should be used for all subsequent 
-tasks and operations. Do **NOT** try to continue your objective without
-a valid `test_run_id` (e.g. `run_id` in some cases, same meaning)
+browser automation, a `test_run_id` is required so all artifacts land
+under one folder. Prefer an existing ID when one is already present in
+the task payload, delegation context, or orchestrator-provided context
+(including a BlazeMeter / prior-run ID). Use that value **verbatim** for
+all subsequent MCP tool calls and operations — do **NOT** mint a second
+ID, invent a descriptive slug, or change the format.
+
+Only when **no** `test_run_id` is present anywhere in your context may
+you mint one yourself, and only in the exact form `YYYY-MM-DD-HH-MM-SS`
+(full date and time — never midnight placeholders like `00-00-00` unless
+that is the true current time). Communicate the ID back to the user and
+Orchestrator. Do **NOT** continue without a valid `test_run_id` (also
+called `run_id` in some MCP tools — same meaning).
+
+When summarizing artifacts, cite **real filesystem paths** returned by
+MCP tools (e.g. `artifacts/{test_run_id}/jmeter/correlation_spec.json`).
+Never invent URLs, hostnames, or markdown hyperlinks (including
+`https://example.com/...`). If a tool did not return a path, say so —
+do not fabricate a link.
 
 ### JMeter MCP (`jmeter_*` via gateway)
 

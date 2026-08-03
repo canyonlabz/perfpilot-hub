@@ -159,8 +159,6 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
     PerfPilot-to-A2A status translation.
     """
     from .a2a_models import (
-        Artifact,
-        Part,
         Task,
         TaskStatus,
         a2a_timestamp,
@@ -187,16 +185,9 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
         context_id = task.payload.get("_a2a_v1_context_id")
 
     artifacts = None
-    if task.result and isinstance(task.result, dict):
-        reply_text = task.result.get("reply_text")
-        if isinstance(reply_text, str) and reply_text.strip():
-            artifacts = [
-                Artifact(
-                    artifact_id=f"{task.task_id}-result",
-                    parts=[Part(text=reply_text, media_type="text/plain")],
-                    name="Agent response",
-                )
-            ]
+    artifact = _reply_text_artifact(str(task.task_id), task.result)
+    if artifact is not None:
+        artifacts = [artifact]
 
     metadata: dict[str, Any] = {
         "agentName": task.agent_name,
@@ -217,19 +208,98 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
     return a2a_task.model_dump(by_alias=True, exclude_none=True)
 
 
-def _task_event_to_a2a_v1_sse(event: task_executor.TaskEvent) -> dict:
-    """Convert a ``TaskEvent`` to an A2A v1 SSE ``data:`` payload.
+def _reply_text_artifact(task_id: str, result: Any) -> Optional[Any]:
+    """Build an A2A ``Artifact`` from ``result.reply_text`` when present."""
+    from .a2a_models import Artifact, Part
 
-    Returns a dict suitable for ``json.dumps()`` as an SSE data field,
-    shaped as a ``StreamResponse`` with a ``statusUpdate``.
+    if not result or not isinstance(result, dict):
+        return None
+    reply_text = result.get("reply_text")
+    if not isinstance(reply_text, str) or not reply_text.strip():
+        return None
+    return Artifact(
+        artifact_id=f"{task_id}-result",
+        parts=[Part(text=reply_text, media_type="text/plain")],
+        name="Agent response",
+    )
+
+
+def _context_id_from_task_or_event(
+    *,
+    context_id: Optional[str] = None,
+    task: Optional[task_store.AgentTask] = None,
+) -> str:
+    """Resolve A2A ``contextId`` for streaming events (required by spec)."""
+    if isinstance(context_id, str) and context_id:
+        return context_id
+    if task is not None and isinstance(task.payload, dict):
+        cid = task.payload.get("_a2a_v1_context_id")
+        if isinstance(cid, str) and cid:
+            return cid
+    return ""
+
+
+def _task_event_to_a2a_v1_sse(
+    event: task_executor.TaskEvent,
+    *,
+    context_id: Optional[str] = None,
+) -> dict:
+    """Convert a ``TaskEvent`` to an A2A v1 SSE ``StreamResponse`` payload.
+
+    Returns a dict with exactly one ``statusUpdate`` key whose value is a
+    ``TaskStatusUpdateEvent`` (A2A §3.2.3 / §4.2.1). Progress strings are
+    carried in ``metadata.progress`` when present.
     """
-    from .a2a_models import TaskStatus, a2a_timestamp, perfpilot_status_to_a2a
+    from .a2a_models import (
+        StreamResponse,
+        TaskStatus,
+        TaskStatusUpdateEvent,
+        a2a_timestamp,
+        perfpilot_status_to_a2a,
+    )
 
     a2a_state = perfpilot_status_to_a2a(event.status)
     status = TaskStatus(state=a2a_state, timestamp=a2a_timestamp())
+    meta: Optional[dict[str, Any]] = None
+    if event.progress:
+        meta = {"progress": event.progress}
 
-    return {
-        "statusUpdate": status.model_dump(by_alias=True, exclude_none=True),
-        "taskId": event.task_id,
-        "progress": event.progress,
-    }
+    stream = StreamResponse(
+        status_update=TaskStatusUpdateEvent(
+            task_id=event.task_id,
+            context_id=_context_id_from_task_or_event(context_id=context_id),
+            status=status,
+            metadata=meta,
+        ),
+    )
+    return stream.model_dump(by_alias=True, exclude_none=True)
+
+
+def _task_event_to_a2a_v1_artifact_sse(
+    event: task_executor.TaskEvent,
+    *,
+    context_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Build an A2A ``artifactUpdate`` StreamResponse for a completed event.
+
+    Returns ``None`` when the event is not completed or has no
+    ``reply_text`` artifact. Callers must emit this immediately before
+    the terminal ``statusUpdate``.
+    """
+    from .a2a_models import StreamResponse, TaskArtifactUpdateEvent
+
+    if event.status != "completed":
+        return None
+    artifact = _reply_text_artifact(event.task_id, event.result)
+    if artifact is None:
+        return None
+
+    stream = StreamResponse(
+        artifact_update=TaskArtifactUpdateEvent(
+            task_id=event.task_id,
+            context_id=_context_id_from_task_or_event(context_id=context_id),
+            artifact=artifact,
+            last_chunk=True,
+        ),
+    )
+    return stream.model_dump(by_alias=True, exclude_none=True)

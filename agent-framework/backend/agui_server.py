@@ -343,23 +343,31 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
 
             session_id_val = getattr(request.state, "session_id", None)
 
-            # Set caller identity so _agent_outbound_headers() can build
-            # correct HTTP headers from AG2's isolated tool thread.
+            # Shared A2A/Web UI rule: reuse an existing test_run_id when the
+            # user supplies one; mint only for pre-script-creation requests.
+            # Stash on _caller_identity so delegate_to_specialist prefers the
+            # framework ID over any LLM-invented tool argument.
+            from utils.test_run_id import ensure_test_run_id_for_inbound
             from agents.orchestrator.agent import (
                 set_caller_identity,
                 clear_caller_identity,
+            )
+
+            ensured_test_run_id = ensure_test_run_id_for_inbound(
+                user_text=new_user_text,
             )
             set_caller_identity(
                 user_id=requesting_user,
                 thread_id=thread_id,
                 session_id=str(session_id_val) if session_id_val else None,
+                test_run_id=ensured_test_run_id,
             )
 
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
                     "/copilotkit caller identity: user_id=%s session_id=%s "
-                    "thread_id=%s",
-                    requesting_user, session_id_val, thread_id,
+                    "thread_id=%s test_run_id=%s",
+                    requesting_user, session_id_val, thread_id, ensured_test_run_id,
                 )
 
             async def _streaming_with_persistence():

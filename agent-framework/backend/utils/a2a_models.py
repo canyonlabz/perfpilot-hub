@@ -184,6 +184,26 @@ class Task(A2ABaseModel):
     metadata: Optional[dict[str, Any]] = None
 
 
+class TaskStatusUpdateEvent(A2ABaseModel):
+    """A2A §4.2.1 — streamed task status change notification."""
+
+    task_id: str
+    context_id: str
+    status: TaskStatus
+    metadata: Optional[dict[str, Any]] = None
+
+
+class TaskArtifactUpdateEvent(A2ABaseModel):
+    """A2A §4.2.2 — streamed artifact generation / update notification."""
+
+    task_id: str
+    context_id: str
+    artifact: Artifact
+    append: Optional[bool] = None
+    last_chunk: Optional[bool] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
 # =============================================================================
 # Request / Response models (Sections 9 + 11 — Protocol Bindings)
 # =============================================================================
@@ -205,7 +225,7 @@ class SendMessageRequest(A2ABaseModel):
 
 
 class StreamResponse(A2ABaseModel):
-    """SSE event wrapper for streaming responses.
+    """SSE event wrapper for streaming responses (A2A §3.2.3).
 
     Exactly one of ``task``, ``message``, ``status_update``, or
     ``artifact_update`` should be set per event.
@@ -213,8 +233,8 @@ class StreamResponse(A2ABaseModel):
 
     task: Optional[Task] = None
     message: Optional[Message] = None
-    status_update: Optional[TaskStatus] = None
-    artifact_update: Optional[Artifact] = None
+    status_update: Optional[TaskStatusUpdateEvent] = None
+    artifact_update: Optional[TaskArtifactUpdateEvent] = None
 
 
 # =============================================================================
