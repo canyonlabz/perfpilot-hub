@@ -349,7 +349,7 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             # user supplies one; mint only for pre-script-creation requests.
             # Stash on _caller_identity so delegate_to_specialist prefers the
             # framework ID over any LLM-invented tool argument.
-            from utils.test_run_id import ensure_test_run_id_for_inbound
+            from core.test_run_id import ensure_test_run_id_for_inbound
             from agents.orchestrator.agent import (
                 set_caller_identity,
                 clear_caller_identity,

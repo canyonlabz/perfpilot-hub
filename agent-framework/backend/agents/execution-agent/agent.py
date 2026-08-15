@@ -208,7 +208,7 @@ def _load_per_agent_llm_block() -> Optional[dict]:
 
 
 def _resolved_config_filename() -> str:
-    from utils.base_agent import resolve_agent_config_path
+    from core.base_agent import resolve_agent_config_path
 
     path = resolve_agent_config_path(AGENT_DIR)
     return path.name if path else "<none>"

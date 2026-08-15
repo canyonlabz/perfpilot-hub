@@ -494,7 +494,7 @@ def list_available_specialists() -> str:
 
 def _safe_read_agent_card(agent_folder: Path) -> dict:
     """Wrapper that imports the helper lazily so this module stays import-cheap."""
-    from utils.base_agent import read_agent_card
+    from core.base_agent import read_agent_card
 
     return read_agent_card(agent_folder)
 
@@ -622,7 +622,7 @@ async def delegate_to_specialist(
     #   2. For script-agent: mint if still missing — do NOT honor an
     #      LLM-invented tool-arg timestamp (e.g. 2023-10-07-12-00-00)
     #   3. For other specialists: allow tool arg / body (BlazeMeter IDs)
-    from utils.test_run_id import mint_test_run_id, resolve_test_run_id
+    from core.test_run_id import mint_test_run_id, resolve_test_run_id
 
     framework_id = resolve_test_run_id(
         agent_test_run_id_var.get(),
@@ -1051,7 +1051,7 @@ def _load_per_agent_llm_block() -> Optional[dict]:
 
 
 def _resolved_config_filename() -> str:
-    from utils.base_agent import resolve_agent_config_path
+    from core.base_agent import resolve_agent_config_path
 
     path = resolve_agent_config_path(AGENT_DIR)
     return path.name if path else "<none>"

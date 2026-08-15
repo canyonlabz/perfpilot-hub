@@ -166,7 +166,7 @@ def load_agent_definition(agent_folder: Path) -> AgentDefinition:
     instructions_path = agent_folder / "INSTRUCTIONS.md"
     agent_card_path = agent_folder / "agent_card.json"
 
-    from . import config_loader
+    from utils import config_loader
 
     config = config_loader.load_agent_config(
         name, framework_dir=agent_folder.parent.parent,
