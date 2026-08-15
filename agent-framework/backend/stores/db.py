@@ -78,7 +78,7 @@ def load_settings_from_env(env_file: Optional[Path] = None) -> DbSettings:
         RuntimeError: If a required PERFAGENT_STATE_* variable is missing.
     """
     if env_file is None:
-        from .paths import get_framework_dir
+        from utils.paths import get_framework_dir
         env_file = get_framework_dir() / ".env"
     if env_file.exists():
         try:

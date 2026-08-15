@@ -57,8 +57,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from . import task_store
-from . import trace_store
+from stores import task_store
+from stores import trace_store
 
 log = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ async def _enforce_hitl_gate(
     if rule is None:
         return None
 
-    from . import hitl_store
+    from stores import hitl_store
 
     prompt = rule.build_prompt(task.agent_name, payload)
 
@@ -317,7 +317,7 @@ async def _inject_completion_message(task: task_store.AgentTask) -> None:
     React polling hook is active), the result is visible without the
     user needing to ask "is it done?".
     """
-    from utils import conversation_store, thread_store
+    from stores import conversation_store, thread_store
 
     summary = _build_completion_summary(task)
     try:
@@ -602,7 +602,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     if user_message and thread_id:
         try:
-            from . import conversation_store
+            from stores import conversation_store
 
             await conversation_store.append_message(
                 thread_id,
@@ -662,7 +662,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     if task.session_id:
         agent_session_id_var.set(str(task.session_id))
         try:
-            from . import session_store as _ss
+            from stores import session_store as _ss
             _session = await _ss.get_session(task.session_id)
             if _session and _session.user_id:
                 agent_user_id_var.set(_session.user_id)
@@ -684,7 +684,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     if thread_id and assistant_text:
         try:
-            from . import conversation_store, thread_store
+            from stores import conversation_store, thread_store
 
             await conversation_store.append_message(
                 thread_id,
@@ -930,7 +930,7 @@ async def _load_thread_history_as_ag2_messages(thread_id: str) -> list[dict]:
     payloads (tool calls) are stringified to a sensible fallback so AG2
     never sees None.
     """
-    from . import conversation_store
+    from stores import conversation_store
 
     rows = await conversation_store.list_for_thread(thread_id, limit=200, ascending=True)
     shaped: list[dict] = []

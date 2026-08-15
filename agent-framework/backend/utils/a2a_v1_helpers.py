@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from . import task_executor, task_store
+from . import task_executor
+from stores import task_store
 
 
 # =============================================================================

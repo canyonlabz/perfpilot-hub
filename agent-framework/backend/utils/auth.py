@@ -127,7 +127,7 @@ async def owner_of_session(session_id: UUID) -> Optional[str]:
     Lazy import of `session_store` so this module stays cheap to import
     in places that only use `requires_owner`.
     """
-    from . import session_store
+    from stores import session_store
 
     session = await session_store.get_session(session_id)
     if session is None:
@@ -142,7 +142,7 @@ async def owner_of_task(task_id: UUID) -> Optional[str]:
     answer is "whoever owns the underlying task's session." HITL approvals
     do not carry their own `user_id` column; ownership flows transitively.
     """
-    from . import task_store
+    from stores import task_store
 
     task = await task_store.get_task(task_id)
     if task is None:

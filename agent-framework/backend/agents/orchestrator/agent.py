@@ -205,7 +205,7 @@ async def _get_standalone_conn():
     completely isolated from the pool used by the rest of the AG-UI server.
     """
     import asyncpg
-    from utils.db import load_settings_from_env
+    from stores.db import load_settings_from_env
 
     settings = load_settings_from_env()
     return await asyncpg.connect(
@@ -927,7 +927,7 @@ async def request_human_approval(
     On error (invalid task_id, DB failure):
         {"ok": False, "error": {"type": "<...>", "message": "<...>"}}.
     """
-    from utils import hitl_store
+    from stores import hitl_store
 
     try:
         task_uuid = UUID(task_id)

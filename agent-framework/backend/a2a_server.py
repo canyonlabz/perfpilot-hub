@@ -75,7 +75,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from utils import agents_config, base_agent, db, task_executor, task_store, thread_store
+from utils import agents_config, base_agent, task_executor
+from stores import db, task_store, thread_store
 from utils.paths import get_framework_dir
 from utils.session_middleware import SessionMiddleware
 
