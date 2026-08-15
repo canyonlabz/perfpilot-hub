@@ -65,8 +65,8 @@ from pydantic import BaseModel, Field
 from utils import (
     agents_config,
     auth,
-    task_executor,
 )
+from services import task_executor
 from stores import (
     conversation_store,
     db,
@@ -76,7 +76,7 @@ from stores import (
     thread_store,
 )
 from utils.paths import get_framework_dir
-from utils.session_middleware import SessionMiddleware
+from services.session_middleware import SessionMiddleware
 
 log = logging.getLogger(__name__)
 
@@ -379,7 +379,7 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                     drain_pending_executions,
                     _background_tasks,
                 )
-                from utils import task_executor
+                from services import task_executor
 
                 def _drain_inline():
                     """Start background execution for tasks queued by tools

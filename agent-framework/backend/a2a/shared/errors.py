@@ -38,7 +38,7 @@ from typing import Any, Optional
 
 from fastapi.responses import JSONResponse
 
-from .a2a_models import (
+from .models import (
     A2A_ERROR_TASK_NOT_CANCELABLE,
     A2A_ERROR_TASK_NOT_FOUND,
     A2A_ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED,

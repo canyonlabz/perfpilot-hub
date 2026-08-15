@@ -56,7 +56,7 @@ def build_analysis_agent():
     system_message = instructions_path.read_text(encoding="utf-8-sig")
 
     from utils.config_loader import load_agent_config
-    from utils.llm_provider import build_llm_config
+    from services.llm_provider import build_llm_config
 
     agent_config = load_agent_config("analysis-agent")
     llm_config = build_llm_config(agent_config.get("llm_provider"))
@@ -79,8 +79,8 @@ def _register_mcp_tools(agent) -> int:
     """Auto-discover and register PerfAnalysis MCP tools on the agent."""
     import asyncio
 
-    from utils.mcp_client import resolve_gateway_url
-    from utils.mcp_tool_registry import register_mcp_tools_on_agent
+    from services.mcp_client import resolve_gateway_url
+    from services.mcp_tool_registry import register_mcp_tools_on_agent
 
     gateway_url = resolve_gateway_url()
 

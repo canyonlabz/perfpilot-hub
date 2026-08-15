@@ -58,7 +58,7 @@ def build_notifications_agent():
     system_message = instructions_path.read_text(encoding="utf-8-sig")
 
     from utils.config_loader import load_agent_config
-    from utils.llm_provider import build_llm_config
+    from services.llm_provider import build_llm_config
 
     agent_config = load_agent_config("notifications-agent")
     llm_config = build_llm_config(agent_config.get("llm_provider"))

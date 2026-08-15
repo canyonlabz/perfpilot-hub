@@ -31,18 +31,18 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
 
-from . import a2a_media_types
+from . import media_types
 
 # =============================================================================
 # Media type constants (re-exported from a2a_media_types registry)
 # =============================================================================
 
-MEDIA_TEXT_PLAIN = a2a_media_types.MEDIA_TEXT_PLAIN
-MEDIA_TEXT_MARKDOWN = a2a_media_types.MEDIA_TEXT_MARKDOWN
-MEDIA_JSON = a2a_media_types.MEDIA_JSON
-MEDIA_ADO_PBI = a2a_media_types.MEDIA_ADO_PBI
-MEDIA_ADO_FEATURE = a2a_media_types.MEDIA_ADO_FEATURE
-MEDIA_ADO_TESTCASE = a2a_media_types.MEDIA_ADO_TESTCASE
+MEDIA_TEXT_PLAIN = media_types.MEDIA_TEXT_PLAIN
+MEDIA_TEXT_MARKDOWN = media_types.MEDIA_TEXT_MARKDOWN
+MEDIA_JSON = media_types.MEDIA_JSON
+MEDIA_ADO_PBI = media_types.MEDIA_ADO_PBI
+MEDIA_ADO_FEATURE = media_types.MEDIA_ADO_FEATURE
+MEDIA_ADO_TESTCASE = media_types.MEDIA_ADO_TESTCASE
 
 # =============================================================================
 # Base model

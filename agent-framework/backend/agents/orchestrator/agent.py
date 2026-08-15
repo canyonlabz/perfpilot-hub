@@ -322,7 +322,7 @@ def build_orchestrator() -> Any:
     """
     from autogen import ConversableAgent  # type: ignore
 
-    from utils.llm_provider import LLMProvider
+    from services.llm_provider import LLMProvider
 
     system_message = _load_system_message()
     provider_config = _resolve_provider_config()
@@ -1018,7 +1018,7 @@ def _resolve_provider_config() -> dict:
     merged in by `utils.llm_provider.merge_env_credentials` regardless
     of which YAML block sourced the behavior keys.
     """
-    from utils.llm_provider import (
+    from services.llm_provider import (
         load_default_provider_config,
         merge_env_credentials,
     )

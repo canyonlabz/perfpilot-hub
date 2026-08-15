@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from . import task_executor
+from services import task_executor
 from stores import task_store
 
 
@@ -92,7 +92,7 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
           "_a2a_v1_context_id": "ctx-001"
         }
     """
-    from .a2a_models import is_a2a_v1_request
+    from a2a.shared.models import is_a2a_v1_request
 
     if not is_a2a_v1_request(body):
         return body
@@ -159,7 +159,7 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
     Phase 1 Pydantic models for structure and the state mapping for
     PerfPilot-to-A2A status translation.
     """
-    from .a2a_models import (
+    from a2a.shared.models import (
         Task,
         TaskStatus,
         a2a_timestamp,
@@ -211,7 +211,7 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
 
 def _reply_text_artifact(task_id: str, result: Any) -> Optional[Any]:
     """Build an A2A ``Artifact`` from ``result.reply_text`` when present."""
-    from .a2a_models import Artifact, Part
+    from a2a.shared.models import Artifact, Part
 
     if not result or not isinstance(result, dict):
         return None
@@ -251,7 +251,7 @@ def _task_event_to_a2a_v1_sse(
     ``TaskStatusUpdateEvent`` (A2A §3.2.3 / §4.2.1). Progress strings are
     carried in ``metadata.progress`` when present.
     """
-    from .a2a_models import (
+    from a2a.shared.models import (
         StreamResponse,
         TaskStatus,
         TaskStatusUpdateEvent,
@@ -287,7 +287,7 @@ def _task_event_to_a2a_v1_artifact_sse(
     ``reply_text`` artifact. Callers must emit this immediately before
     the terminal ``statusUpdate``.
     """
-    from .a2a_models import StreamResponse, TaskArtifactUpdateEvent
+    from a2a.shared.models import StreamResponse, TaskArtifactUpdateEvent
 
     if event.status != "completed":
         return None

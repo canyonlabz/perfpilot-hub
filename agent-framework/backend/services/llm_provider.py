@@ -61,7 +61,7 @@ def load_agents_yaml(framework_dir: Optional[Path] = None) -> dict:
     Returns:
         The parsed YAML dict, or ``{}`` if neither file exists (with a warning).
     """
-    from . import config_loader
+    from utils import config_loader
 
     return config_loader.load_global_config(framework_dir=framework_dir)
 

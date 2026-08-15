@@ -75,11 +75,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from utils import agents_config, task_executor
+from utils import agents_config
+from services import task_executor
 from core import base_agent
 from stores import db, task_store, thread_store
 from utils.paths import get_framework_dir
-from utils.session_middleware import SessionMiddleware
+from services.session_middleware import SessionMiddleware
 
 log = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ def create_app() -> FastAPI:
 
     _register_routes(app)
 
-    from utils.a2a_v1_routes import (
+    from a2a.server.v1_routes import (
         register_a2a_v1_routes,
         register_a2a_v1_jsonrpc_route,
     )
@@ -518,7 +519,7 @@ def _task_to_dict(task: task_store.AgentTask) -> dict:
 # Backward-compat re-exports (smoke tests import these from a2a_server)
 # =============================================================================
 
-from utils.a2a_v1_helpers import (  # noqa: F401 — re-exported for backward compat
+from a2a.server.v1_helpers import (  # noqa: F401 — re-exported for backward compat
     A2A_V1_AGENT_NAME,
     A2A_VERSION_HEADER,
     _a2a_v1_response_headers,

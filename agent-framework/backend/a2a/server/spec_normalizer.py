@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from .a2a_media_types import (
+from a2a.shared.media_types import (
     MEDIA_ADO_TESTCASE,
     MEDIA_JSON,
     MEDIA_TEXT_MARKDOWN,

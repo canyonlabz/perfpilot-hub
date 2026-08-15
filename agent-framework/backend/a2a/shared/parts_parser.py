@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 # ── Media type constants (sourced from the MIME type registry) ──────────────
 
-from .a2a_media_types import (  # noqa: E402
+from .media_types import (  # noqa: E402
     MEDIA_ADO_FEATURE,
     MEDIA_ADO_PBI,
     MEDIA_ADO_TESTCASE,

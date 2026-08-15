@@ -123,7 +123,7 @@ def build_execution_agent() -> Any:
     """
     from autogen import ConversableAgent  # type: ignore
 
-    from utils.llm_provider import LLMProvider
+    from services.llm_provider import LLMProvider
 
     system_message = _load_system_message()
     provider_config = _resolve_provider_config()
@@ -175,7 +175,7 @@ def _resolve_provider_config() -> dict:
     merged in by `utils.llm_provider.merge_env_credentials` regardless
     of which YAML block sourced the behavior keys.
     """
-    from utils.llm_provider import (
+    from services.llm_provider import (
         load_default_provider_config,
         merge_env_credentials,
     )
@@ -370,7 +370,7 @@ async def start_performance_test(
             message="test_id must be a non-empty string",
         )
 
-    from utils.mcp_client import MCPClient, build_client_config
+    from services.mcp_client import MCPClient, build_client_config
 
     config = build_client_config(["blazemeter", "jmeter"])
     try:
@@ -624,7 +624,7 @@ async def wait_for_completion(
     poll = max(_MIN_POLL_INTERVAL_SECONDS, float(poll_interval_seconds))
     timeout = max(0.0, float(timeout_seconds))
 
-    from utils.mcp_client import MCPClient, build_client_config
+    from services.mcp_client import MCPClient, build_client_config
 
     config = build_client_config(["blazemeter", "jmeter"])
     try:
@@ -900,7 +900,7 @@ async def extract_test_run_artifacts(
         result["notes"] = "test_run_id must be a non-empty string"
         return result
 
-    from utils.mcp_client import MCPClient, build_client_config
+    from services.mcp_client import MCPClient, build_client_config
 
     config = build_client_config(["blazemeter", "jmeter"])
     try:

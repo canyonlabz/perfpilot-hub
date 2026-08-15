@@ -20,7 +20,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional, Union
 
-from .a2a_models import (
+from .models import (
     A2A_ERROR_NAMES,
     A2A_ERROR_TASK_NOT_FOUND,
     A2A_ERROR_UNSUPPORTED_OPERATION,

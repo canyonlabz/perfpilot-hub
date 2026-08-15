@@ -43,7 +43,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from .a2a_v1_helpers import (
+from .v1_helpers import (
     A2A_V1_AGENT_NAME,
     _a2a_v1_response_headers,
     _normalize_a2a_v1_body,
@@ -95,7 +95,7 @@ def _yield_task_event_sse(
             "data": json.dumps(status_payload),
         })
     else:
-        from .a2a_jsonrpc import jsonrpc_sse_event
+        from a2a.shared.jsonrpc import jsonrpc_sse_event
 
         if artifact_payload:
             frames.append({
@@ -138,7 +138,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     _extract_subscriber_endpoints = ctx["extract_subscriber_endpoints"]
     _thread_response_headers = ctx["thread_response_headers"]
 
-    from .a2a_errors import (
+    from a2a.shared.errors import (
         http_bad_request,
         http_not_found,
         http_task_not_found,
@@ -352,7 +352,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
     _extract_subscriber_endpoints = ctx["extract_subscriber_endpoints"]
     _thread_response_headers = ctx["thread_response_headers"]
 
-    from .a2a_jsonrpc import (
+    from a2a.shared.jsonrpc import (
         JsonRpcError,
         JsonRpcRequest,
         a2a_error_data,

@@ -11,7 +11,7 @@ circular dependencies.
 
 Usage::
 
-    from .a2a_media_types import MEDIA_TEXT_PLAIN, SUPPORTED_MEDIA_TYPES
+    from .media_types import MEDIA_TEXT_PLAIN, SUPPORTED_MEDIA_TYPES
 """
 
 from __future__ import annotations

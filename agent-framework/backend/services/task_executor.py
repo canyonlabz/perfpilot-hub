@@ -504,7 +504,7 @@ _HITL_GATE_RULES: list[HitlGateRule] = [
 
 def _load_orchestrator_config() -> dict:
     """Load the full orchestrator config.yaml (cached by config_loader)."""
-    from . import config_loader
+    from utils import config_loader
 
     return config_loader.load_agent_config("orchestrator")
 
@@ -646,7 +646,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     # Shared A2A + Web UI ingress: reuse metadata/payload/text ID when
     # present; mint only for pre-script-creation (parts[] test specs or
     # script-creation prose). Do NOT mint for unrelated chat turns.
-    from .test_run_id import ensure_test_run_id_for_inbound
+    from core.test_run_id import ensure_test_run_id_for_inbound
 
     inbound_payload = task.payload if isinstance(task.payload, dict) else None
     if inbound_payload is not None and getattr(task, "test_run_id", None):
@@ -730,7 +730,7 @@ def _invoke_orchestrator_sync(messages: list[dict]) -> tuple[str, Any]:
     # Make `agents.orchestrator.agent` importable when the executor runs
     # from a context that did not put the framework dir on sys.path
     # (e.g. unit tests invoking utils/task_executor.py directly).
-    from .paths import get_framework_dir
+    from utils.paths import get_framework_dir
     framework_dir = get_framework_dir()
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
@@ -786,7 +786,7 @@ async def _invoke_orchestrator_with_tool_loop(
     """
     import sys
 
-    from .paths import get_framework_dir
+    from utils.paths import get_framework_dir
     framework_dir = get_framework_dir()
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
@@ -796,7 +796,7 @@ async def _invoke_orchestrator_with_tool_loop(
     agent = await asyncio.to_thread(build_orchestrator)
 
     # ---- Load loop config from the orchestrator's config.yaml ----------
-    from . import config_loader
+    from utils import config_loader
 
     orch_config = config_loader.load_agent_config("orchestrator")
 
@@ -982,7 +982,7 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
       - No ``parts[]`` array in the payload
       - Normalizer finds no test spec content in the parts
     """
-    from .test_run_id import resolve_or_mint_test_run_id
+    from core.test_run_id import resolve_or_mint_test_run_id
 
     if not isinstance(task.payload, dict):
         return
@@ -1004,9 +1004,9 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     from agents.orchestrator.agent import agent_test_run_id_var
     agent_test_run_id_var.set(test_run_id)
 
-    from . import a2a_spec_normalizer
+    from a2a.server import spec_normalizer
 
-    spec_content = a2a_spec_normalizer.normalize_parts_to_spec(parts)
+    spec_content = spec_normalizer.normalize_parts_to_spec(parts)
     if not spec_content:
         log.debug(
             "_persist_test_spec_from_parts: no test spec content found "
@@ -1015,7 +1015,7 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
         )
         return
 
-    from .paths import get_artifacts_base
+    from utils.paths import get_artifacts_base
 
     spec_dir = get_artifacts_base() / test_run_id / "test-specs"
 
@@ -1094,9 +1094,9 @@ def _extract_user_message_from_payload(payload: Any) -> Optional[str]:
             break
 
     # ── Step 4-5: Parts parsing ──
-    from . import a2a_parts_parser
+    from a2a.shared import parts_parser
 
-    parsed = a2a_parts_parser.parse_request_body(payload)
+    parsed = parts_parser.parse_request_body(payload)
 
     if parsed.has_parts and parsed.prompt:
         if top_level_message:
@@ -1194,7 +1194,7 @@ async def _load_specialist_module(agent_name: str) -> Any:
         import importlib.util
         import sys
 
-        from .paths import get_framework_dir
+        from utils.paths import get_framework_dir
 
         module_path = (
             get_framework_dir()
@@ -2010,7 +2010,7 @@ async def _run_mcp_specialist_agent(
     # has none so MCP tool calls share one artifact folder. Write the
     # value into a mutable payload copy BEFORE prompt composition so
     # the LLM sees the authoritative ID.
-    from .test_run_id import resolve_or_mint_test_run_id
+    from core.test_run_id import resolve_or_mint_test_run_id
 
     payload = dict(payload) if isinstance(payload, dict) else {}
     test_run_id = resolve_or_mint_test_run_id(
@@ -2075,7 +2075,7 @@ async def _run_mcp_specialist_agent(
     # ---- Load agent config early (needed for stateful detection) ------
     import sys
 
-    from .paths import get_framework_dir
+    from utils.paths import get_framework_dir
     framework_dir = get_framework_dir()
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
@@ -2098,7 +2098,7 @@ async def _run_mcp_specialist_agent(
     compaction_preserve_recent = int(agent_config.get("compaction_preserve_recent", 5))
 
     # ---- Detect stateful namespaces -----------------------------------
-    from utils.mcp_tool_registry import STATEFUL_NAMESPACES
+    from .mcp_tool_registry import STATEFUL_NAMESPACES
 
     all_namespaces = list(
         agent_config.get("mcp_tools", {}).get("allowed_namespaces", [])
@@ -2236,8 +2236,8 @@ async def _call_mcp_tool_passthrough_for_specialist(
         ``{ok: True, tool, result, attempts}`` on success.
         ``{ok: False, tool, error, attempts}`` on failure.
     """
-    from utils.mcp_client import MCPClient, build_client_config
-    from utils.mcp_tool_registry import _is_api_based
+    from .mcp_client import MCPClient, build_client_config
+    from .mcp_tool_registry import _is_api_based
 
     is_api = _is_api_based(tool_name)
     max_attempts = 3 if is_api else 1
@@ -2343,7 +2343,7 @@ async def _call_mcp_tool_passthrough(tool_name: str, args: dict) -> dict:
     back-off for ``blazemeter_*`` tools; single attempt for ``jmeter_*``
     (code-based, deterministic).
     """
-    from utils.mcp_client import MCPClient, build_client_config
+    from .mcp_client import MCPClient, build_client_config
 
     is_code_based = tool_name.startswith("jmeter_")
     max_attempts = 1 if is_code_based else 3
