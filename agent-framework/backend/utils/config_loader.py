@@ -77,7 +77,7 @@ def load_agent_config(
 
     import yaml
 
-    from .base_agent import resolve_agent_config_path
+    from core.base_agent import resolve_agent_config_path
 
     if framework_dir is None:
         framework_dir = _default_framework_dir()
