@@ -1,0 +1,6 @@
+{
+  "browser": "chromium",
+  "headless": true,
+  "saveTrace": true,
+  "outputDir": "/home/node/output"
+}

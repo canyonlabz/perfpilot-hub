@@ -1,13 +1,19 @@
 # =============================================================================
-# PerfPilot Hub — Full Stack: Gateway + PerfMemory DB (macOS)
+# PerfPilot Hub — Full Stack (macOS)
+#   Gateway + PerfMemory DB + Playwright MCP + Agent Backend + Frontend
 # =============================================================================
 # Usage:
 #   1. Copy .env.gateway.example to .env.gateway and fill in your values
 #   2. Copy config/*.example.yaml files to their non-example counterparts
 #   3. Run: docker compose -f docker-compose-full-mac.yaml up --build
 #
-# This compose file includes the PerfMemory PostgreSQL database (pgvector + AGE).
-# The gateway waits for the database to be healthy before starting.
+# Services:
+#   perf-gateway    — MCP gateway aggregator (port 8888)
+#   perfmemory-db   — PostgreSQL with pgvector + AGE (port 5432)
+#   playwright-mcp  — Microsoft Playwright MCP for browser automation (port 8931)
+#   agent-a2a       — A2A protocol server (port 8001)
+#   agent-agui      — AG-UI protocol server (port 8002)
+#   frontend        — Next.js web UI (port 3000)
 #
 # macOS note: The perfmemory-db service uses explicit user/PGDATA settings
 # to avoid file permission issues with Docker Desktop on macOS.
@@ -18,22 +24,25 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.gateway
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
     image: perfpilot-hub-full:latest
     container_name: perf-gateway
     ports:
-      - "8000:8000"
+      - "8888:8888"
     env_file:
       - .env.gateway
     environment:
       - PERFPILOT_DOCKER=true
       - GATEWAY_TRANSPORT=http
-      - GATEWAY_PORT=8000
+      - GATEWAY_PORT=8888
+      - FASTMCP_CHECK_FOR_UPDATES=off
       # Override POSTGRES_HOST to use the internal Docker network service name
       - POSTGRES_HOST=perfmemory-db
       - POSTGRES_PORT=5432
     volumes:
       # Artifacts (persisted on host)
-      - ../artifacts:/app/artifacts
+      - ../mcp-perf-suite/artifacts:/app/artifacts
       # Gateway config
       - ./config/gateway/config.yaml:/app/gateway-mcp/config.yaml:ro
       # BlazeMeter config
@@ -56,6 +65,8 @@ services:
       - ./config/jmeter/config.yaml:/app/jmeter-mcp/config.yaml:ro
       - ./config/jmeter/jmeter_config.yaml:/app/jmeter-mcp/jmeter_config.yaml:ro
       - ./config/jmeter/correlation_config.yaml:/app/jmeter-mcp/correlation_config.yaml:ro
+      # JMeter test-specs (subfolder structure: web-flows/, azure-devops/, etc.)
+      - ./config/jmeter/test-specs:/app/jmeter-mcp/test-specs:ro
       # JMeter properties overrides (optional — appended to jmeter.properties at startup)
       - ./config/jmeter/jmeter-overrides.properties:/app/jmeter-config/jmeter-overrides.properties:ro
       # JMeter client certs (optional — place .jks files here, configure via env vars)
@@ -63,6 +74,14 @@ services:
       # PerfMemory config
       - ./config/perfmemory/config.yaml:/app/perfmemory-mcp/config.yaml:ro
       - ./config/perfmemory/taxonomy.yaml:/app/perfmemory-mcp/taxonomy.yaml:ro
+      # Playwright output (bind mount shared with playwright-mcp container)
+      - ../.playwright-mcp:/app/.playwright-mcp
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8888/health || exit 1"]
+      interval: 60s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
     depends_on:
       perfmemory-db:
         condition: service_healthy
@@ -93,6 +112,127 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+  playwright-mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.playwright-mcp
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: playwright-mcp:latest
+    container_name: playwright-mcp
+    user: "0:0"
+    ports:
+      - "8931:8931"
+    command: ["--port", "8931", "--host", "0.0.0.0", "--allowed-hosts", "*", "--caps", "devtools", "--ignore-https-errors", "--config", "/app/config.json"]
+    volumes:
+      - ../.playwright-mcp:/home/node/output
+      - ./config/playwright/config.json:/app/config.json:ro
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+  agent-a2a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-backend
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perf-agent-backend:latest
+    container_name: agent-a2a
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env.gateway
+    environment:
+      - PERFPILOT_DOCKER=true
+      - GATEWAY_MCP_URL=http://perf-gateway:8888/mcp
+      - PLAYWRIGHT_MCP_URL=http://playwright-mcp:8931/mcp
+      - PERFAGENT_STATE_HOST=perfmemory-db
+      - PERFAGENT_STATE_PORT=5432
+      - PERFAGENT_STATE_DB=perfagent_state
+      - PERFAGENT_STATE_USER=${POSTGRES_USER}
+      - PERFAGENT_STATE_PASSWORD=${POSTGRES_PASSWORD}
+      - HEALTHCHECK_PORT=8001
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 60s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    depends_on:
+      perfmemory-db:
+        condition: service_healthy
+      perf-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+  agent-agui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-backend
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perf-agent-backend:latest
+    container_name: agent-agui
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env.gateway
+    environment:
+      - PERFPILOT_DOCKER=true
+      - GATEWAY_MCP_URL=http://perf-gateway:8888/mcp
+      - PLAYWRIGHT_MCP_URL=http://playwright-mcp:8931/mcp
+      - PERFAGENT_STATE_HOST=perfmemory-db
+      - PERFAGENT_STATE_PORT=5432
+      - PERFAGENT_STATE_DB=perfagent_state
+      - PERFAGENT_STATE_USER=${POSTGRES_USER}
+      - PERFAGENT_STATE_PASSWORD=${POSTGRES_PASSWORD}
+      - HEALTHCHECK_PORT=8002
+    command: ["python", "agui_server.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      interval: 60s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    depends_on:
+      perfmemory-db:
+        condition: service_healthy
+      agent-a2a:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - perf-network
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-frontend
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perf-agent-frontend:latest
+    container_name: frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - AGUI_BACKEND_URL=http://agent-agui:8002
+      - A2A_BACKEND_URL=http://agent-a2a:8001
+      - FRONTEND_PORT=3000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    depends_on:
+      agent-agui:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - perf-network

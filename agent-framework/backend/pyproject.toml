@@ -1,0 +1,70 @@
+[project]
+name = "agent-framework"
+version = "0.1.0"
+description = "PerfPilot Agents - AG2-based AI agent framework for the MCP Perf Suite"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  # AG2 (formerly AutoGen) - multi-agent framework, A2A integration, AG-UI integration.
+  # `[ag-ui]` extra brings in `ag-ui-protocol` so `autogen.ag_ui.AGUIStream(agent).build_asgi()`
+  # can mount on FastAPI - this is the AG-UI endpoint CopilotKit React talks to.
+  # Pinned >=0.13.3,<0.14 for stable AG-UI surface; AG2 v1.0 will move ag_ui out of beta.
+  "ag2[ag-ui]>=0.13.3,<0.14",
+
+  # MCP client - reaches the PerfPilot Hub gateway (perf-gateway:8000)
+  "fastmcp>=3.4.2,<4",
+
+  # FastAPI + ASGI for the A2A server (port 8001) and AG-UI bridge (port 8002)
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+
+  # Starlette pinned for CVE-2026-48710 (BadHost) security fix.
+  # FastAPI depends on Starlette transitively, but we pin explicitly to ensure
+  # the patched version is always installed - same convention as docker/requirements.gateway.txt
+  "starlette>=1.2.1",
+
+  # SSE responses for the A2A `tasks/sendSubscribe` endpoint and the AG-UI
+  # event stream (V2 doc Section 14.2 Pattern 2). Idiomatic on top of Starlette.
+  "sse-starlette>=2.1.3",
+
+  # Database - perfagent_state pool (asyncpg, JSONB-only schema)
+  "asyncpg>=0.30.0",
+
+  # Models / validation
+  "pydantic>=2.10.0",
+
+  # HTTP client - shared by LLM provider adapters (mirrors PerfMemory pattern)
+  "httpx>=0.28.1",
+
+  # LLM provider SDKs (OpenAI client also covers Azure OpenAI via AsyncAzureOpenAI)
+  "openai>=2.30.0",
+
+  # Config and env loading
+  "pyyaml>=6.0.2",
+  "python-dotenv>=1.2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agents", "stores", "core", "a2a", "services", "utils", "workflows"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "agents",
+  "stores",
+  "core",
+  "a2a",
+  "services",
+  "utils",
+  "workflows",
+  "config",
+  "sql",
+  "pyproject.toml",
+  "requirements.txt",
+  "README.md",
+  "AGENTS.md",
+  ".env.example",
+]

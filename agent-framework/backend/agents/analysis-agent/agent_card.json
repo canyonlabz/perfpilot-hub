@@ -1,0 +1,96 @@
+{
+  "name": "analysis-agent",
+  "display_name": "PerfPilot Analysis Agent",
+  "description": "Specialist agent for post-test data correlation and verdict generation in the PerfPilot Agents framework. Owns three analytical pipelines: (1) SLA validation -- compares per-transaction P90 response times against slas.yaml thresholds; (2) Bottleneck attribution -- correlates BlazeMeter performance metrics with Datadog infrastructure data; (3) Log-error analysis -- maps failed transactions to root-cause buckets with frequency counts.",
+  "url": "/agents/analysis-agent",
+  "version": "0.3.0",
+  "status": "available",
+  "supportedInterfaces": [
+    {
+      "url": "https://{host}:{port}/agents/analysis-agent",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "PerfPilot"
+  },
+  "tags": [
+    "analysis",
+    "sla",
+    "bottleneck",
+    "correlation",
+    "epic-3"
+  ],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": true,
+    "extendedAgentCard": false,
+    "long_running_tasks": true,
+    "webhook_subscribers": true,
+    "human_in_the_loop": false
+  },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"],
+  "skills": [
+    {
+      "id": "validate_sla_thresholds",
+      "name": "Analyze test results against SLA thresholds",
+      "description": "Validates per-transaction P90 response times and error rates against SLA thresholds defined in slas.yaml, producing pass/fail verdicts per transaction.",
+      "tags": ["sla", "validation", "response-time", "thresholds"]
+    },
+    {
+      "id": "identify_bottlenecks",
+      "name": "Identify performance bottlenecks by correlating BlazeMeter and Datadog data",
+      "description": "Correlates BlazeMeter performance metrics with Datadog infrastructure data to identify bottlenecks and attribute them to application, infrastructure, or external causes.",
+      "tags": ["bottleneck", "correlation", "blazemeter", "datadog"]
+    },
+    {
+      "id": "analyze_environment_metrics",
+      "name": "Analyze environment metrics",
+      "description": "Analyzes environment metrics including host CPU/memory utilization, Kubernetes pod resource consumption, and APM service latency for infrastructure-level insights.",
+      "tags": ["metrics", "infrastructure", "kubernetes", "apm"]
+    },
+    {
+      "id": "analyze_application_logs",
+      "name": "Analyze application logs for error patterns and root-cause bucketing",
+      "description": "Analyzes application logs to identify error patterns, map failed transactions to root-cause buckets (timeouts, 5xx, auth failures, etc.), and produce frequency counts.",
+      "tags": ["logs", "errors", "root-cause", "analysis"]
+    },
+    {
+      "id": "correlate_data_sources",
+      "name": "Correlate test results across data sources for comprehensive analysis",
+      "description": "Correlates test results across multiple data sources (BlazeMeter, Datadog host/K8s/APM, application logs) to produce a unified comprehensive analysis.",
+      "tags": ["correlation", "multi-source", "comprehensive"]
+    },
+    {
+      "id": "check_analysis_status",
+      "name": "Check analysis status for a given test run",
+      "description": "Checks the current analysis status for a given test run, reporting which analytical pipelines have completed and their results.",
+      "tags": ["status", "polling", "test-run"]
+    }
+  ],
+  "metadata": {
+    "epic": "3",
+    "feature": "3.10",
+    "pbi_scaffolded_at": "3.9.3",
+    "pbi_promoted_at": "3.10.4",
+    "mcp_namespaces": ["perfanalysis"],
+    "mcp_tool_discovery": "auto (register_mcp_tools_on_agent at build time)",
+    "analytical_pipelines": {
+      "sla_validation": "P90 response times vs slas.yaml thresholds -- pass/fail per transaction",
+      "bottleneck_attribution": "BlazeMeter + Datadog correlation -- application vs infrastructure vs external",
+      "log_error_analysis": "JMeter log root-cause bucketing -- timeouts, 5xx, auth failures, etc."
+    },
+    "upstream_dependencies": [
+      "execution-agent (artifacts/{test_run_id}/blazemeter/)",
+      "monitoring-agent (artifacts/{test_run_id}/datadog/)"
+    ],
+    "output_path": "artifacts/{test_run_id}/analysis/",
+    "perfpilot_capabilities": {
+      "long_running_tasks": true,
+      "webhook_subscribers": true,
+      "human_in_the_loop": false
+    }
+  }
+}

@@ -10,7 +10,7 @@
 **/.venv/
 
 # Test artifacts and results
-artifacts/
+mcp-perf-suite/artifacts/
 
 # Git metadata
 .git/
@@ -29,14 +29,14 @@ artifacts/
 docs/
 
 # Streamlit UI (separate application, not part of gateway)
-streamlit-ui/
+mcp-perf-suite/streamlit-ui/
 
 # Utility scripts (local dev only)
 scripts/
 
 # MS Teams and SharePoint MCPs (not Docker-eligible — require Graph API auth flow)
-msteams-mcp/
-sharepoint-mcp/
+mcp-perf-suite/msteams-mcp/
+mcp-perf-suite/sharepoint-mcp/
 
 # Node modules (if any exist from Streamlit or other tooling)
 node_modules/
@@ -57,7 +57,7 @@ node_modules/
 
 # Docker data volumes and local compose state
 docker/data/
-docker/certs/
+docker/certs/jmeter/
 docker/.env.gateway
 
 # OS-specific files

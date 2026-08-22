@@ -223,146 +223,152 @@ __marimo__/
 # ignore .sqlite3 database file
 *.sqlite3
 
-# =========================================================
-# Repo: mcp-perf-suite
-# Ignore the following files and directories
-# =========================================================
+# =================================================================================
+# *** New Repo Name: perfpilot-hub ***
+# Original Repo Name: mcp-perf-suite
+# 
+# The following files and directories are ignored to prevent sensitive information, 
+# local configurations, and temporary files from being tracked in version control.
+# =================================================================================
 
-# ignore environment variables & uv.lock files
+# Ignore all .env files
 .env
-blazemeter-mcp/.env
-blazemeter-mcp/uv.lock
-datadog-mcp/.env
-datadog-mcp/uv.lock
-perfanalysis-mcp/.env
-perfanalysis-mcp/uv.lock
-perfmemory-mcp/.env
-perfmemory-mcp/taxonomy.yaml
-perfmemory-mcp/tools/logs/*.log
-confluence-mcp/.env
-msgraph-mcp/.env
-docker/.env
-streamlit-ui/.env
+.env.*
 
-# Ignore docker data and local YAML files for Docker Compose, which may contain sensitive information or be specific to individual environments
-docker/data/*
-docker/docker-compose.yaml
-docker/Dockerfile.pgvector-age
-docker/ca-bundle.pem
+# But keep .env example files
+!.env.example
+!.env.*.example
 
-# ignore performance test results and logs
-artifacts/*
-!artifacts/.gitkeep
-!artifacts/README.md
+# Ignore all config.yaml files
+config.yaml
+config.yml
+
+# But keep example config files
+!config.example.yaml
+!config.example.yml
+!*.example.yaml
+!*.example.yml
 
 # ignore config.yaml files for Windows or Mac systems (NOTE: These files are specific to OS, but can be re-enabled by commenting out the following lines)
 **/config.mac.yaml
 **/config.windows.yaml
 
-# ignore temp documentation files, but include the main documentation markdown files
-docs/*
-!docs/apache_age_installation_guide.md
-!docs/apache_age_viewer_guide.md
-!docs/report_template_guidelines.md
-!docs/datadog_query_guide.md
-!docs/jmeter_mcp_configuration_guide.md
-!docs/metrics_calculations_and_display.md
-!docs/sla_configuration_guide.md
-!docs/har_adapter_guide.md
-!docs/har_jmx_comparison_guide.md
-!docs/artifacts_guide.md
-!docs/jmeter_hitl_user_guide.md
-!docs/large_file_handling.md
-!docs/correlation_analysis_guide.md
-!docs/perfanalysis_techniques_guide.md
-!docs/perfmemory_user_guide.md
-!docs/pgvector_installation_guide.md
-!docs/playwright_mcp_configuration_guide.md
-!docs/troubleshooting/
-!docs/troubleshooting/age-viewer-fix-on-macbook.md
-!docs/troubleshooting/pgvector-fix-on-macbook.md
-!docs/troubleshooting/rancher-desktop-fix.md
-!docs/README.md
+# Ignore lock files (environment specific, auto-generated)
+uv.lock
+poetry.lock
+package-lock.json
 
-# Re-include the changelogs directory itself
-!docs/changelogs/
+# Ignore docker data and local YAML files for Docker Compose, which may contain sensitive information or be specific to individual environments
+docker/data/*
+docker/docker-compose.yaml
+docker/Dockerfile.gateway
+docker/Dockerfile.pgvector-age
+docker/Dockerfile.agent-backend
+docker/Dockerfile.agent-frontend
+docker/Dockerfile.playwright-mcp
+docker/ca-bundle.pem
+docker/certs/jmeter/*.jks
+!docker/certs/jmeter/.gitkeep
+docker/certs/corporate/*
+!docker/certs/corporate/.gitkeep
 
-# Re-include everything inside changelogs
-!docs/changelogs/**
+# ignore performance test results and logs
+mcp-perf-suite/artifacts/*
+!mcp-perf-suite/artifacts/.gitkeep
+!mcp-perf-suite/artifacts/README.md
 
 # Ignore local JMeter configuration files and all custom JMeter MCP test-spec files
-jmeter-mcp/jmeter_config.yaml
-jmeter-mcp/correlation_config.yaml
-jmeter-mcp/test-specs/*
-jmeter-mcp/test-specs/azure-devops/*.txt
-jmeter-mcp/test-specs/jira/*.txt
-!jmeter-mcp/test-specs/README.md
-!jmeter-mcp/test-specs/web-flows/blazedemo_product_purchase.md
-!jmeter-mcp/test-specs/azure-devops/
-!jmeter-mcp/test-specs/azure-devops/README.md
-!jmeter-mcp/test-specs/jira/
-!jmeter-mcp/test-specs/jira/README.md
+mcp-perf-suite/jmeter-mcp/jmeter_config.yaml
+mcp-perf-suite/jmeter-mcp/correlation_config.yaml
+mcp-perf-suite/jmeter-mcp/test-specs/*
+mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/*.txt
+mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/*.md
+
+!mcp-perf-suite/jmeter-mcp/test-specs/README.md
+!mcp-perf-suite/jmeter-mcp/test-specs/web-flows/blazedemo_product_purchase.md
+!mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/
+!mcp-perf-suite/jmeter-mcp/test-specs/azure-devops/README.md
+!mcp-perf-suite/jmeter-mcp/test-specs/jira/
+!mcp-perf-suite/jmeter-mcp/test-specs/jira/README.md
 
 # Ignore local Datadog environments and custom queries files
-datadog-mcp/environments.json
-datadog-mcp/custom_queries.json
-
-# Ignore local config YAML files for perfanalysis-mcp
-perfanalysis-mcp/slas.yaml
-
-# Ignore all files in perfreport-mcp/templates except the default templates
-perfreport-mcp/templates/*
-!perfreport-mcp/templates/default_*.md
-# Ignore local config YAML files for perfreport-mcp
-perfreport-mcp/config.yaml
-perfreport-mcp/report_config.yaml
-perfreport-mcp/chart_schema.yaml
-perfreport-mcp/chart_colors.yaml
-
-# Ignore all test files in perfanalysis-mcp and perfreport-mcp
-perfanalysis-mcp/test/**
-perfanalysis-mcp/tests/**
-perfreport-mcp/test/**
-perfreport-mcp/tests/**
-
-# Ignore the following Streamlit files and directories
-streamlit-ui/config.yaml
+mcp-perf-suite/datadog-mcp/environments.json
+mcp-perf-suite/datadog-mcp/custom_queries.json
 
 # Ignore the following Microsoft Teams local configuration files
-msteams-mcp/config.yaml
-msteams-mcp/templates/*
-!msteams-mcp/templates/default-notification-*.md
+mcp-perf-suite/msteams-mcp/templates/*
+!mcp-perf-suite/msteams-mcp/templates/default-notification-*.md
 
-# Ignore the following Microsoft SharePoint local configuration files
-sharepoint-mcp/config.yaml
+# Ignore local config YAML files for perfanalysis-mcp
+mcp-perf-suite/perfanalysis-mcp/slas.yaml
+mcp-perf-suite/perfanalysis-mcp/test/**
+mcp-perf-suite/perfanalysis-mcp/tests/**
 
-# Ignore the following PerfPilot Hub (gateway) local configuration files
-gateway-mcp/config.yaml
+# Ignore local config YAML files for perfmemory-mcp
+mcp-perf-suite/perfmemory-mcp/taxonomy.yaml
+mcp-perf-suite/perfmemory-mcp/tools/logs/*.log
+
+# Ignore all files in perfreport-mcp/templates except the default templates
+mcp-perf-suite/perfreport-mcp/templates/*
+!mcp-perf-suite/perfreport-mcp/templates/default_*.md
+# Ignore local config YAML files for perfreport-mcp
+mcp-perf-suite/perfreport-mcp/report_config.yaml
+mcp-perf-suite/perfreport-mcp/chart_schema.yaml
+mcp-perf-suite/perfreport-mcp/chart_colors.yaml
+mcp-perf-suite/perfreport-mcp/test/**
+mcp-perf-suite/perfreport-mcp/tests/**
 
 # Ignore Docker gateway config files (users copy from .example versions)
 docker/config/gateway/config.yaml
 docker/config/blazemeter/config.yaml
+docker/config/confluence/config.yaml
 docker/config/datadog/config.yaml
 docker/config/datadog/environments.json
 docker/config/datadog/custom_queries.json
-docker/config/perfanalysis/config.yaml
-docker/config/perfanalysis/slas.yaml
-docker/config/perfreport/config.yaml
-docker/config/perfreport/report_config.yaml
-docker/config/perfreport/chart_schema.yaml
-docker/config/perfreport/chart_colors.yaml
-docker/config/confluence/config.yaml
 docker/config/jmeter/config.yaml
 docker/config/jmeter/jmeter_config.yaml
 docker/config/jmeter/correlation_config.yaml
 docker/config/jmeter/jmeter-overrides.properties
+docker/config/perfanalysis/config.yaml
+docker/config/perfanalysis/slas.yaml
 docker/config/perfmemory/config.yaml
 docker/config/perfmemory/taxonomy.yaml
-docker/certs/jmeter/*.jks
-docker/.env.gateway
+docker/config/perfreport/config.yaml
+docker/config/perfreport/report_config.yaml
+docker/config/perfreport/chart_schema.yaml
+docker/config/perfreport/chart_colors.yaml
+
+# Ignore the following AG2 Agent Framework local configuration files (operators
+# copy from .example versions). The .env file is already covered by the global
+# `.env` rule above; the explicit entry here makes the agent-framework section
+# self-documenting. The committed templates live at:
+#   - `agent-framework/backend/config/agents.example.yaml`              (global)
+#   - `agent-framework/backend/agents/<agent-name>/config.example.yaml` (per-agent)
+# Each operator-side `config.yaml` is a local override; the loader (see
+# `utils/base_agent.py::CANDIDATE_CONFIG_FILES`) walks both candidates in
+# priority order and uses whichever exists.
+agent-framework/backend/.env
+agent-framework/backend/config/agents.yaml
+agent-framework/backend/agents/*/config.yaml
+
+# Re-include the Next.js frontend lib/ directory (excluded by the bare `lib/`
+# rule in the Python packaging section which matches recursively)
+!agent-framework/frontend/ui/lib/
+!agent-framework/frontend/ui/lib/**
+
+# Dev-only destructive helper for re-DDL'ing perfagent_state during the
+# architecture-build phase. Kept out of the published repo because it can
+# wipe a developer's local database with a single `--yes` flag and is not
+# intended for end-users. Recreate from the in-repo development notes if
+# the file is ever needed again on a fresh clone.
+agent-framework/backend/sql/drop_perfagent_state.py
 
 # Ignore all Playwright output files
 .playwright-mcp/*
+
+# =========================================================
+# Custom Cursor files
+# =========================================================
 
 # Ignore all custom Cursor Rules files, except the below
 .cursor/rules/*.mdc
@@ -414,10 +420,16 @@ docker/.env.gateway
 !.cursor/agents/datadog-extractor.md
 !.cursor/agents/jmeter-script-validator.md
 
-# Ignore all custom Cursor Plans files, except the below
-.cursor/plans/*
+# Ignore all custom Cursor Docs & Plans files, except the below
+.cursor/plans/
+.cursor/docs/
+.cursor/bugs/
+.cursor/enhancements/
 
-# Temp test files
+# =========================================================
+# Test scripts and test files
+# =========================================================
+
 scripts/*
 test_datadog.py
 test_blazemeter.py

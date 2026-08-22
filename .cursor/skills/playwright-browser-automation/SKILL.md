@@ -59,12 +59,17 @@ Think time simulates realistic user pauses between browser interactions.
 
 ### Playwright Traces
 
-- Playwright captures network traffic automatically when `--save-trace` is enabled in
-  the Playwright MCP configuration (`mcp.json`)
+- The `saveTrace: true` config (in `.playwright-mcp/config.json`) enables the tracing
+  **capability**, but does NOT auto-record. You must explicitly call
+  `browser_start_tracing` before browser steps and `browser_stop_tracing` after.
+- `browser_start_tracing` creates `.trace` and `.network` files in the traces directory.
+  `browser_stop_tracing` finalizes them with all captured data.
 - Traces are saved to `<repo_root>/.playwright-mcp/traces/`
 - Old traces must be archived before each new run to prevent stale data contamination
 - Video/streaming files (`.m3u8`, `.ts`) are excluded from capture via the
   `capture_video_streams: False` config setting
+- When the gateway runs in Docker, trace files must be accessible inside the container
+  at `/app/.playwright-mcp/traces/` (via shared volume or `docker cp`)
 
 ### Tool Reference
 
@@ -92,6 +97,8 @@ These are the Playwright browser tools used during step execution:
 | `browser_wait_for` | Wait for a specified duration (seconds) |
 | `browser_handle_dialog` | Handle alert, confirm, or prompt dialogs |
 | `browser_scroll` | Scroll the page or a container |
+| `browser_start_tracing` | Start trace recording (call BEFORE browser steps) |
+| `browser_stop_tracing` | Stop trace recording and finalize trace files (call AFTER all browser steps) |
 
 ### Related Rules
 
@@ -230,6 +237,15 @@ get_browser_steps(
 
 **Action:** Execute each browser step sequentially using Playwright browser tools.
 
+**Before executing any steps, start trace recording:**
+
+```
+browser_start_tracing()
+```
+
+Verify the response confirms "Trace recording started" and lists the `.trace` and
+`.network` file paths.
+
 **For each step (index 1 through total_steps):**
 
 1. Take a snapshot before interacting:
@@ -264,9 +280,17 @@ browser_wait_for(
 - Do **not** close the browser on errors.
 
 **After all steps are complete:**
-- Confirm the flow is complete to the user.
-- Keep the browser open for manual inspection.
-- Notify the user that Playwright has captured network traffic to `.playwright-mcp/traces/`.
+
+1. Stop trace recording:
+
+```
+browser_stop_tracing()
+```
+
+2. Verify trace files exist in `.playwright-mcp/traces/` (look for `.network` and `.trace` files).
+3. Confirm the flow is complete to the user.
+4. Keep the browser open for manual inspection.
+5. Notify the user that trace recording has been stopped and network traffic is saved to `.playwright-mcp/traces/`.
 
 **Save:** `spec_file_path` = the full path to the spec file used (needed for Step 5).
 

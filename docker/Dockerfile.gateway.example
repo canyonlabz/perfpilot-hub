@@ -1,0 +1,152 @@
+# =============================================================================
+# PerfPilot Hub — Gateway Docker Image
+#
+# Multi-stage build:
+#   Stage 1 (base): Python 3.12 slim + system deps
+#   Stage 2 (jmeter-layer): JMeter 5.6.3 + OpenJDK 21 + plugins
+#   Stage 3 (final): Combines everything + MCP server source + Python deps
+#
+# Build (standard):
+#   docker build -f docker/Dockerfile.gateway -t perf-gateway .
+#
+# Build (corporate CA / HTTPS-intercepting proxy):
+#   1. Place your CA PEM bundle in docker/certs/corporate/ca-bundle.pem
+#   2. Set ENABLE_CORP_CA=true in docker/.env.gateway
+#   3. Rebuild via docker-compose (the compose files pass it as a build arg)
+#
+# Custom JMeter plugins (override default set):
+#   docker build -f docker/Dockerfile.gateway \
+#     --build-arg JMETER_PLUGINS="bzm-parallel,bzm-http2,jpgc-casutg" .
+# =============================================================================
+
+FROM python:3.12-slim AS base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# =============================================================================
+# Stage 2: JMeter + Java + Plugins
+# =============================================================================
+FROM base AS jmeter-layer
+
+# Corporate CA support (default: disabled)
+ARG ENABLE_CORP_CA=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-21-jre-headless \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy corporate certs directory (succeeds even if empty)
+COPY docker/certs/corporate/ /tmp/corporate-certs/
+
+# If ENABLE_CORP_CA=true and PEM files exist, install into the OS trust store
+# and import into Java's cacerts keystore (Java uses its own store, not the OS one)
+RUN if [ "$ENABLE_CORP_CA" = "true" ] && ls /tmp/corporate-certs/*.pem 1>/dev/null 2>&1; then \
+        cat /tmp/corporate-certs/*.pem > /usr/local/share/ca-certificates/corporate-ca.crt && \
+        update-ca-certificates && \
+        JAVA_CACERTS=$(find /usr/lib/jvm -name cacerts -path "*/security/*" | head -1) && \
+        awk 'BEGIN {c=0} /-----BEGIN CERTIFICATE-----/{c++} {print > "/tmp/cert-" c ".pem"}' \
+            /usr/local/share/ca-certificates/corporate-ca.crt && \
+        for cert in /tmp/cert-*.pem; do \
+            keytool -importcert -trustcacerts -keystore "$JAVA_CACERTS" \
+                -storepass changeit -noprompt -alias "corporate-$(basename $cert .pem)" \
+                -file "$cert" 2>/dev/null || true; \
+        done && \
+        rm -f /tmp/cert-*.pem && \
+        echo "Corporate CA installed into OS + Java trust stores"; \
+    else \
+        echo "Corporate CA: skipped (ENABLE_CORP_CA=$ENABLE_CORP_CA)"; \
+    fi && rm -rf /tmp/corporate-certs
+
+ENV JMETER_VERSION=5.6.3
+ENV JMETER_HOME=/opt/jmeter/apache-jmeter-${JMETER_VERSION}
+ENV PATH="${JMETER_HOME}/bin:${PATH}"
+
+# Download and extract JMeter
+RUN mkdir -p /opt/jmeter && \
+    wget -q https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz \
+         -O /tmp/jmeter.tgz && \
+    tar -xzf /tmp/jmeter.tgz -C /opt/jmeter && \
+    rm /tmp/jmeter.tgz
+
+# Install JMeter Plugin Manager + command runner
+RUN wget -q https://jmeter-plugins.org/get/ \
+         -O ${JMETER_HOME}/lib/ext/jmeter-plugins-manager.jar && \
+    wget -q https://repo1.maven.org/maven2/kg/apc/cmdrunner/2.3/cmdrunner-2.3.jar \
+         -O ${JMETER_HOME}/lib/cmdrunner-2.3.jar && \
+    java -cp ${JMETER_HOME}/lib/ext/jmeter-plugins-manager.jar \
+         org.jmeterplugins.repository.PluginManagerCMDInstaller
+
+# Install plugins via Plugin Manager CLI (configurable at build time)
+ARG JMETER_PLUGINS="jpgc-casutg,bzm-parallel,bzm-http2,jpgc-functions,jpgc-json,jpgc-tst,websocket-samplers"
+RUN ${JMETER_HOME}/bin/PluginsManagerCMD.sh install ${JMETER_PLUGINS}
+
+# =============================================================================
+# Stage 3: Final image
+# =============================================================================
+FROM base AS final
+
+# Declare build platform arg (provided automatically by BuildKit)
+ARG TARGETARCH
+
+# Corporate CA support (default: disabled)
+ARG ENABLE_CORP_CA=false
+
+# Copy corporate certs directory (succeeds even if empty)
+COPY docker/certs/corporate/ /tmp/corporate-certs/
+
+# If ENABLE_CORP_CA=true and PEM files exist, install for Python/httpx runtime use
+RUN if [ "$ENABLE_CORP_CA" = "true" ] && ls /tmp/corporate-certs/*.pem 1>/dev/null 2>&1; then \
+        cat /tmp/corporate-certs/*.pem > /etc/ssl/certs/corporate-ca.pem && \
+        echo "Corporate CA installed for runtime SSL"; \
+    fi && rm -rf /tmp/corporate-certs
+
+# Copy JMeter + Java from builder stage
+COPY --from=jmeter-layer /opt/jmeter /opt/jmeter
+COPY --from=jmeter-layer /usr/lib/jvm /usr/lib/jvm
+COPY --from=jmeter-layer /etc/java-21-openjdk /etc/java-21-openjdk
+
+ENV JMETER_HOME=/opt/jmeter/apache-jmeter-5.6.3
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}
+ENV PATH="${JMETER_HOME}/bin:${JAVA_HOME}/bin:${PATH}"
+
+# Copy MCP server source directories (7 Docker-eligible servers + gateway)
+COPY mcp-perf-suite/jmeter-mcp/ ./jmeter-mcp/
+COPY mcp-perf-suite/blazemeter-mcp/ ./blazemeter-mcp/
+COPY mcp-perf-suite/datadog-mcp/ ./datadog-mcp/
+COPY mcp-perf-suite/perfanalysis-mcp/ ./perfanalysis-mcp/
+COPY mcp-perf-suite/perfreport-mcp/ ./perfreport-mcp/
+COPY mcp-perf-suite/confluence-mcp/ ./confluence-mcp/
+COPY mcp-perf-suite/perfmemory-mcp/ ./perfmemory-mcp/
+COPY mcp-perf-suite/gateway-mcp/ ./gateway-mcp/
+
+# Install all Python dependencies (consolidated from all servers)
+COPY docker/requirements.gateway.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy entrypoint script
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Environment: Docker mode + gateway defaults
+ENV PERFPILOT_DOCKER=true
+ENV GATEWAY_TRANSPORT=http
+ENV GATEWAY_PORT=8888
+ENV GATEWAY_HOST=0.0.0.0
+
+# Artifacts volume mount point
+VOLUME /app/artifacts
+
+EXPOSE 8888
+
+HEALTHCHECK --interval=60s --timeout=5s --start-period=15s \
+    CMD curl -f http://localhost:8888/health || exit 1
+
+WORKDIR /app/gateway-mcp
+ENTRYPOINT ["/app/entrypoint.sh"]

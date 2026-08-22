@@ -36,6 +36,16 @@ globs:
 - Archive old traces using `archive_playwright_traces` before starting new runs
 - Do not overwrite existing traces without archiving first
 
+## Trace Recording
+
+- Call `browser_start_tracing` BEFORE executing browser steps
+- Call `browser_stop_tracing` AFTER all browser steps complete
+- The `saveTrace: true` config enables the capability but does NOT auto-record;
+  explicit start/stop calls are required
+- After stopping, verify trace files (.network, .trace) exist in
+  `.playwright-mcp/traces/`
+- Do NOT call `browser_start_tracing` more than once without a matching stop
+
 ## Error Recovery
 
 - If an element is not found, take a new snapshot and retry once

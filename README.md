@@ -1,299 +1,314 @@
-# MCP Perf Suite
+# ✈️ PerfPilot-Hub
 
-> **⚠️ This project is under active development. Features, modules, and documentation may change frequently. Use at your own risk and please report any issues or suggestions!**
+> **An open-source AI co-pilot for the Performance Testing Lifecycle — from test creation to execution, monitoring, analysis, reporting, and delivery.**
 
-Welcome to the **MCP Perf Suite** — a modular collection of MCP servers designed to support and streamline performance testing workflows.
-
----
-
-## 🚀 PerfPilot Hub — Super MCP Gateway
-
-**PerfPilot Hub** is the central MCP gateway that gives AI agents a single endpoint into
-the entire performance testing toolchain. Instead of connecting to 9 separate MCP servers,
-connect to one:
-
-> "Connect your AI agent to **PerfPilot Hub** and get the full performance testing
-> toolchain through one MCP endpoint."
-
-- 🔌 **One connection** — 99 tools from 9 servers through a single MCP endpoint
-- 🔒 **Full isolation** — each server runs as its own subprocess with its own venv
-- ⚙️ **Configurable** — enable/disable servers, set transport mode (stdio or http)
-- 🔀 **Backward compatible** — all servers still work standalone
-
-See [gateway-mcp/README.md](gateway-mcp/README.md) for setup instructions.
+> ⚠️ **This project is under active development.**
+> Repository structure, APIs, setup instructions, Docker files, and documentation may change frequently while the platform is being assembled.
 
 ---
 
-## 📖 Overview
+## 🚀 Overview
 
-This repository hosts multiple MCP servers, each designed for a specific role in the performance testing lifecycle:
+**PerfPilot-Hub** is an AI-assisted performance testing platform that brings together:
 
-### 🧪 Test Creation & Execution
-- **JMeter MCP Server:**  
-  Generate JMeter scripts from Playwright-captured traffic. Convert structured JSON into JMX files, execute JMeter tests, monitor them in real time, and analyze performance results.
+* 🤖 **Multi-agent orchestration** for performance testing workflows
+* 🛩️ **Gateway MCP**, a unified MCP gateway for performance testing tools
+* 🧪 **JMeter script generation and execution**
+* 🔥 **BlazeMeter test execution and result collection**
+* 📊 **Datadog metrics, logs, and APM correlation**
+* 🧠 **PerfMemory**, a persistent AI memory layer for debugging and lessons learned
+* 📄 **Performance analysis and reporting**
+* 💬 **Collaboration integrations** such as Confluence, MS Teams, and SharePoint
+* 🖥️ **A browser-based CopilotKit / React UI** for human-in-the-loop workflows
 
-- **BlazeMeter MCP Server:**  
-  Interact with BlazeMeter’s API to manage workspaces, projects, tests, and fetch run results.
-
-### 📊 Monitoring & Analysis
-- **Datadog (Application Performance Monitoring) MCP Server:**  
-  Pull and correlate monitoring and metrics data from Datadog to complement load test results.
-
-- **Performance Test Analysis MCP Server:**  
-  Perform deep analysis of BlazeMeter test results alongside Datadog system metrics (e.g., CPU, Memory). Includes log analysis of both JMeter and Datadog logs, followed by time-series correlation across datasets to detect anomalies and provide actionable insights.
-
-### 🧠 AI Memory & Learning
-- **PerfMemory MCP Server:**  
-  Persistent memory and lessons-learned layer backed by PostgreSQL with pgvector and Apache AGE. Stores debug sessions, attempts, and vector embeddings of symptoms so AI agents can recall past fixes and avoid repeating mistakes. The Apache AGE knowledge graph enables cross-project issue discovery via structural relationship traversal. Supports OpenAI, Azure OpenAI, and Ollama embedding providers.
-
-### 📑 Reporting, Collaboration & Artifact Storage
-- **Performance Reporting MCP Server:**  
-  Generate formatted reports (e.g. PDF, Word, Markdown) from test data and analysis files for presentation and decision-making.
-
-- **Confluence MCP Server:**  
-  Publish Performance Test reports by converting Markdown files into Confluence XHTML format.
-
-- **SharePoint MCP Server:**  
-  Upload and archive performance test artifacts (files, folders, reports) to SharePoint document libraries for long-term persistence. Supports dual authentication (Bearer token and cookie-based FedAuth/rtFa), automatic chunked uploads for large files, KQL search, and library discovery. Uses browser-based authentication (no Azure AD app registration required).
-
-### 💬 Notifications & Communication
-- **MS Teams MCP Server:**  
-  Automate Microsoft Teams notifications for performance testing workflows. Send pre-test alerts before execution, post-test completion summaries with high-level results, and share report links — all driven by AI agents. Uses browser-based authentication (no Azure AD app registration required) with templated notifications and config-driven channel targets.
+PerfPilot-Hub extends the original [`mcp-perf-suite`](https://github.com/canyonlabz/mcp-perf-suite) project into a broader platform that combines MCP tools, AI agents, an A2A server, an AG-UI backend, and a web frontend under one repository.
 
 ---
 
-## 🔄 Pipeline & Workflow
+## 🎯 Vision
 
-The MCP servers in this repository (and external integrations like Playwright MCP) form a complete performance testing pipeline. This workflow illustrates how scripts are created, validated, executed, monitored, analyzed, reported, and communicated across teams — with stakeholder notifications at key milestones.
+Performance testing often requires a human to move between many disconnected tools:
 
-### 📐 Workflow Diagram
+1. Capture or design a user flow
+2. Generate a JMeter script
+3. Debug correlation and test data issues
+4. Execute a load test
+5. Monitor infrastructure and application metrics
+6. Analyze bottlenecks
+7. Write a report
+8. Publish results
+9. Notify stakeholders
+
+**PerfPilot-Hub** is designed to turn that fragmented process into an agent-assisted workflow.
+
+The goal is not to remove the human from the process. The goal is to give performance engineers an AI co-pilot that can handle the repetitive work while keeping humans in control of consequential decisions such as launching tests, approving reports, and publishing results.
+
+---
+
+## ✈️ Naming Convention: The PerfPilot-Hub Aviation Model
+
+PerfPilot-Hub uses an aviation-inspired naming model to make the platform easier to understand, remember, and explain.
+
+Performance testing has many parallels to aviation: every test needs a plan, a controlled launch, real-time monitoring, telemetry, communication, analysis, and a final flight record. PerfPilot applies that metaphor to the Performance Testing Lifecycle while keeping the actual repository structure practical and developer-friendly.
+
+The codebase uses clear folder names such as `agent-framework/`, `mcp-perf-suite/`, `docker/`, and `docs/`. The aviation names are used in the documentation and product language so users can quickly understand how the pieces fit together.
+
+| Product Name      | Technical Component                        | Meaning                                                                                                          |
+| ----------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| **PerfPilot-Hub**     | Overall framework and orchestrator concept | The pilot coordinating the full performance testing mission                                                      |
+| **Pilot**             | Orchestrator agent                         | Plans the workflow, delegates tasks, and keeps humans in control                                                 |
+| **Copilots**          | Specialized agents                         | Domain-specific agents that assist with scripting, execution, monitoring, analysis, reporting, and notifications |
+| **Gateway MCP**       | `mcp-perf-suite/gateway-mcp/`              | The central MCP gateway that gives agents one endpoint for the full performance testing toolchain                |
+| **FlightDeck**        | `agent-framework/frontend/`                | The human-facing web UI where users interact with PerfPilot                                                      |
+| **ACARS**             | A2A server inside `agent-framework/`       | The agent-to-agent communication layer for upstream and downstream AI frameworks                                 |
+| **Flight Log**        | Test artifacts, reports, and run history   | The record of what happened during a performance testing mission                                                 |
+| **Black Box**         | PerfMemory and persisted debugging context | The memory layer that helps agents recall prior issues, fixes, and lessons learned                               |
+
+In short: **PerfPilot-Hub is the pilot, the specialist agents are copilots, and PerfPilot Hub is the airport-style tool hub where they access the systems needed to complete the mission.**
+
+This gives users a simple mental model:
+
+> “My PerfPilots are handling my performance testing workflow, while I stay in control from the FlightDeck.”
+
+---
+
+## 🧭 Repository Structure
 
 ```text
-                ┌────────────────────────┐
-                │   Playwright MCP       │
-                │ (external, captures    │
-                │  browser traffic)      │
-                └───────────┬────────────┘
-                            │ JSON traffic
-                            ▼
-                ┌────────────────────────┐       ┌─────────────────────────┐
-                │   JMeter MCP Server    │◄─────►│  PerfMemory MCP Server  │
-                │  - Generate JMX scripts│       │  - Recall past fixes    │
-                │  - Run smoke tests to  │       │  - Store new lessons    │
-                │    validate correctness│       │  - Vector similarity    │
-                └───────────┬────────────┘       │    search (pgvector)    │
-                            │ Validated JMX      │  - Knowledge graph      │
-                            ▼                    │    (Apache AGE)         │
-                ┌────────────────────────┐       └─────────────────────────┘
-                │   MS Teams MCP Server  │
-                │   (Pre-test notify)    │
-                └───────────┬────────────┘
-                            │
-                            ▼
-                ┌────────────────────────┐
-                │   BlazeMeter MCP Server│
-                │  - Execute full-scale  │
-                │    performance tests   │
-                │  - Fetch run results   │
-                └───────────┬────────────┘
-                            │ Results & metrics
-                            ▼
-        ┌────────────────────────────────┐
-        │ Datadog MCP Server             │
-        │ (APM metrics correlation)      │
-        └───────────┬────────────────────┘
-                    │
-                    ▼
-        ┌────────────────────────────────┐
-        │ Performance Test Analysis MCP  │
-        │ - Analyze BlazeMeter results   │
-        │ - Analyze Datadog metrics      │
-        │ - Log analysis (JMeter +       │
-        │   Datadog logs)                │
-        │ - Time-series correlation      │
-        └───────────┬────────────────────┘
-                    │
-                    ▼
-        ┌────────────────────────────────┐
-        │ Performance Reporting MCP      │
-        │ (PDF, Word, Markdown reports)  │
-        └────────────────┬───────────────┘
-                         │
-            ┌────────────┼────────────────┐
-            ▼            ▼                ▼
- ┌────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────┐
- │ Confluence MCP     │ │ MS Teams MCP Server      │ │ SharePoint MCP       │
- │ (Publish reports   │ │ (Post-test notification: │ │ (Archive artifacts   │
- │  to Confluence;    │ │  high-level summary      │ │  to document         │
- │  HITL review cycle)│ │  results & report links) │ │  libraries for       │
- └────────────────────┘ └──────────────────────────┘ │  long-term storage)  │
-                                                     └──────────────────────┘
+perfpilot/
+├── agent-framework/       # AG2 agents, A2A server, AG-UI backend, CopilotKit frontend
+│   ├── frontend/          # CopilotKit / React / Next.js web UI
+│   └── backend/           # Python AG-UI server and A2A server
+├── mcp-perf-suite/        # Gateway + all MCP servers
+│   ├── gateway-mcp/       # PerfPilot Hub — unified MCP gateway via FastMCP
+│   ├── blazemeter-mcp/    # BlazeMeter API tools
+│   ├── confluence-mcp/    # Confluence publishing tools
+│   ├── datadog-mcp/       # Datadog metrics, logs, and APM tools
+│   ├── jmeter-mcp/        # JMeter script generation and execution tools
+│   ├── perfanalysis-mcp/  # Performance analysis and correlation tools
+│   ├── perfmemory-mcp/    # AI memory backed by PostgreSQL, pgvector, and Apache AGE
+│   ├── perfreport-mcp/    # Report generation tools
+│   ├── artifacts/         # Test artifacts, reports, JTLs, logs, and generated files
+│   └── streamlit-ui/      # Web UI for viewing performance test results
+├── docker/                # Compose files, Dockerfiles, and config templates
+└── docs/                  # Public documentation
 ```
 
 ---
 
-## 🏗️ Architecture & Structure
+## 🧠 Core Concepts
 
-Each MCP server lives in its **own subdirectory** within this repo, making it easy to develop, maintain, and deploy independently:
+### 🛩️ PerfPilot Gateway
 
+**PerfPilot Gateway** is the central MCP gateway. Instead of connecting an AI agent to many separate MCP servers, PerfPilot Hub exposes the performance testing toolchain through one MCP endpoint.
+
+It routes requests to specialized MCP servers such as JMeter, BlazeMeter, Datadog, PerfAnalysis, PerfReport, Confluence, PerfMemory, MS Teams, and SharePoint.
+
+### 🤖 Pilot and Copilots
+
+The **Pilot** is the orchestrator agent. It understands the user’s request, creates a plan, delegates work, coordinates progress, and keeps the human in control.
+
+The **Copilots** are specialist agents. Each Copilot focuses on a specific phase of the Performance Testing Lifecycle, such as script generation, test execution, monitoring, analysis, reporting, or notifications.
+
+Together, the Pilot and Copilots form the agent layer of PerfPilot.
+
+Planned and/or evolving agents include:
+
+| Agent                  | Purpose                                                         |
+| ---------------------- | --------------------------------------------------------------- |
+| 🎯 Orchestrator Agent  | Coordinates the full workflow and delegates work to specialists |
+| 📝 Script Agent        | Generates or adapts performance test scripts                    |
+| 🚀 Execution Agent     | Starts and monitors performance test execution                  |
+| 📊 Monitoring Agent    | Pulls infrastructure, application, logs, and APM data           |
+| 🔍 Analysis Agent      | Correlates test results with monitoring data                    |
+| 📄 Reporting Agent     | Drafts performance test reports                                 |
+| 📣 Notifications Agent | Sends summaries, links, and status updates to stakeholders      |
+
+### 🖥️ FlightDeck
+
+**FlightDeck** is the human-facing web UI. It gives users a cockpit-style command surface for chatting with PerfPilot, reviewing workflow progress, approving human-in-the-loop actions, and viewing results.
+
+The implementation lives under `agent-framework/frontend/`, but the product experience is called **PerfPilot FlightDeck**.
+
+It is built around:
+
+* Next.js
+* React
+* CopilotKit
+* AG-UI
+* A Python backend
+* Persistent conversation and workflow state
+
+### 📡 ACARS
+
+**ACARS** is the agent-to-agent communication layer. In aviation, ACARS is associated with structured aircraft communication. In PerfPilot, the term represents the A2A server that allows upstream and downstream AI frameworks to communicate with the PerfPilot agent runtime.
+
+The implementation lives inside `agent-framework/backend/`.
+
+> "PerfPilot gives performance engineers the feeling that “my PerfPilots are handling my performance testing workflow” — while the human remains in command."
+
+---
+
+## 🏗️ High-Level Architecture
+
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│                          Human Users                             │
+│                                                                  │
+│  Browser UI / Cursor / Claude / Other AI Agent Frameworks        │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                       PerfPilot Agent Layer                      │
+│                                                                  │
+│  Orchestrator Agent                                              │
+│     ├── Script Agent                                             │
+│     ├── Execution Agent                                          │
+│     ├── Monitoring Agent                                         │
+│     ├── Analysis Agent                                           │
+│     ├── Reporting Agent                                          │
+│     └── Notifications Agent                                      │
+│                                                                  │
+│  Surfaces:                                                       │
+│     - A2A server for agent-to-agent workflows                    │
+│     - AG-UI backend for browser-based human interaction          │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                         PerfPilot Hub                            │
+│                                                                  │
+│  Unified MCP gateway exposing performance testing tools          │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+        ┌───────────────────────┼────────────────────────┐
+        ▼                       ▼                        ▼
+┌───────────────┐       ┌────────────────┐        ┌─────────────────┐
+│ JMeter MCP    │       │ BlazeMeter MCP │        │ Datadog MCP     │
+└───────────────┘       └────────────────┘        └─────────────────┘
+        ▼                       ▼                        ▼
+┌───────────────┐       ┌────────────────┐        ┌─────────────────┐
+│ PerfAnalysis  │       │ PerfReport     │        │ PerfMemory      │
+│ MCP           │       │ MCP            │        │ MCP             │
+└───────────────┘       └────────────────┘        └─────────────────┘
+        ▼                       ▼                        ▼
+┌───────────────┐       ┌────────────────┐        ┌─────────────────┐
+│ Confluence    │       │ MS Teams       │        │ SharePoint      │
+│ MCP           │       │ MCP            │        │ MCP             │
+└───────────────┘       └────────────────┘        └─────────────────┘
 ```
 
-mcp-perf-suite/
-├── artifacts/               # Folder that contains the performance test results
-├── blazemeter-mcp/          # BlazeMeter MCP server (current)
-├── confluence-mcp/          # Confluence MCP server (current)
-├── datadog-mcp/             # Datadog MCP server (current)
-├── docker/                  # Dockerfiles and Compose files (pgvector + Apache AGE)
-├── gateway-mcp/             # 🛩️ PerfPilot Hub — Super MCP Gateway (NEW)
-├── jmeter-mcp/              # JMeter MCP server (current)
-├── msteams-mcp/             # MS Teams notifications MCP (current)
-├── perfanalysis-mcp/        # LLM-powered test analysis MCP (current)
-├── perfmemory-mcp/          # AI memory & lessons learned MCP (current)
-├── perfreport-mcp/          # Reporting and formatting MCP (current)
-├── sharepoint-mcp/          # SharePoint artifact storage MCP (current)
-├── README.md                # This file: repo overview and guidance
-└── LICENSE                  # Repository license (e.g., MIT)
+---
 
-```
+## 🔄 Example Workflow
+
+A future end-to-end PerfPilot workflow may look like this:
+
+1. A user submits a request through the Web UI, Cursor, Claude, or an upstream AI framework.
+2. The Orchestrator Agent creates a performance testing plan.
+3. The Script Agent generates or updates a JMeter script.
+4. The human reviews and approves the generated script.
+5. The Execution Agent starts a test through BlazeMeter or another load testing backend.
+6. The Monitoring Agent collects metrics, logs, and traces during the test.
+7. The Analysis Agent correlates load test results with application and infrastructure telemetry.
+8. The Reporting Agent drafts an executive-friendly report.
+9. The human reviews, revises, and approves the report.
+10. The report is published to Confluence and/or archived to SharePoint.
+11. Stakeholders are notified through MS Teams or another notification channel.
+
+---
+
+## 🧰 Technology Stack
+
+| Layer                        | Technology                       |
+| ---------------------------- | -------------------------------- |
+| Agent framework              | AG2                              |
+| Agent-to-agent communication | A2A                              |
+| Tool protocol                | MCP                              |
+| MCP gateway                  | FastMCP                          |
+| Backend APIs                 | Python / FastAPI                 |
+| Browser UI                   | Next.js, React, CopilotKit       |
+| Database                     | PostgreSQL                       |
+| Vector memory                | pgvector                         |
+| Knowledge graph memory       | Apache AGE                       |
+| Load testing                 | JMeter, BlazeMeter               |
+| Observability                | Datadog                          |
+| Reporting / collaboration    | Confluence, SharePoint, MS Teams |
+| Local orchestration          | Docker Compose                   |
+
+---
+
+## 📦 Project Status
+
+PerfPilot is currently being assembled from the original `mcp-perf-suite` project and the experimental agent-framework branch.
+
+| Area                 | Status                                               |
+| -------------------- | ---------------------------------------------------- |
+| MCP Perf Suite       | Existing project being moved under the new root repo |
+| PerfPilot Hub        | Existing MCP gateway concept from `gateway-mcp`      |
+| Agent Framework      | Active development                                   |
+| A2A Server           | Active development                                   |
+| AG-UI Backend        | Active development                                   |
+| CopilotKit Web UI    | Active development                                   |
+| Docker Compose       | Planned / evolving                                   |
+| Public documentation | In progress                                          |
 
 ---
 
 ## ▶️ Getting Started
 
-All MCP servers use **FastMCP** and **Python 3.12+**. Each server has its own README with detailed setup instructions, configuration, and tool reference. Navigate to the server's folder and follow its README to get started.
+> The repository is currently in early setup. Full installation instructions will be added as the folder structure stabilizes.
 
-| MCP Server | Folder | README | Prerequisites |
-|------------|--------|--------|---------------|
-| **PerfPilot Hub** | `gateway-mcp/` | [README](gateway-mcp/README.md) | All servers below set up with venvs |
-| JMeter | `jmeter-mcp/` | [README](jmeter-mcp/README.md) | JMeter 5.6+, Playwright MCP (optional) |
-| BlazeMeter | `blazemeter-mcp/` | [README](blazemeter-mcp/README.md) | BlazeMeter API key |
-| Datadog | `datadog-mcp/` | [README](datadog-mcp/README.md) | Datadog API + App keys |
-| Performance Analysis | `perfanalysis-mcp/` | [README](perfanalysis-mcp/README.md) | BlazeMeter or JMeter test artifacts |
-| PerfMemory | `perfmemory-mcp/` | [README](perfmemory-mcp/README.md) | PostgreSQL + pgvector + Apache AGE ([setup guide](docs/pgvector_installation_guide.md)), embedding API key |
-| Performance Report | `perfreport-mcp/` | [README](perfreport-mcp/README.md) | Analysis artifacts |
-| Confluence | `confluence-mcp/` | [README](confluence-mcp/README.md) | Confluence token (cloud or on-prem) |
-| MS Teams | `msteams-mcp/` | [README](msteams-mcp/README.md) | Microsoft Teams account, Edge or Chrome |
-| SharePoint | `sharepoint-mcp/` | [README](sharepoint-mcp/README.md) | SharePoint Online account, Edge or Chrome |
+For now, the expected local development flow will be:
 
-**Common setup steps:**
-
-1. Clone this repository
-2. Navigate to the MCP server folder you want to use
-3. Copy `.env.example` to `.env` and fill in your credentials
-4. Copy `config.example.yaml` to `config.yaml` and adjust settings as needed
-5. Install dependencies: `pip install -e .` (or use `pyproject.toml`)
-6. Configure the MCP server in your IDE's `mcp.json`
-
-For Docker-based dependencies (e.g., PerfMemory's PostgreSQL with pgvector + Apache AGE), see `docker/docker-compose-windows.yaml` or `docker/docker-compose-mac.yaml`.
-
----
-
-## 🛣️ Future Roadmap 
-
-### Upcoming: Schema-Driven Architecture
-
-The MCP Perf Suite is evolving toward a **schema-driven architecture** that enables true modularity and extensibility. The core principle: **standardized data contracts between MCPs ensure that adding new data sources doesn't require changes to downstream consumers.**
-
-#### Future Architecture Vision
-
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              DATA SOURCES                                   │
-├─────────────────────────────────┬───────────────────────────────────────────┤
-│          APM MCP                │           Load Test MCP                   │
-│   (replaces Datadog MCP)        │      (replaces BlazeMeter MCP)            │
-│                                 │                                           │
-│  ┌─────────────────────────┐    │    ┌─────────────────────────┐            │
-│  │   Datadog Adapter       │    │    │   BlazeMeter Adapter    │            │
-│  │   New Relic Adapter     │    │    │   LoadRunner Adapter    │            │
-│  │   AppDynamics Adapter   │    │    │   Gatling Adapter       │            │
-│  │   Dynatrace Adapter     │    │    │   k6 Adapter            │            │
-│  │   Splunk APM Adapter    │    │    │   Locust Adapter        │            │
-│  └──────────┬──────────────┘    │    └──────────┬──────────────┘            │
-│             │                   │               │                           │
-│             ▼                   │               ▼                           │
-│  ┌─────────────────────────┐    │    ┌─────────────────────────┐            │
-│  │  Standardized APM       │    │    │  Standardized Load Test │            │
-│  │  Output Schema          │    │    │  Output Schema          │            │
-│  │  (metrics, logs, traces)│    │    │  (results, aggregates)  │            │
-│  └──────────┬──────────────┘    │    └──────────┬──────────────┘            │
-├─────────────┴───────────────────┴───────────────┴───────────────────────────┤
-│                                                                             │
-│                    STANDARDIZED SCHEMA LAYER                                │
-│           (Source-agnostic data contracts / JSON & CSV schemas)             │
-│                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│                         ┌─────────────────────────┐                         │
-│                         │  Performance Analysis   │                         │
-│                         │        MCP              │                         │
-│                         │ (source-agnostic)       │                         │
-│                         └───────────┬─────────────┘                         │
-│                                     │                                       │
-│                                     ▼                                       │
-│                         ┌─────────────────────────┐                         │
-│                         │  Performance Report     │                         │
-│                         │        MCP              │                         │
-│                         │ (source-agnostic)       │                         │
-│                         └───────────┬─────────────┘                         │
-│                                     │                                       │
-│               ┌──────────────┼──────────────┬──────────────┐                │
-│               ▼              ▼              ▼              ▼                │
-│        ┌──────────┐   ┌──────────┐  ┌────────────┐ ┌──────────────┐         │
-│        │Confluence│   │SharePoint│  │  MS Teams  │ │ Other Output │         │
-│        │   MCP    │   │   MCP    │  │    MCP     │ │   Adapters   │         │
-│        └──────────┘   └──────────┘  └────────────┘ └──────────────┘         │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```bash
+# Clone the repository
+git clone https://github.com/canyonlabz/mcp-perf-suite.git
+cd mcp-perf-suite
 ```
 
-#### Key Benefits
+Then follow the setup instructions inside each major module:
 
-| Benefit | Description |
-|---------|-------------|
-| **Extensibility** | Add new APM tools or load test platforms by implementing an adapter that outputs the standard schema |
-| **Loose Coupling** | PerfAnalysis and PerfReport MCPs remain unchanged when new data sources are added |
-| **Community Contributions** | Clear schema contracts make it easy for contributors to add support for their preferred tools |
-| **Maintainability** | Changes to source APIs (e.g., Datadog v3) only affect their respective adapter, not the entire pipeline |
-
-#### Planned Milestones
-
-- [ ] **APM MCP Server**: Unified entry point supporting multiple APM tools via adapter modules
-  - Datadog (current implementation migrated as adapter)
-  - New Relic adapter
-  - Dynatrace adapter  
-  - AppDynamics adapter
-  - Splunk APM adapter
-
-- [ ] **Load Test MCP Server**: Unified entry point supporting multiple load testing tools
-  - BlazeMeter (current implementation migrated as adapter)
-  - LoadRunner adapter
-  - Gatling adapter
-  - k6 adapter
-  - Locust adapter
-
-- [ ] **Schema Documentation**: Formal JSON/CSV schema specifications for data interchange
-
-### Other Planned Enhancements
-
-- Enhance the **Test Analysis MCP Server** utilizing OpenAI GPT or other LLMs for enhanced test result analysis
-- Add test results log analysis to identify potential issues or bottlenecks
-- Continue refinement of the **Reporting MCP Server** to produce executive-friendly reports and dashboards from test analysis data
-- Enable seamless workflow orchestration across MCP servers for a comprehensive performance testing pipeline
+| Module          | Path               | Purpose                                                            |
+| --------------- | ------------------ | ------------------------------------------------------------------ |
+| Agent Framework | `agent-framework/` | Multi-agent orchestration, A2A server, AG-UI backend, and frontend |
+| MCP Perf Suite  | `mcp-perf-suite/`  | MCP gateway and specialized performance testing MCP servers        |
+| Docker          | `docker/`          | Local containers, databases, and service orchestration             |
+| Docs            | `docs/`            | Public documentation and architecture notes                        |
 
 ---
 
-## 🤝 Contribution
+## 🗺️ Roadmap
 
-Contributions, ideas, and feature requests are welcome! Please open issues or create pull requests to collaborate.
+Planned areas of work include:
+
+* [ ] Normalize environment configuration across agents, MCPs, and Docker
+* [ ] Add root-level Docker Compose orchestration
+* [ ] Add one-command local startup for database, MCP gateway, agents, and UI
+* [ ] Expand specialist agents beyond the first working vertical slices
+* [ ] Add human-in-the-loop approval cards in the Web UI
+* [ ] Add persistent multi-thread conversation history
+* [ ] Add task progress streaming and test-run result views
+* [ ] Add public architecture documentation
+* [ ] Add contribution guidelines
 
 ---
 
-## 📜 License 
+## 🤝 Contributing
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+Contributions, ideas, and feedback are welcome.
+
+This project is still early and moving quickly, so please expect breaking changes while the architecture stabilizes.
 
 ---
 
-Created with ❤️ to enable next-gen performance testing, analysis, and reporting powered by FastMCP and AI.
+## 📜 License
 
+This project is licensed under the MIT License.
+
+See the `LICENSE` file for details.
+
+---
+
+Created with ❤️ for performance engineers, quality engineers, SREs, and AI-assisted testing workflows.
