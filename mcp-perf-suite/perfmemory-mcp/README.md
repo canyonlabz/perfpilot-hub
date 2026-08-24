@@ -1,7 +1,7 @@
 # 🧠📚 PerfMemory MCP Server
 
 Welcome to the PerfMemory MCP Server! 🚀  
-This is a Python-based MCP server built with **FastMCP 2.0** that introduces a persistent "memory layer" for performance testing — enabling AI agents like Claude/Cursor to learn from past debugging sessions and apply those lessons to future JMeter script creation and troubleshooting.
+This is a Python-based MCP server built with **FastMCP 3.4.x** that introduces a persistent "memory layer" for performance testing — enabling AI agents like Claude/Cursor to learn from past debugging sessions and apply those lessons to future JMeter script creation and troubleshooting.
 
 Powered by a **PostgreSQL + pgvector + Apache AGE** database with HNSW indexing and a knowledge graph, PerfMemory MCP stores structured debug sessions, failed attempts, and successful resolutions, allowing agents to query semantically similar issues before taking action. By leveraging embeddings, vector search, and **graph traversal across projects**, it transforms historical "lessons learned" into actionable intelligence — reducing trial-and-error and accelerating script fixes.
 
@@ -468,7 +468,7 @@ These settings are configured in `config.yaml` under the `taxonomy` section.
 
 ## 🚧 Future Enhancements
 
-* **FastMCP 3.0 Migration** — Migrate to FastMCP 3.0 with async database drivers (`asyncpg`/`psycopg3`) for improved concurrency.
+* **FastMCP 4.x Migration** — Upgrade to the latest FastMCP release with async database drivers (`asyncpg`/`psycopg3`) for improved concurrency.
 * **Structured Symptom Templates** — Standardize how symptoms are formatted before embedding to improve similarity scores.
 * **Correlation Patterns Table** — Store common correlation patterns (separate from debug attempts) for reuse across scripts.
 * **Data Retention Policies** — Auto-archive old attempts and configurable TTL.
@@ -484,4 +484,4 @@ Feel free to open issues or submit pull requests to enhance functionality, add n
 
 ---
 
-Created with ❤️ using FastMCP, PostgreSQL, pgvector, Apache AGE, and the MCP Perf Suite architecture.
+Created with ❤️ using FastMCP 3.4.x, PostgreSQL, pgvector, Apache AGE, and the PerfPilot-Hub architecture.

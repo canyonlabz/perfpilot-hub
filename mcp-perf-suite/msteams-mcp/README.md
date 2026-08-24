@@ -1,6 +1,6 @@
 # MS Teams MCP Server 💬🚀
 
-A Python-based MCP server built with FastMCP 2.0 to automate Microsoft Teams notifications for performance testing workflows. Enables pre-test alerts, post-test result sharing, channel discovery, and team communication — all driven by AI agents.
+A Python-based MCP server built with FastMCP 3.4.x to automate Microsoft Teams notifications for performance testing workflows. Enables pre-test alerts, post-test result sharing, channel discovery, and team communication — all driven by AI agents.
 
 > **Attribution**: Authentication architecture informed by [m0nkmaster/msteams-mcp](https://github.com/nicholasgriffintn/msteams-mcp) (MIT License, v0.23.1). Reimplemented in Python with improvements for the mcp-perf-suite ecosystem.
 
@@ -14,12 +14,12 @@ A Python-based MCP server built with FastMCP 2.0 to automate Microsoft Teams not
 - 📋 **Templated Notifications**: Pre-defined markdown templates with `{{PLACEHOLDER}}` interpolation, auto-converted to Teams HTML
 - 🎯 **Config-Driven Targets**: Named notification targets (channels, chats) in YAML config with auto-resolution
 - 📁 **Test Run Context**: Auto-populates template variables from `artifacts/<test_run_id>/` (BlazeMeter, Confluence links) and logs notifications for context tracking
-- 🧩 **FastMCP 2.0**: Consistent architecture with the rest of the mcp-perf-suite ecosystem
+- 🧩 **FastMCP 3.4.x**: Consistent architecture with the rest of the PerfPilot-Hub ecosystem
 
 ## 🛠️ Prerequisites
 
 - 🐍 **Python 3.12+**
-- 🚀 **FastMCP 2.0**
+- 🚀 **FastMCP 3.4.x**
 - 🌐 **Microsoft Edge or Google Chrome** installed (used for Playwright browser automation)
 - 🏢 **Microsoft Teams Account** (personal, business, or enterprise)
 - 📦 **Python Packages**: `fastmcp`, `httpx`, `playwright`, `cryptography`, `python-dotenv`, `pyyaml`
@@ -28,8 +28,8 @@ A Python-based MCP server built with FastMCP 2.0 to automate Microsoft Teams not
 
 ### 1. Clone the Repository
 ```
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd mcp-perf-suite/msteams-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/msteams-mcp
 ```
 
 ### 2. Register in Cursor MCP Config
@@ -454,4 +454,4 @@ Authentication architecture informed by [m0nkmaster/msteams-mcp](https://github.
 
 ---
 
-**Built with ❤️ using FastMCP 2.0**
+**Built with ❤️ using FastMCP 3.4.x**

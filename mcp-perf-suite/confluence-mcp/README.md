@@ -1,6 +1,6 @@
 # Confluence MCP Server 🗂️🚀
 
-A Python-based MCP server built with FastMCP 2.0 to publish performance test reports and artifacts to Confluence Cloud (v2 REST API) or Server/Data Center (v1 REST API). Converts Markdown reports to Confluence storage-format XHTML and provides comprehensive Confluence management capabilities.
+A Python-based MCP server built with FastMCP 3.4.x to publish performance test reports and artifacts to Confluence Cloud (v2 REST API) or Server/Data Center (v1 REST API). Converts Markdown reports to Confluence storage-format XHTML and provides comprehensive Confluence management capabilities.
 
 ## 🎯 Features
 
@@ -16,7 +16,7 @@ A Python-based MCP server built with FastMCP 2.0 to publish performance test rep
 ## 🛠️ Prerequisites
 
 - 🐍 **Python 3.12+**
-- 🚀 **FastMCP 2.0**
+- 🚀 **FastMCP 3.4.x**
 - 🔑 **Confluence API Credentials** (API token for Cloud, PAT for On-Prem)
 - 📂 **Artifacts Directory**: Performance reports in `artifacts/<test_run_id>/reports/`
 - 📦 **Python Packages**: `fastmcp`, `httpx`, `python-dotenv`, `pyyaml`
@@ -25,8 +25,8 @@ A Python-based MCP server built with FastMCP 2.0 to publish performance test rep
 
 ### 1. Clone the Repository
 ```
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd mcp-perf-suite/confluence-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/confluence-mcp
 ```
 
 ### 2. Create and Activate Python Virtual Environment
@@ -290,4 +290,4 @@ This project is part of the MCP Performance Suite. See repository root for licen
 
 ---
 
-**Built with ❤️ using FastMCP 2.0**
+**Built with ❤️ using FastMCP 3.4.x**

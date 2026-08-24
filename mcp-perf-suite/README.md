@@ -138,18 +138,19 @@ Each MCP server lives in its **own subdirectory** within this repo, making it ea
 
 perfpilot-hub/mcp-perf-suite/
 ├── artifacts/               # Folder that contains the performance test results
-├── blazemeter-mcp/          # BlazeMeter MCP server (current)
-├── confluence-mcp/          # Confluence MCP server (current)
-├── datadog-mcp/             # Datadog MCP server (current)
-├── gateway-mcp/             # 🛩️ Gateway MCP (NEW)
-├── jmeter-mcp/              # JMeter MCP server (current)
-├── msteams-mcp/             # MS Teams notifications MCP (current)
-├── perfanalysis-mcp/        # LLM-powered test analysis MCP (current)
-├── perfmemory-mcp/          # AI memory & lessons learned MCP (current)
-├── perfreport-mcp/          # Reporting and formatting MCP (current)
-├── sharepoint-mcp/          # SharePoint artifact storage MCP (current)
+├── blazemeter-mcp/          # BlazeMeter MCP server
+├── confluence-mcp/          # Confluence MCP server
+├── datadog-mcp/             # Datadog MCP server
+├── gateway-mcp/             # 🛩️ Gateway MCP — unified MCP gateway
+├── jmeter-mcp/              # JMeter MCP server
+├── msteams-mcp/             # MS Teams notifications MCP
+├── perfanalysis-mcp/        # Performance test analysis MCP
+├── perfmemory-mcp/          # AI memory & lessons learned MCP
+├── perfreport-mcp/          # Reporting and formatting MCP
+├── sharepoint-mcp/          # SharePoint artifact storage MCP
+├── streamlit-ui/            # Streamlit web UI for viewing test results
 ├── README.md                # This file: repo overview and guidance
-└── LICENSE                  # Repository license (e.g., MIT)
+└── LICENSE                  # Repository license (MIT)
 
 ```
 
@@ -157,7 +158,7 @@ perfpilot-hub/mcp-perf-suite/
 
 ## ▶️ Getting Started
 
-All MCP servers use **FastMCP** and **Python 3.12+**. Each server has its own README with detailed setup instructions, configuration, and tool reference. Navigate to the server's folder and follow its README to get started.
+All MCP servers use **FastMCP 3.4.x** and **Python 3.12+**. Each server has its own README with detailed setup instructions, configuration, and tool reference. Navigate to the server's folder and follow its README to get started.
 
 | MCP Server | Folder | README | Prerequisites |
 |------------|--------|--------|---------------|
@@ -273,10 +274,10 @@ The MCP Perf Suite is evolving toward a **schema-driven architecture** that enab
 
 ### Other Planned Enhancements
 
-- Enhance the **Test Analysis MCP Server** utilizing OpenAI GPT or other LLMs for enhanced test result analysis
-- Add test results log analysis to identify potential issues or bottlenecks
-- Continue refinement of the **Reporting MCP Server** to produce executive-friendly reports and dashboards from test analysis data
-- Enable seamless workflow orchestration across MCP servers for a comprehensive performance testing pipeline
+- ~~Enhance the **Test Analysis MCP Server** utilizing OpenAI GPT or other LLMs for enhanced test result analysis~~ — ✅ Implemented (PerfAnalysis MCP with bottleneck detection, SLA validation, and cross-correlation)
+- ~~Add test results log analysis to identify potential issues or bottlenecks~~ — ✅ Implemented (JMeter MCP `analyze_jmeter_log` and PerfAnalysis MCP `analyze_logs`)
+- ~~Continue refinement of the **Reporting MCP Server** to produce executive-friendly reports and dashboards from test analysis data~~ — ✅ Implemented (PerfReport MCP with AI-assisted HITL revision, charts, and comparison reports)
+- ~~Enable seamless workflow orchestration across MCP servers for a comprehensive performance testing pipeline~~ — ✅ Implemented (Gateway MCP + PerfPilot Agents orchestrator)
 
 ---
 
@@ -292,5 +293,5 @@ This project is licensed under the MIT License. See the LICENSE file for details
 
 ---
 
-Created with ❤️ to enable next-gen performance testing, analysis, and reporting powered by FastMCP and AI.
+Created with ❤️ to enable next-gen performance testing, analysis, and reporting powered by FastMCP 3.4.x and AI.
 

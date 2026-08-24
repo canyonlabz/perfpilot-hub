@@ -5,7 +5,7 @@ agents a single endpoint into the performance testing lifecycle, routing them to
 specialized MCP servers for JMeter, BlazeMeter, Datadog, analysis, reporting,
 collaboration, and debugging memory.
 
-Built on FastMCP v3's `create_proxy()` composition — each server runs as its own
+Built on FastMCP v3.4.x's `create_proxy()` composition — each server runs as its own
 subprocess with full process isolation. No shared dependencies, no import conflicts.
 
 > "Connect your AI agent to **PerfPilot Hub** and get the full performance testing
@@ -44,7 +44,7 @@ as it does in standalone mode.
 
 - ✅ Python 3.12+
 - ✅ All 9 MCP servers set up with their own `.venv` and dependencies installed
-- ✅ FastMCP v3.4.1+ installed in the gateway venv
+- ✅ FastMCP v3.4.x+ installed in the gateway venv
 
 ---
 
@@ -193,11 +193,13 @@ Once PerfPilot Hub is tested, replace all 9 MCP entries in `mcp.json` with one:
 
 ---
 
-## 🗺️ Future Ecosystem
+## 🗺️ PerfPilot Ecosystem
 
 | Component | Purpose | Status |
 |-----------|---------|--------|
 | 🚀 **PerfPilot Hub** | MCP Gateway — single endpoint to all perf tools | ✅ Completed |
-| 🤖 **PerfPilot Orchestrator** | A2A Server — external AI Agent communication | 📋 Planned |
+| 🤖 **PerfPilot Orchestrator** | A2A Server — external AI Agent communication | ✅ Completed |
 | 🧠 **PerfMemory DB** | PostgreSQL + pgvector + Apache AGE | ✅ Completed |
 | 🐳 **Docker Deployment** | Containerized hub + database | ✅ Completed |
+| 🖥️ **FlightDeck Web UI** | CopilotKit / React chat interface | ✅ Completed |
+| ✈️ **PerfPilot Agents** | AG2-based multi-agent orchestration layer | ✅ Completed |

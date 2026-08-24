@@ -1,6 +1,6 @@
 # Performance Analysis MCP Server 🎉
 
-The Performance Analysis MCP Server is a Python-based MCP server built with **FastMCP** that provides comprehensive analysis of load testing results correlated with infrastructure metrics. It identifies performance bottlenecks, validates SLA compliance, and generates actionable insights for optimization.
+The Performance Analysis MCP Server is a Python-based MCP server built with **FastMCP 3.4.x** that provides comprehensive analysis of load testing results correlated with infrastructure metrics. It identifies performance bottlenecks, validates SLA compliance, and generates actionable insights for optimization.
 
 ***
 
@@ -20,7 +20,7 @@ The Performance Analysis MCP Server is a Python-based MCP server built with **Fa
 
 ## 🏁 Prerequisites
 
-- Python 3.12.4 or higher installed
+- Python 3.12+ installed
 - Access to BlazeMeter and Datadog artifact folders containing test results and metrics
 - Completed BlazeMeter and Datadog data collection from previous test runs
 - `slas.yaml` configuration file (copy from `slas.example.yaml` and customize)
@@ -32,8 +32,8 @@ The Performance Analysis MCP Server is a Python-based MCP server built with **Fa
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd perfanalysis-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/perfanalysis-mcp
 ```
 
 ### 2. Create & Activate a Python Virtual Environment
@@ -376,4 +376,4 @@ Feel free to open issues or submit pull requests to enhance the analysis capabil
 
 ***
 
-Created with ❤️ using FastMCP, Pandas, and SciPy
+Created with ❤️ using FastMCP 3.4.x, Pandas, and SciPy

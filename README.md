@@ -21,7 +21,7 @@
 * 💬 **Collaboration integrations** such as Confluence, MS Teams, and SharePoint
 * 🖥️ **A browser-based CopilotKit / React UI** for human-in-the-loop workflows
 
-PerfPilot-Hub extends the original [`mcp-perf-suite`](https://github.com/canyonlabz/mcp-perf-suite) project into a broader platform that combines MCP tools, AI agents, an A2A server, an AG-UI backend, and a web frontend under one repository.
+PerfPilot-Hub extends the original `mcp-perf-suite` project into a broader platform that combines MCP tools, AI agents, an A2A server, an AG-UI backend, and a web frontend under one repository. The repository has been renamed from `mcp-perf-suite` to [`perfpilot-hub`](https://github.com/canyonlabz/perfpilot-hub) to reflect this evolution.
 
 ---
 
@@ -75,19 +75,21 @@ This gives users a simple mental model:
 ## 🧭 Repository Structure
 
 ```text
-perfpilot/
+perfpilot-hub/
 ├── agent-framework/       # AG2 agents, A2A server, AG-UI backend, CopilotKit frontend
-│   ├── frontend/          # CopilotKit / React / Next.js web UI
+│   ├── frontend/          # CopilotKit / React / Next.js web UI (FlightDeck)
 │   └── backend/           # Python AG-UI server and A2A server
 ├── mcp-perf-suite/        # Gateway + all MCP servers
-│   ├── gateway-mcp/       # PerfPilot Hub — unified MCP gateway via FastMCP
+│   ├── gateway-mcp/       # PerfPilot Hub — unified MCP gateway via FastMCP 3.4.x
 │   ├── blazemeter-mcp/    # BlazeMeter API tools
 │   ├── confluence-mcp/    # Confluence publishing tools
 │   ├── datadog-mcp/       # Datadog metrics, logs, and APM tools
 │   ├── jmeter-mcp/        # JMeter script generation and execution tools
+│   ├── msteams-mcp/       # MS Teams notifications
 │   ├── perfanalysis-mcp/  # Performance analysis and correlation tools
 │   ├── perfmemory-mcp/    # AI memory backed by PostgreSQL, pgvector, and Apache AGE
 │   ├── perfreport-mcp/    # Report generation tools
+│   ├── sharepoint-mcp/    # SharePoint artifact storage
 │   ├── artifacts/         # Test artifacts, reports, JTLs, logs, and generated files
 │   └── streamlit-ui/      # Web UI for viewing performance test results
 ├── docker/                # Compose files, Dockerfiles, and config templates
@@ -264,8 +266,8 @@ For now, the expected local development flow will be:
 
 ```bash
 # Clone the repository
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd mcp-perf-suite
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub
 ```
 
 Then follow the setup instructions inside each major module:

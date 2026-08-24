@@ -1,7 +1,7 @@
 # 🚀📶 JMeter MCP Server
 
 Welcome to the JMeter MCP Server! 🎉
-This is a Python-based MCP server built with **FastMCP 2.0** that partners with the **Playwright MCP** to turn human-readable workflows into JMeter performance test scripts—by using Playwright to run browser automation and capture trace files, then analyzing those traces to produce structured JSON, generate JMeter **JMX** scripts, and provide correlation analysis, results aggregation, and log analysis.
+This is a Python-based MCP server built with **FastMCP 3.4.x** that partners with the **Playwright MCP** to turn human-readable workflows into JMeter performance test scripts—by using Playwright to run browser automation and capture trace files, then analyzing those traces to produce structured JSON, generate JMeter **JMX** scripts, and provide correlation analysis, results aggregation, and log analysis.
 
 ---
 
@@ -53,8 +53,8 @@ Planned support for additional MCP hosts:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd mcp-perf-suite/jmeter-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/jmeter-mcp
 ```
 
 ### 2. Create Configuration Files
@@ -576,4 +576,4 @@ Feel free to open issues or submit pull requests to enhance functionality, add n
 
 ---
 
-Created with ❤️ using FastMCP, JMeter, and the MCP Perf Suite architecture.
+Created with ❤️ using FastMCP 3.4.x, JMeter, and the PerfPilot-Hub architecture.

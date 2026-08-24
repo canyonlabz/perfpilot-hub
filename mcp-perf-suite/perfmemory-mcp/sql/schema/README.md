@@ -16,8 +16,9 @@ This document defines the schema for two tables, their columns, allowed values, 
                    │
 ┌──────────────────▼──────────────────────────┐
 │  PerfMemory MCP Tools                       │
-│  store_debug_lesson()                       │
-│  find_similar_lesson()                      │
+│  store_debug_session()                      │
+│  store_debug_attempt()                      │
+│  find_similar_attempts()                    │
 │  (same interface regardless of provider)    │
 └──────────────────┬──────────────────────────┘
                    │

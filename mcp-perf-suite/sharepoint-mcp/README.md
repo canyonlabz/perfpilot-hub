@@ -1,6 +1,6 @@
 # 📂🏢 SharePoint MCP Server
 
-A Python-based MCP server built with FastMCP 2.0 to upload performance test artifacts to SharePoint. Enables performance test engineers to persist test results, reports, and analysis files to SharePoint document libraries — all driven by AI agents.
+A Python-based MCP server built with FastMCP 3.4.x to upload performance test artifacts to SharePoint. Enables performance test engineers to persist test results, reports, and analysis files to SharePoint document libraries — all driven by AI agents.
 
 > **Architecture Note**: Authentication architecture adapted from the [msteams-mcp](../msteams-mcp/) server in this suite, using the same browser-based token capture pattern for environments without Azure AD app registration access.
 
@@ -21,12 +21,12 @@ A Python-based MCP server built with FastMCP 2.0 to upload performance test arti
 - 🔎 **KQL Search**: Search SharePoint content using Keyword Query Language
 - 👤 **User Profile**: View the authenticated user's identity from JWT claims
 - 💬 **Optional Teams Notification**: Notify your team via MS Teams MCP after upload completes (config-driven)
-- 🧩 **FastMCP 2.0**: Consistent architecture with the rest of the mcp-perf-suite ecosystem
+- 🧩 **FastMCP 3.4.x**: Consistent architecture with the rest of the PerfPilot-Hub ecosystem
 
 ## 🛠️ Prerequisites
 
 - 🐍 **Python 3.12+**
-- 🚀 **FastMCP 2.0**
+- 🚀 **FastMCP 3.4.x**
 - 🌐 **Microsoft Edge or Google Chrome** installed (used for Playwright browser automation)
 - 🏢 **SharePoint Online Account** (business or enterprise)
 - 📦 **Python Packages**: `fastmcp`, `httpx`, `playwright`, `cryptography`, `python-dotenv`, `pyyaml`
@@ -35,8 +35,8 @@ A Python-based MCP server built with FastMCP 2.0 to upload performance test arti
 
 ### 1. Clone the Repository
 ```
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd mcp-perf-suite/sharepoint-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/sharepoint-mcp
 ```
 
 ### 2. Register in Cursor MCP Config
@@ -325,4 +325,4 @@ Authentication architecture adapted from [msteams-mcp](../msteams-mcp/) (browser
 
 ---
 
-**Built with ❤️ using FastMCP 2.0**
+**Built with ❤️ using FastMCP 3.4.x**

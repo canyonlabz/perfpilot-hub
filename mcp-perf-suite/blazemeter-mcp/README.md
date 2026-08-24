@@ -1,6 +1,6 @@
 # BlazeMeter MCP Server
 
-Welcome to the BlazeMeter MCP Server! 🎉 This is a Python-based MCP server built with **FastMCP** to interact easily with BlazeMeter’s API for performance testing lifecycle management.
+Welcome to the BlazeMeter MCP Server! 🎉 This is a Python-based MCP server built with **FastMCP 3.4.x** to interact easily with BlazeMeter’s API for performance testing lifecycle management.
 
 ---
 
@@ -19,7 +19,7 @@ Welcome to the BlazeMeter MCP Server! 🎉 This is a Python-based MCP server bui
 
 ## 🏁 Prerequisites
 
-- Python 3.12.4 or higher installed  
+- Python 3.12+ installed  
 - BlazeMeter API Key (set in `.env`)  
 
 ---
@@ -29,8 +29,8 @@ Welcome to the BlazeMeter MCP Server! 🎉 This is a Python-based MCP server bui
 ### 1. Clone the Repository
 
 ```
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd blazemeter_mcp_server
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/blazemeter-mcp
 ```
 
 ### 2. Create & Activate a Python Virtual Environment
@@ -368,9 +368,9 @@ Files uploaded to a shared folder are available to **all tests** linked to that 
 
 ## 🚧 Future Enhancements
 
-- Expanded artifact processing \& analytics workflows
-- Integration with Datadog and other monitoring MCP servers
-- Automated test result analysis via LLMs
+- Expanded artifact processing & analytics workflows
+- ~~Integration with Datadog and other monitoring MCP servers~~ — ✅ Done (Datadog MCP + PerfAnalysis cross-correlation)
+- ~~Automated test result analysis via LLMs~~ — ✅ Done (PerfAnalysis MCP)
 - Enhanced error reporting and system diagnostics
 
 ---
@@ -381,5 +381,5 @@ Feel free to open issues or submit pull requests!
 
 ---
 
-Created with ❤️ using FastMCP and BlazeMeter APIs
+Created with ❤️ using FastMCP 3.4.x and BlazeMeter APIs
 
