@@ -1,8 +1,8 @@
-# PerfPilot Web UI
+# ✈️ 🌐 PerfPilot Web UI
 
 The browser-based chat interface for PerfPilot Agents. Built with Next.js 15,
-CopilotKit, and Tailwind CSS — connects to the AG-UI bridge on port 8002 for
-real-time streaming conversations with the PerfPilot orchestrator agent.
+CopilotKit, and Tailwind CSS — connects to the AG-UI bridge for real-time 
+streaming conversations with the PerfPilot orchestrator agent.
 
 ---
 
@@ -189,10 +189,12 @@ Browser (localhost:3000)
 |------|---------|
 | `app/page.tsx` | Main page — manages `activeThreadId`, wraps chat in `<CopilotKit>` provider |
 | `app/api/copilotkit/route.ts` | CopilotKit Runtime API route — proxies to AG-UI backend with cookie forwarding |
-| `components/chat/chat-panel.tsx` | Unified chat panel — DB history + live streaming + react-markdown |
+| `components/chat/chat-panel.tsx` | Unified chat panel — DB history + live streaming + react-markdown; also exposes attached GitHub SCM metadata to the orchestrator via `useCopilotReadable` |
 | `components/sidebar/thread-sidebar.tsx` | Thread list with CRUD operations |
-| `components/layout/header.tsx` | PerfPilot header with health indicator |
+| `components/layout/header.tsx` | PerfPilot header with health indicator + Agents / Tasks / GitHub toggle buttons |
+| `components/github/github-creds-card.tsx` | Session-only GitHub credential capture card (URL + PAT + optional branch/path) with privacy disclosures |
 | `lib/api.ts` | API helpers (health, threads, messages) |
+| `lib/github-creds.ts` | AES-256-GCM encrypted, session-scoped storage for GitHub credentials via Web Crypto API |
 | `lib/types.ts` | TypeScript interfaces (Thread, Message, etc.) |
 | `next.config.js` | Proxy rewrites + webpack config for CopilotKit v2 CSS exclusion |
 
@@ -205,6 +207,7 @@ Browser (localhost:3000)
 | Agent catalog panel (cards with status, skills) | Completed |
 | SSE task streaming (real-time progress display) | Completed |
 | HITL approve/reject inline cards | Completed |
+| GitHub credentials card (session-scoped, encrypted, drives new-JMX pipeline) | Completed |
 | Test-run results display (`/runs` pages) | In Progress |
 | Polish — dark/light mode, responsive layout, skeletons, error boundaries | Not started |
 

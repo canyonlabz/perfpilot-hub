@@ -142,6 +142,9 @@ Your MCP server exposes these primary tools for Cursor, agents, or other MCP cli
 | `get_shared_folders` | List all shared folders in a workspace |
 | `get_shared_folder_file_list` | List files inside a shared folder (name, size, last modified) |
 | `upload_to_shared_folder` | Upload a file or directory of files to a shared folder (with extension filtering) |
+| `resolve_project` | Resolve a workspace + project pair by numeric id, name, or a mix. Returns `{workspace_id, project_id}` after validating both exist and match. Used by the A2A / Web UI new-JMX pipeline before creating a fresh test |
+| `create_test` | Create a new script-mode BlazeMeter test under a resolved workspace/project. Returns `bm_test_id` for the follow-up upload and start-test calls |
+| `upload_test_files` | Multipart upload of a JMX plus any CSV / JKS / properties data files to a newly created test. Uses the same allowed-extension filter as `upload_to_shared_folder` |
 
 #### Deprecated Tools (disabled by default)
 
@@ -174,6 +177,47 @@ A standard BlazeMeter MCP workflow uses these tools in sequence for automated, r
     - `get_public_report_url`: Generate a shareable report link for stakeholders.
 6. **List Past Runs (optional)**
     - `list_test_runs`: View previous completed runs for a given test within a time range.
+
+---
+
+## 🆕 New-JMX Pipeline (A2A / Web UI)
+
+When an upstream agent framework (or a browser user via the PerfPilot Web
+UI) sends a new JMX for the first time, the pipeline uses three of the
+tools above to provision a BlazeMeter test on the fly. The workflow is
+orchestrated by the PerfPilot Execution Agent's `provision_performance_test`
+composite tool, which chains these calls:
+
+1. `resolve_project(workspace_id?, workspace_name?, project_id?, project_name?)`
+    - Accepts any combination of numeric ids and human-readable names.
+    - Falls back to `environments.yaml` when the caller only supplied the
+      environment name (e.g. `QA`, `UAT`, `PERF`).
+    - Rejects mismatches (e.g. a `project_id` that doesn't live under the
+      resolved `workspace_id`).
+2. `create_test(workspace_id, project_id, test_name)`
+    - Creates a fresh script-mode test.
+    - Returns the new `bm_test_id`.
+3. `upload_test_files(bm_test_id, files=[jmx_path, *data_files])`
+    - Multipart upload of the JMX plus any CSV / JKS / properties data
+      files. Enforces the same allowed-extension filter as the
+      `upload_to_shared_folder` tool.
+    - Returns per-file upload status so the caller can retry individual
+      files without recreating the test.
+
+After provisioning, the caller may immediately chain into the standard
+`start_test` → `check_test_status` → `get_run_results` →
+`process_session_artifacts` flow. When the Execution Agent detects
+`smoke_status="FAIL"` from the Script Agent's local smoke run it still
+provisions the test but flags it with a `smoke_failed` warning so the
+HITL gate (`hitl.require_approval_before_test_provision`) can pause the
+pipeline for human review.
+
+Companion MCPs:
+
+- [github-mcp](../github-mcp/README.md) - pushes the JMX to a caller-supplied
+  `owner/repo/branch/path` before provisioning.
+- [jmeter-mcp](../jmeter-mcp/README.md) - generates and locally smoke-tests
+  the JMX that feeds this pipeline.
 
 ---
 

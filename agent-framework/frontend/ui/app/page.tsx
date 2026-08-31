@@ -7,7 +7,12 @@ import { ThreadSidebar } from "@/components/sidebar/thread-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { CatalogPanel } from "@/components/catalog/catalog-panel";
 import { TaskProgressPanel } from "@/components/tasks/task-progress-panel";
+import { GitHubCredsCard } from "@/components/github/github-creds-card";
 import { fetchCurrentSession, fetchSettings, listThreads, createThread } from "@/lib/api";
+import {
+  getGitHubCredsMetadata,
+  subscribeToCredsChanges,
+} from "@/lib/github-creds";
 import type { Thread } from "@/lib/types";
 
 const STORAGE_KEY = "perfpilot_active_thread_id";
@@ -17,6 +22,8 @@ export default function HomePage() {
   const [initialized, setInitialized] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
+  const [showGitHubCreds, setShowGitHubCreds] = useState(false);
+  const [gitHubCredsAttached, setGitHubCredsAttached] = useState(false);
   const [contextIndicatorEnabled, setContextIndicatorEnabled] = useState(true);
 
   useEffect(() => {
@@ -68,16 +75,46 @@ export default function HomePage() {
 
   const handleToggleCatalog = useCallback(() => {
     setShowCatalog((prev) => {
-      if (!prev) setShowTasks(false);
+      if (!prev) {
+        setShowTasks(false);
+        setShowGitHubCreds(false);
+      }
       return !prev;
     });
   }, []);
 
   const handleToggleTasks = useCallback(() => {
     setShowTasks((prev) => {
-      if (!prev) setShowCatalog(false);
+      if (!prev) {
+        setShowCatalog(false);
+        setShowGitHubCreds(false);
+      }
       return !prev;
     });
+  }, []);
+
+  const handleToggleGitHubCreds = useCallback(() => {
+    setShowGitHubCreds((prev) => {
+      if (!prev) {
+        setShowCatalog(false);
+        setShowTasks(false);
+      }
+      return !prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const meta = await getGitHubCredsMetadata();
+      if (!cancelled) setGitHubCredsAttached(Boolean(meta));
+    };
+    refresh();
+    const unsubscribe = subscribeToCredsChanges(refresh);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   if (!initialized) {
@@ -98,6 +135,9 @@ export default function HomePage() {
         onToggleCatalog={handleToggleCatalog}
         showTasks={showTasks}
         onToggleTasks={handleToggleTasks}
+        showGitHubCreds={showGitHubCreds}
+        onToggleGitHubCreds={handleToggleGitHubCreds}
+        gitHubCredsAttached={gitHubCredsAttached}
       />
       <div className="flex flex-1 overflow-hidden">
         <ThreadSidebar
@@ -131,6 +171,11 @@ export default function HomePage() {
               threadId={activeThreadId}
               showContextIndicator={contextIndicatorEnabled}
             />
+          </aside>
+        )}
+        {showGitHubCreds && (
+          <aside className="w-96 border-l bg-card flex-shrink-0">
+            <GitHubCredsCard />
           </aside>
         )}
       </div>

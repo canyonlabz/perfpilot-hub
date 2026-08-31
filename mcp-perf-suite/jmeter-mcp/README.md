@@ -401,6 +401,35 @@ When application APIs change and you have a fresh HAR capture:
 
 ---
 
+## 🆕 New-JMX Pipeline Handoff (A2A / Web UI)
+
+When the PerfPilot Script Agent runs the "generate → push → smoke →
+provision" pipeline (see [orchestrator INSTRUCTIONS](../../agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md)
+§9.7), it uses this MCP for two steps:
+
+1. **Generate** — one of `generate_jmeter_script_from_har`,
+   `generate_jmeter_script_from_swagger`, or the Playwright capture
+   pipeline. Produces the JMX under
+   `artifacts/{test_run_id}/jmeter/scripts/`.
+2. **Smoke test** — `start_jmeter_test` runs a short local smoke
+   iteration against the generated script. The Script Agent inspects
+   `get_jmeter_run_status` and `analyze_jmeter_log` output to derive a
+   `smoke_status` of either `PASS` or `FAIL`.
+
+The Script Agent then hands the JMX path plus `smoke_status` to the
+Execution Agent's `provision_performance_test` tool (see
+[blazemeter-mcp README](../blazemeter-mcp/README.md#-new-jmx-pipeline-a2a--web-ui)),
+which uses BlazeMeter MCP tools to create a new BlazeMeter test and
+upload the JMX. Version control of the JMX itself is handled by
+[github-mcp](../github-mcp/README.md).
+
+The JMeter MCP does not push to Git and does not talk to BlazeMeter
+directly — those responsibilities are intentionally split across
+sibling MCPs so this server stays focused on script generation and
+local execution.
+
+---
+
 ## 📁 Project Structure
 
 ```

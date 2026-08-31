@@ -15,7 +15,7 @@
 #
 # Sections:
 #   1. llm_provider     - per-agent LLM override
-#   2. mcp_tools        - gateway namespace allowlist (jmeter, perfmemory)
+#   2. mcp_tools        - gateway namespace allowlist (jmeter, github, perfmemory)
 #   3. playwright_mcp   - direct Playwright MCP connection (outside gateway)
 #   4. retries          - call-level retry budget for transient MCP failures
 #   5. timeout_seconds  - per-tool soft timeout for short MCP calls
@@ -41,7 +41,7 @@
 # =============================================================================
 # 2. MCP namespace allowlist (gateway-mcp tools)
 # =============================================================================
-# The script-agent accesses two namespaces through the gateway-mcp:
+# The script-agent accesses three namespaces through the gateway-mcp:
 #
 # - `jmeter` — JMX creation, editing, component manipulation, smoke
 #   testing, HAR/Swagger conversion, correlation, script validation.
@@ -49,6 +49,12 @@
 #   jmeter_create_jmx_from_swagger, jmeter_add_component,
 #   jmeter_edit_component, jmeter_run_smoke_test,
 #   jmeter_analyze_jmeter_log, jmeter_get_correlations, etc.
+#
+# - `github` — Publish generated JMX (and optional data files) to a
+#   repo/branch/path chosen by the caller. Tools:
+#   github_push_jmx, github_ensure_branch, github_get_repo_default_branch.
+#   Token resolution honors per-request `token` arg (Web UI / user-
+#   attributed A2A) before falling back to the server env var.
 #
 # - `perfmemory` — Lessons-learned database (PostgreSQL + pgvector +
 #   Apache AGE). Tools for similar-issue lookup, cross-project pattern
@@ -64,6 +70,7 @@
 mcp_tools:
   allowed_namespaces:
     - jmeter
+    - github
     - perfmemory
 
 # =============================================================================
@@ -169,7 +176,7 @@ polling_max_consecutive_repeats: 30
 #   turns during browser automation but may cause issues if the model needs
 #   to return a text response (e.g., final status report). Only enable
 #   after validating that the A1 autonomous execution directive (Section
-#   2.1 of INSTRUCTIONS.md) alone does not sufficiently reduce filler
+#   2.2 of INSTRUCTIONS.md) alone does not sufficiently reduce filler
 #   turns. Default: false (opt-in).
 force_tool_choice: false
 

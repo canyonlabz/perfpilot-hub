@@ -180,7 +180,26 @@ A technical reference explaining how the PerfAnalysis MCP handles large JTL/CSV 
 
 ---
 
-### 🧩 **10. Architecture & Flow Docs (Future Expansion)**
+### 🔗 **10. A2A New-JMX Pipeline Guide (`agent-framework/a2a_new_jmx_pipeline_guide.md`)**
+
+A reference for upstream AI agent frameworks and the PerfPilot Web UI that
+need to drive the *new-JMX* pipeline (generate → push to Git → local
+smoke → provision BlazeMeter test), including:
+
+* Which surfaces the pipeline supports (A2A, Web UI, Cursor/MCP)
+* Full A2A metadata schema (`environment`, `scm`, `blazemeter`,
+  `test_run_id`)
+* A minimal example A2A payload that a `curl` or Python client can send
+* User-attributed vs user-agnostic GitHub token flow (per-request vs
+  server env var)
+* Which HITL gates apply to the pipeline and where they fire
+
+➡️ *Use this if you are integrating an upstream framework (or a
+custom UI) with the PerfPilot orchestrator's script-creation pipeline.*
+
+---
+
+### 🧩 **11. Architecture & Flow Docs (Future Expansion)**
 
 Potential documents coming later:
 
@@ -206,6 +225,9 @@ docs/
 ├── report_template_guidelines.md     ← Performance report template rules
 ├── large_file_handling.md            ← Large JTL file handling & limitations
 ├── perfanalysis_techniques_guide.md ← Analytical techniques & algorithms reference
+│
+├── agent-framework/
+│   └── a2a_new_jmx_pipeline_guide.md ← A2A + Web UI new-JMX pipeline metadata reference
 │
 ├── config_reference.md        ← (Planned)
 ├── mcp_tools_index.md         ← (Planned)

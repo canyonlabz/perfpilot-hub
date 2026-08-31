@@ -106,6 +106,12 @@ if servers_cfg.get("perfmemory", True):
         namespace="perfmemory",
     )
 
+if servers_cfg.get("github", True):
+    gateway.mount(
+        create_proxy(_server_config("github-mcp", "github.py")),
+        namespace="github",
+    )
+
 # --- Local-only servers ---
 if servers_cfg.get("msteams", True):
     gateway.mount(

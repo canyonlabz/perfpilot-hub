@@ -21,6 +21,9 @@ from services.blazemeter_api import (
     list_shared_folders,
     get_shared_folder_files,
     upload_to_shared_folder as _upload_to_shared_folder,
+    resolve_project_target as _resolve_project_target,
+    create_test as _create_test,
+    upload_test_files as _upload_test_files,
 )
 
 mcp = FastMCP("blazemeter")
@@ -352,6 +355,106 @@ async def upload_to_shared_folder(folder_id: str, path: str, ctx: Context) -> di
         failed files, skipped files with reasons, and total size in MB.
     """
     return await _upload_to_shared_folder(folder_id, path, ctx)
+
+
+# -----------------------------
+# Test-scoped Provisioning Tools
+# -----------------------------
+# These complement the shared-folder tools above. They target the
+# per-test file endpoint (POST /api/v4/tests/{testId}/files) and are
+# the pieces the Execution Agent's provision_performance_test composite
+# calls after a fresh JMX has been pushed to Git.
+
+@mcp.tool()
+async def resolve_project(
+    workspace_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> dict:
+    """Resolve a BlazeMeter workspace + project from any id/name combo.
+
+    Accepts either explicit BlazeMeter numeric ids or human-readable
+    names. Explicit ``project_id`` is trusted verbatim (no extra API
+    call). Otherwise ``project_name`` plus a workspace scope (id, env
+    var, or workspace_name lookup) is required.
+
+    Zero or many name matches return an ``error`` status; the resolver
+    never guesses.
+
+    Args:
+        workspace_id: Numeric workspace id (string). Optional.
+        project_id: Numeric project id (string). When provided the
+            resolver returns immediately.
+        workspace_name: Workspace name used when no id / env var scope
+            is available.
+        project_name: Project name for name-based lookup.
+
+    Returns:
+        Dict with ``status`` (``"success"`` | ``"error"``) plus
+        resolved ``workspace_id`` / ``project_id`` on success or an
+        ``error`` message on failure.
+    """
+    return await _resolve_project_target(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        workspace_name=workspace_name,
+        project_name=project_name,
+    )
+
+
+@mcp.tool()
+async def create_test(
+    project_id: str,
+    name: str,
+    jmx_filename: str,
+) -> dict:
+    """Create a new Taurus / JMeter script-mode BlazeMeter test.
+
+    Wraps ``POST /api/v4/tests`` with the minimum body required for a
+    JMeter script test. The caller must upload the JMX (and any data
+    files) in a follow-up call to ``upload_test_files``.
+
+    Args:
+        project_id: Numeric BlazeMeter project id (string form).
+        name: Test name to display in the BlazeMeter UI.
+        jmx_filename: Basename of the JMX that will be uploaded next.
+            Must match the file's real name (BlazeMeter uses this to
+            identify the main script at run time).
+
+    Returns:
+        Dict with ``status`` (``"success"`` | ``"error"``), ``test_id``
+        on success, and other echoed metadata (test name, project id,
+        configuration block).
+    """
+    return await _create_test(project_id, name, jmx_filename)
+
+
+@mcp.tool()
+async def upload_test_files(
+    test_id: str,
+    paths: list,
+    ctx: Context = None,
+) -> dict:
+    """Attach one or more local files to an existing BlazeMeter test.
+
+    Wraps ``POST /api/v4/tests/{testId}/files`` (one multipart request
+    per file, single ``file`` field). Order is preserved: push the JMX
+    first, then each data file, so BlazeMeter's asset resolution keeps
+    the main script and its inputs consistent.
+
+    Args:
+        test_id: The BlazeMeter test id from ``create_test``.
+        paths: List of local file paths (JMX first is a good convention).
+            Each must exist on disk.
+        ctx: Optional FastMCP context for per-file progress logging.
+
+    Returns:
+        Dict with ``status`` (``"success"`` | ``"partial"`` | ``"error"``),
+        counts of uploaded vs failed files, and a ``results`` list with
+        per-file outcomes.
+    """
+    return await _upload_test_files(test_id, paths, ctx)
 
 
 # -----------------------------

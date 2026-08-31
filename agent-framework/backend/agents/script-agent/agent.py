@@ -2,7 +2,8 @@
 
 The script-agent owns the JMeter-script lifecycle: convert
 HAR/Swagger/Playwright captures to JMX, edit and analyze scripts,
-run smoke tests, and iteratively debug with PerfMemory integration.
+run smoke tests, publish scripts to version control, and iteratively
+debug with PerfMemory integration.
 
 MCP collaboration (auto-discovered at build time):
 
@@ -11,7 +12,16 @@ MCP collaboration (auto-discovered at build time):
    correlation, network traffic capture/analysis. Code-based (single
    attempt, no retry).
 
-2. Playwright MCP (direct connection, ``browser_*``) — Browser
+2. GitHub MCP (via gateway, ``github_*``) — Push generated JMX (and
+   optional data files) to a repo/branch/path chosen by the caller.
+   Idempotent branch create; per-request token supported for the
+   Web UI encrypted-session path.
+
+3. PerfMemory MCP (via gateway, ``perfmemory_*``) — Similar-issue
+   lookup, cross-project pattern discovery, debug session storage.
+   Used during the iterative debug-fix loop.
+
+4. Playwright MCP (direct connection, ``browser_*``) — Browser
    automation for live network capture driven by test specification
    files. The Playwright MCP container (Microsoft ``playwright-mcp``)
    runs as a separate service and the script-agent connects directly
@@ -33,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 _AGENT_DIR = pathlib.Path(__file__).resolve().parent
 
-GATEWAY_MCP_NAMESPACES = ["jmeter"]
+GATEWAY_MCP_NAMESPACES = ["jmeter", "github", "perfmemory"]
 PLAYWRIGHT_MCP_NAMESPACE = ["browser"]
 
 # Playwright MCP endpoint resolution:
@@ -123,14 +133,15 @@ def build_script_agent(stateful_client_holder: dict | None = None):
 
     total = jmeter_count + playwright_count
     logger.info(
-        "script-agent built — %d JMeter tools + %d Playwright tools = %d total",
-        jmeter_count, playwright_count, total,
+        "script-agent built — %d gateway tools (%s) + %d Playwright tools = %d total",
+        jmeter_count, ", ".join(GATEWAY_MCP_NAMESPACES),
+        playwright_count, total,
     )
     return agent
 
 
 def _register_gateway_tools(agent) -> int:
-    """Auto-discover and register JMeter MCP tools from the gateway."""
+    """Auto-discover and register gateway MCP tools from the configured namespaces."""
     import asyncio
 
     from services.mcp_client import resolve_gateway_url

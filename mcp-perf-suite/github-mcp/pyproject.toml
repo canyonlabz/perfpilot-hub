@@ -1,0 +1,18 @@
+[project]
+name = "github-mcp"
+version = "0.1.0"
+description = "GitHub MCP Server for pushing JMX scripts and data files to a repo/branch/path chosen by the caller"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=3.4.2,<4",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools]
+py-modules = ["github"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["services*", "utils*"]

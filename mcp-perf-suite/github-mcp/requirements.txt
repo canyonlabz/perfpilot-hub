@@ -1,0 +1,13 @@
+# github-mcp Server Dependencies
+
+# Core MCP framework
+fastmcp>=3.4.2,<4
+
+# HTTP client for GitHub REST API calls
+httpx>=0.28.1
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Configuration
+pyyaml>=6.0

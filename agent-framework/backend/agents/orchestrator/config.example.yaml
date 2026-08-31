@@ -100,10 +100,11 @@ a2a:
 # Requests from upstream A2A agent frameworks are treated the same as human
 # requests — HITL gates apply uniformly regardless of caller surface.
 hitl:
-  require_approval_before_test_start: false   # Set true to require HITL before launching load tests
-  require_approval_before_publish: true       # Reserved for Epic 4 (Confluence publish gate)
-  poll_interval_seconds: 2                    # How often to check for human approve/reject decision
-  timeout_seconds: 300                        # Max wait for human decision before timeout (5 min)
+  require_approval_before_test_start: false      # Set true to require HITL before launching load tests
+  require_approval_before_test_provision: false  # Set true to require HITL before provisioning a NEW BlazeMeter test from a fresh JMX
+  require_approval_before_publish: true          # Reserved for Epic 4 (Confluence publish gate)
+  poll_interval_seconds: 2                       # How often to check for human approve/reject decision
+  timeout_seconds: 300                           # Max wait for human decision before timeout (5 min)
 
 # =============================================================================
 # 7. Pipeline defaults

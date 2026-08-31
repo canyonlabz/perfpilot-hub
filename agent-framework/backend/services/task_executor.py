@@ -481,6 +481,18 @@ class _SafeFormatMap(dict):
 
 _HITL_GATE_RULES: list[HitlGateRule] = [
     HitlGateRule(
+        config_key="require_approval_before_test_provision",
+        agent_names=(EXECUTION_AGENT_NAME,),
+        tools=frozenset({"provision_performance_test"}),
+        title="Approve BlazeMeter Test Provisioning",
+        summary_template=(
+            "The {agent_name} wants to create a NEW BlazeMeter test "
+            "'{test_name}' for environment {environment} and upload the "
+            "JMX from {jmx_path}. Approve to provision, or reject to keep "
+            "the JMX in Git only."
+        ),
+    ),
+    HitlGateRule(
         config_key="require_approval_before_test_start",
         agent_names=(EXECUTION_AGENT_NAME,),
         tools=frozenset({"start_performance_test"}),
@@ -530,6 +542,7 @@ EXECUTION_AGENT_TOOL_NAMES: tuple[str, ...] = (
     "start_performance_test",
     "wait_for_completion",
     "extract_test_run_artifacts",
+    "provision_performance_test",
 )
 
 # MCP tool prefixes the execution-agent may call directly (pass-through).
@@ -1099,9 +1112,15 @@ def _extract_user_message_from_payload(payload: Any) -> Optional[str]:
     parsed = parts_parser.parse_request_body(payload)
 
     if parsed.has_parts and parsed.prompt:
-        if top_level_message:
-            return f"{top_level_message}\n\n{parsed.prompt}"
-        return parsed.prompt
+        metadata_context = _format_metadata_context(parsed.metadata)
+        base = (
+            f"{top_level_message}\n\n{parsed.prompt}"
+            if top_level_message
+            else parsed.prompt
+        )
+        if metadata_context:
+            return f"{base}\n\n{metadata_context}"
+        return base
 
     if top_level_message:
         # Append metadata context if available from the request
@@ -1127,20 +1146,66 @@ def _format_metadata_context(metadata: dict) -> str:
 
     Only includes metadata fields that carry actionable context.
     Returns an empty string when nothing useful is present.
+
+    Nested ``scm`` and ``blazemeter`` blocks are surfaced as sub-lines
+    so the orchestrator can decide whether to delegate script pushes
+    and BlazeMeter provisioning.
     """
     if not metadata:
         return ""
 
     lines: list[str] = []
-    context_keys = {
+    scalar_keys = {
         "upstream_framework": "Upstream framework",
         "environment": "Target environment",
         "requested_workflow": "Requested workflow",
+        "test_run_id": "Test run id",
     }
-    for key, label in context_keys.items():
+    for key, label in scalar_keys.items():
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             lines.append(f"- {label}: {value}")
+
+    scm = metadata.get("scm")
+    if isinstance(scm, dict):
+        parts: list[str] = []
+        url = scm.get("url")
+        if isinstance(url, str) and url.strip():
+            parts.append(f"url={url.strip()}")
+        branch = scm.get("branch")
+        if isinstance(branch, str) and branch.strip():
+            parts.append(f"branch={branch.strip()}")
+        path = scm.get("path")
+        if isinstance(path, str) and path.strip():
+            parts.append(f"path={path.strip()}")
+        provider = scm.get("provider")
+        if isinstance(provider, str) and provider.strip():
+            parts.append(f"provider={provider.strip()}")
+        if parts:
+            lines.append("- SCM target: " + ", ".join(parts))
+
+    bm = metadata.get("blazemeter")
+    if isinstance(bm, dict):
+        parts = []
+        for src_key, label in (
+            ("workspaceId", "workspaceId"),
+            ("workspace_id", "workspaceId"),
+            ("projectId", "projectId"),
+            ("project_id", "projectId"),
+            ("testName", "testName"),
+            ("test_name", "testName"),
+        ):
+            val = bm.get(src_key)
+            if isinstance(val, (str, int)) and str(val).strip():
+                parts.append(f"{label}={val}")
+        if parts:
+            deduped: list[str] = []
+            seen: set[str] = set()
+            for p in parts:
+                if p not in seen:
+                    seen.add(p)
+                    deduped.append(p)
+            lines.append("- BlazeMeter target: " + ", ".join(deduped))
 
     if not lines:
         return ""
