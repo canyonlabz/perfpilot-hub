@@ -292,6 +292,22 @@ def _register_tools(agent: Any) -> None:
     )(extract_test_run_artifacts)
     agent.register_for_execution()(extract_test_run_artifacts)
 
+    agent.register_for_llm(
+        name="provision_performance_test",
+        description=(
+            "Provision a NEW BlazeMeter test for a freshly-generated JMX. "
+            "Resolves the workspace/project via the framework env_resolver "
+            "(environment name -> BlazeMeter target) and any A2A overrides, "
+            "then calls blazemeter_resolve_project -> blazemeter_create_test -> "
+            "blazemeter_upload_test_files in sequence. ALWAYS runs even when "
+            "smoke_status='FAIL' (per user contract), but flags "
+            "warning='smoke_failed' on the return so the orchestrator can "
+            "surface a 'not recommended to run' message. Never uploads to "
+            "shared folders (that is a separate tool). Never raises."
+        ),
+    )(provision_performance_test)
+    agent.register_for_execution()(provision_performance_test)
+
 
 # =============================================================================
 # Tool 1 (PBI 3.8.3): start_performance_test
@@ -310,7 +326,7 @@ async def start_performance_test(
     test_id: Annotated[
         str,
         "Identifier of an EXISTING test definition in the load-testing tool "
-        "(BlazeMeter test ID in F3.8, e.g. '14491287'). The test artifact "
+        "(BlazeMeter test ID, e.g. '12345678'). The test artifact "
         "(JMX / .yaml / recorded scenario) must already be uploaded; this "
         "agent does NOT upload JMX scripts.",
     ],
@@ -1504,3 +1520,422 @@ def _normalize_artifacts_base(raw: Any) -> Optional[str]:
     if not text or "No artifacts_path found" in text:
         return None
     return text
+
+
+# =============================================================================
+# Tool 4: provision_performance_test
+# =============================================================================
+#
+# Composite tool that lands a fresh JMX in BlazeMeter as a new test with
+# its data files attached. Sits between the script-agent (which pushes
+# the JMX to Git and runs a local smoke) and start_performance_test
+# (which kicks off the run). Always creates a NEW test - never updates
+# an existing one, matching the plan's "always create-new for a new JMX"
+# contract.
+#
+# On smoke_status="FAIL" the tool still runs and flags a warning; the
+# HITL gate on this tool + the orchestrator's summary make sure the
+# human sees the "not recommended to run" flag before choosing to
+# actually start the test.
+
+
+async def provision_performance_test(
+    environment: Annotated[
+        Optional[str],
+        "Environment name from A2A / Web UI metadata (e.g. 'QA', 'UAT'). "
+        "Resolved via env_resolver -> BlazeMeter workspace/project. May be "
+        "None when the caller supplies workspace_id / project_id explicitly.",
+    ] = None,
+    test_name: Annotated[
+        Optional[str],
+        "Human-friendly test name to display in BlazeMeter. Required.",
+    ] = None,
+    jmx_path: Annotated[
+        Optional[str],
+        "Local filesystem path to the JMX file to upload. Required. The "
+        "basename becomes BlazeMeter's `configuration.filename`.",
+    ] = None,
+    data_files: Annotated[
+        Optional[list],
+        "Optional list of local file paths (CSV / JSON / other data assets) "
+        "to upload after the JMX. Order preserved.",
+    ] = None,
+    smoke_status: Annotated[
+        Optional[str],
+        "Outcome of the Script Agent's local JMeter smoke test: 'PASS' or "
+        "'FAIL'. Anything other than 'PASS' surfaces warning='smoke_failed' "
+        "on the return; provisioning still proceeds either way.",
+    ] = None,
+    workspace_id: Annotated[
+        Optional[str],
+        "Explicit BlazeMeter workspace id override (from A2A metadata). Wins "
+        "over the environments.yaml mapping.",
+    ] = None,
+    project_id: Annotated[
+        Optional[str],
+        "Explicit BlazeMeter project id override (from A2A metadata). Wins "
+        "over the environments.yaml mapping. When set the resolver skips "
+        "workspace/project lookup entirely.",
+    ] = None,
+) -> dict:
+    """Create a new BlazeMeter test and upload the JMX + data files.
+
+    Always executes when required inputs are present, even when the
+    caller reports ``smoke_status='FAIL'``. The failure surfaces as
+    ``warning='smoke_failed'`` on the return dict; the orchestrator
+    (and the HITL gate) show it to the human before any start-test
+    approval.
+
+    Returns:
+        Always a dict. **NEVER raises** for tool-side failures.
+
+        Success (all uploads OK)::
+
+            {
+                "ok": True,
+                "vendor": "blazemeter",
+                "environment": "QA",
+                "test_id": "<new-test-id>",
+                "test_name": "...",
+                "workspace_id": "...",
+                "project_id": "...",
+                "uploaded_files": [{"file": "...", "size_mb": 0.1}, ...],
+                "smoke_status": "PASS",
+                "warning": None,
+                "provision_status": "success",   # or "partial"
+                "raw_upload": {...},              # truncated MCP response
+            }
+
+        With warning (smoke fail or partial upload)::
+
+            {..., "ok": True, "warning": "smoke_failed" | "upload_partial", ...}
+
+        Failure (missing input, project resolution failed, or create_test
+        failed)::
+
+            {
+                "ok": False,
+                "error": {"type": "...", "message": "...", "phase": "..."},
+                "environment": "QA",
+                "test_name": "...",
+                "smoke_status": "PASS/FAIL",
+            }
+    """
+    normalized_smoke = (smoke_status or "").strip().upper() or None
+    smoke_warning: Optional[str] = None
+    if normalized_smoke and normalized_smoke != "PASS":
+        smoke_warning = "smoke_failed"
+
+    if not test_name or not str(test_name).strip():
+        return _provision_error(
+            environment, test_name, normalized_smoke,
+            phase="invalid-input",
+            message="test_name must be a non-empty string",
+        )
+    if not jmx_path or not str(jmx_path).strip():
+        return _provision_error(
+            environment, test_name, normalized_smoke,
+            phase="invalid-input",
+            message="jmx_path must be a non-empty string",
+        )
+
+    jmx_path_str = str(jmx_path).strip()
+    if not Path(jmx_path_str).is_file():
+        return _provision_error(
+            environment, test_name, normalized_smoke,
+            phase="invalid-input",
+            message=f"JMX file not found: {jmx_path_str}",
+        )
+
+    normalized_data_files: list[str] = []
+    if data_files:
+        if not isinstance(data_files, (list, tuple)):
+            return _provision_error(
+                environment, test_name, normalized_smoke,
+                phase="invalid-input",
+                message="data_files must be a list of file paths",
+            )
+        for entry in data_files:
+            if not entry or not isinstance(entry, str):
+                return _provision_error(
+                    environment, test_name, normalized_smoke,
+                    phase="invalid-input",
+                    message=f"invalid data_files entry: {entry!r}",
+                )
+            if not Path(entry).is_file():
+                return _provision_error(
+                    environment, test_name, normalized_smoke,
+                    phase="invalid-input",
+                    message=f"data file not found: {entry}",
+                )
+            normalized_data_files.append(entry)
+
+    resolved_workspace = (workspace_id or "").strip() or None
+    resolved_project = (project_id or "").strip() or None
+    resolved_workspace_name: Optional[str] = None
+    resolved_project_name: Optional[str] = None
+
+    if environment and (resolved_project is None or resolved_workspace is None):
+        try:
+            from services.env_resolver import resolve_environment
+            overrides: dict[str, Any] = {}
+            if resolved_workspace:
+                overrides["workspaceId"] = resolved_workspace
+            if resolved_project:
+                overrides["projectId"] = resolved_project
+            env_target = resolve_environment(
+                environment, overrides=overrides or None,
+            )
+        except Exception as e:
+            return _provision_error(
+                environment, test_name, normalized_smoke,
+                phase="env-resolver",
+                message=f"{type(e).__name__}: {_truncate(e, 200)}",
+            )
+
+        if env_target is None:
+            return _provision_error(
+                environment, test_name, normalized_smoke,
+                phase="env-resolver",
+                message=(
+                    f"environment '{environment}' not found in "
+                    "environments.yaml"
+                ),
+            )
+        bm = env_target.blazemeter
+        resolved_workspace = resolved_workspace or bm.workspace_id
+        resolved_project = resolved_project or bm.project_id
+        resolved_workspace_name = bm.workspace_name
+        resolved_project_name = bm.project_name
+
+    if not resolved_project and not resolved_project_name:
+        return _provision_error(
+            environment, test_name, normalized_smoke,
+            phase="env-resolver",
+            message=(
+                "Could not resolve BlazeMeter project: no project_id override "
+                "and environments.yaml did not supply project_id or "
+                "project_name."
+            ),
+        )
+
+    from services.mcp_client import MCPClient, build_client_config
+
+    config = build_client_config(["blazemeter", "jmeter"])
+    try:
+        async with MCPClient(config) as client:
+            return await _provision_performance_test_with_client(
+                client=client,
+                environment=environment,
+                test_name=str(test_name).strip(),
+                jmx_path=jmx_path_str,
+                data_files=normalized_data_files,
+                workspace_id=resolved_workspace,
+                project_id=resolved_project,
+                workspace_name=resolved_workspace_name,
+                project_name=resolved_project_name,
+                smoke_status=normalized_smoke,
+                smoke_warning=smoke_warning,
+            )
+    except Exception as e:
+        return _provision_error(
+            environment, test_name, normalized_smoke,
+            phase="client-setup",
+            message=f"{type(e).__name__}: {_truncate(e, 200)}",
+        )
+
+
+async def _provision_performance_test_with_client(
+    *,
+    client: Any,
+    environment: Optional[str],
+    test_name: str,
+    jmx_path: str,
+    data_files: list[str],
+    workspace_id: Optional[str],
+    project_id: Optional[str],
+    workspace_name: Optional[str],
+    project_name: Optional[str],
+    smoke_status: Optional[str],
+    smoke_warning: Optional[str],
+) -> dict:
+    """Inner implementation: 3-step BlazeMeter provisioning over an open client.
+
+    Exposed (underscored) so smoke tests can inject a fake client and
+    exercise the flow without a real BlazeMeter API.
+    """
+    resolve_args: dict[str, Any] = {}
+    if workspace_id:
+        resolve_args["workspace_id"] = workspace_id
+    if project_id:
+        resolve_args["project_id"] = project_id
+    if workspace_name:
+        resolve_args["workspace_name"] = workspace_name
+    if project_name:
+        resolve_args["project_name"] = project_name
+
+    try:
+        resolve_result = await client.call_tool(
+            "blazemeter_resolve_project", resolve_args,
+        )
+    except Exception as e:
+        return _provision_error(
+            environment, test_name, smoke_status,
+            phase="resolve-project",
+            message=f"{type(e).__name__}: {_truncate(e, 200)}",
+        )
+    resolve_payload = _extract_text_or_data(resolve_result)
+    if not isinstance(resolve_payload, dict) or resolve_payload.get("status") != "success":
+        err = (
+            resolve_payload.get("error")
+            if isinstance(resolve_payload, dict)
+            else f"non-dict response: {_truncate(resolve_payload, 200)}"
+        )
+        return _provision_error(
+            environment, test_name, smoke_status,
+            phase="resolve-project",
+            message=str(err),
+        )
+
+    final_workspace_id = resolve_payload.get("workspace_id")
+    final_project_id = resolve_payload.get("project_id")
+    if not final_project_id:
+        return _provision_error(
+            environment, test_name, smoke_status,
+            phase="resolve-project",
+            message="resolve_project returned success but no project_id",
+        )
+
+    jmx_basename = Path(jmx_path).name
+    try:
+        create_result = await client.call_tool(
+            "blazemeter_create_test",
+            {
+                "project_id": str(final_project_id),
+                "name": test_name,
+                "jmx_filename": jmx_basename,
+            },
+        )
+    except Exception as e:
+        return _provision_error(
+            environment, test_name, smoke_status,
+            phase="create-test",
+            message=f"{type(e).__name__}: {_truncate(e, 200)}",
+        )
+    create_payload = _extract_text_or_data(create_result)
+    if not isinstance(create_payload, dict) or create_payload.get("status") != "success":
+        err = (
+            create_payload.get("error")
+            if isinstance(create_payload, dict)
+            else f"non-dict response: {_truncate(create_payload, 200)}"
+        )
+        return _provision_error(
+            environment, test_name, smoke_status,
+            phase="create-test",
+            message=str(err),
+        )
+
+    test_id = create_payload.get("test_id")
+    if not test_id:
+        return _provision_error(
+            environment, test_name, smoke_status,
+            phase="create-test",
+            message="create_test returned success but no test_id",
+        )
+
+    upload_paths = [jmx_path] + list(data_files)
+    try:
+        upload_result = await client.call_tool(
+            "blazemeter_upload_test_files",
+            {"test_id": str(test_id), "paths": upload_paths},
+        )
+    except Exception as e:
+        return {
+            "ok": False,
+            "vendor": "blazemeter",
+            "environment": environment,
+            "test_name": test_name,
+            "test_id": str(test_id),
+            "workspace_id": final_workspace_id,
+            "project_id": final_project_id,
+            "smoke_status": smoke_status,
+            "warning": smoke_warning,
+            "error": {
+                "type": type(e).__name__,
+                "message": _truncate(e, 200),
+                "phase": "upload-files",
+            },
+        }
+    upload_payload = _extract_text_or_data(upload_result)
+
+    uploaded_files: list[dict] = []
+    upload_status = "error"
+    if isinstance(upload_payload, dict):
+        upload_status = upload_payload.get("status") or "error"
+        for row in (upload_payload.get("results") or []):
+            if row.get("status") == "success":
+                uploaded_files.append({
+                    "file": row.get("file"),
+                    "size_bytes": row.get("size_bytes"),
+                    "size_mb": row.get("size_mb"),
+                })
+
+    final_warning = smoke_warning
+    if upload_status == "partial" and final_warning is None:
+        final_warning = "upload_partial"
+    elif upload_status == "error":
+        return {
+            "ok": False,
+            "vendor": "blazemeter",
+            "environment": environment,
+            "test_name": test_name,
+            "test_id": str(test_id),
+            "workspace_id": final_workspace_id,
+            "project_id": final_project_id,
+            "smoke_status": smoke_status,
+            "warning": smoke_warning,
+            "error": {
+                "type": "UploadFailed",
+                "message": _truncate(upload_payload, 240),
+                "phase": "upload-files",
+            },
+        }
+
+    return {
+        "ok": True,
+        "vendor": "blazemeter",
+        "environment": environment,
+        "test_id": str(test_id),
+        "test_name": test_name,
+        "workspace_id": final_workspace_id,
+        "project_id": final_project_id,
+        "uploaded_files": uploaded_files,
+        "smoke_status": smoke_status,
+        "warning": final_warning,
+        "provision_status": upload_status,
+        "raw_upload": _truncate(upload_payload, 500),
+    }
+
+
+def _provision_error(
+    environment: Optional[str],
+    test_name: Optional[str],
+    smoke_status: Optional[str],
+    *,
+    phase: str,
+    message: str,
+) -> dict:
+    """Canonical error dict for provision_performance_test."""
+    return {
+        "ok": False,
+        "vendor": "blazemeter",
+        "environment": environment,
+        "test_name": test_name,
+        "smoke_status": smoke_status,
+        "warning": "smoke_failed" if (smoke_status and smoke_status != "PASS") else None,
+        "error": {
+            "type": "InvalidInput" if phase == "invalid-input" else "ProvisionError",
+            "message": message,
+            "phase": phase,
+        },
+    }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, CheckCircle2, XCircle, BookOpen, ListChecks, FlaskConical } from "lucide-react";
+import { Activity, CheckCircle2, XCircle, BookOpen, ListChecks, FlaskConical, Github } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { fetchHealth } from "@/lib/api";
 
@@ -13,9 +13,20 @@ interface HeaderProps {
   onToggleCatalog?: () => void;
   showTasks?: boolean;
   onToggleTasks?: () => void;
+  showGitHubCreds?: boolean;
+  onToggleGitHubCreds?: () => void;
+  gitHubCredsAttached?: boolean;
 }
 
-export function Header({ showCatalog, onToggleCatalog, showTasks, onToggleTasks }: HeaderProps) {
+export function Header({
+  showCatalog,
+  onToggleCatalog,
+  showTasks,
+  onToggleTasks,
+  showGitHubCreds,
+  onToggleGitHubCreds,
+  gitHubCredsAttached,
+}: HeaderProps) {
   const [status, setStatus] = useState<HealthStatus>("loading");
 
   useEffect(() => {
@@ -79,6 +90,32 @@ export function Header({ showCatalog, onToggleCatalog, showTasks, onToggleTasks 
           >
             <ListChecks className="h-3.5 w-3.5" />
             Tasks
+          </button>
+        )}
+        {onToggleGitHubCreds && (
+          <button
+            onClick={onToggleGitHubCreds}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              showGitHubCreds
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+            title={
+              gitHubCredsAttached
+                ? "GitHub credentials attached — click to review or clear"
+                : "Attach a GitHub repo for script pushes (session only)"
+            }
+          >
+            <Github className="h-3.5 w-3.5" />
+            GitHub
+            {gitHubCredsAttached && (
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  showGitHubCreds ? "bg-primary-foreground" : "bg-emerald-500"
+                }`}
+                aria-hidden
+              />
+            )}
           </button>
         )}
         <HealthIndicator status={status} />

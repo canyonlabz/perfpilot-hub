@@ -214,6 +214,8 @@ __marimo__/
 .vscode/
 # ignore the .idea directory
 .idea/
+# ignore any node_modules directories
+node_modules/
 # ignore the .node_modules directory
 .node_modules/
 # ignore the .DS_Store file

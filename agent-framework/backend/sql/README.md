@@ -1,6 +1,6 @@
 # `perfagent_state` SQL
 
-DDL for the PerfPilot Agents runtime-state database. Six JSONB-only tables on
+DDL for the PerfPilot Agents runtime-state database. Eight JSONB-only tables on
 the same PostgreSQL instance as `perfmemory`. No pgvector, no Apache AGE.
 
 ## File order
@@ -8,14 +8,18 @@ the same PostgreSQL instance as `perfmemory`. No pgvector, no Apache AGE.
 | # | File | Context | Purpose |
 |---|---|---|---|
 | 001 | [`001_create_perfagent_state.sql`](./001_create_perfagent_state.sql) | `postgres` DB | `CREATE DATABASE perfagent_state` |
-| 002 | [`002_create_agent_sessions.sql`](./002_create_agent_sessions.sql) | `perfagent_state` | UI / IDE / A2A sessions (V2 doc Section 4.3) |
+| 002 | [`002_create_agent_sessions.sql`](./002_create_agent_sessions.sql) | `perfagent_state` | UI / IDE / A2A sessions |
 | 003 | [`003_create_agent_tasks.sql`](./003_create_agent_tasks.sql) | `perfagent_state` | A2A task lifecycle (FK -> agent_sessions) |
+| 003b | [`003b_add_thread_id_to_agent_tasks.sql`](./003b_add_thread_id_to_agent_tasks.sql) | `perfagent_state` | Add thread_id column to agent_tasks |
 | 004 | [`004_create_agent_checkpoints.sql`](./004_create_agent_checkpoints.sql) | `perfagent_state` | Resumable agent state snapshots |
 | 005 | [`005_create_conversation_messages.sql`](./005_create_conversation_messages.sql) | `perfagent_state` | Append-only chat transcript |
 | 006 | [`006_create_tool_call_traces.sql`](./006_create_tool_call_traces.sql) | `perfagent_state` | MCP tool-call audit (FK -> agent_tasks) |
 | 007 | [`007_create_hitl_approvals.sql`](./007_create_hitl_approvals.sql) | `perfagent_state` | HITL prompt log (FK -> agent_tasks) |
+| 008 | [`008_create_agent_threads.sql`](./008_create_agent_threads.sql) | `perfagent_state` | Persistent conversation threads |
+| 009 | [`009_create_token_ledger.sql`](./009_create_token_ledger.sql) | `perfagent_state` | LLM token usage tracking |
+| 010 | [`010_add_parent_task_id.sql`](./010_add_parent_task_id.sql) | `perfagent_state` | Add parent_task_id for task hierarchies |
 
-Files 002 - 007 use `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
+Files 002 - 010 use `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
 so re-running them is safe. File 001 is gated by an existence check in
 [`provision.py`](./provision.py) because PostgreSQL does not support
 `CREATE DATABASE IF NOT EXISTS`.

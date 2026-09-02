@@ -1,6 +1,6 @@
 # Datadog MCP Server
 
-Welcome to the Datadog MCP Server! 🎉 This is a Python-based MCP server built with **FastMCP** to seamlessly integrate with Datadog's monitoring APIs for performance testing correlation and infrastructure metrics collection.
+Welcome to the Datadog MCP Server! 🎉 This is a Python-based MCP server built with **FastMCP 3.4.x** to seamlessly integrate with Datadog's monitoring APIs for performance testing correlation and infrastructure metrics collection.
 
 ***
 
@@ -21,7 +21,7 @@ Welcome to the Datadog MCP Server! 🎉 This is a Python-based MCP server built 
 
 ## 🏁 Prerequisites
 
-- Python 3.12.4 or higher installed
+- Python 3.12+ installed
 - Datadog API Key and Application Key (set in `.env`)
 - Configured `environments.json` file defining your infrastructure
 
@@ -32,8 +32,8 @@ Welcome to the Datadog MCP Server! 🎉 This is a Python-based MCP server built 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd datadog-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/datadog-mcp
 ```
 
 
@@ -387,4 +387,4 @@ Feel free to open issues or submit pull requests!
 
 ***
 
-Created with ❤️ using FastMCP and Datadog APIs
+Created with ❤️ using FastMCP 3.4.x and Datadog APIs

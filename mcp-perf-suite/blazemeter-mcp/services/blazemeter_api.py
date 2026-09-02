@@ -1322,3 +1322,354 @@ async def upload_to_shared_folder(
         await ctx.error(f"{len(failed)} file(s) failed to upload.")
 
     return summary
+
+
+# ===============================================
+# Test-scoped Provisioning (create test + upload files to that test)
+# ===============================================
+#
+# These functions target the two-call flow documented at
+# https://help.blazemeter.com/apidocs/performance/tests_create_a_test.htm
+# and https://help.blazemeter.com/apidocs/performance/tests_upload_or_update_asset_files.htm
+#
+#   1. POST /api/v4/tests   -> create a Taurus/JMeter script-mode test.
+#   2. POST /api/v4/tests/{testId}/files  -> attach the JMX and any data
+#      files (one multipart upload per file, single `file` field).
+#
+# The shared-folder tools above are left in place because they target a
+# different concept (workspace-level asset folders shared across tests).
+
+
+async def resolve_project_target(
+    workspace_id: str | None = None,
+    project_id: str | None = None,
+    workspace_name: str | None = None,
+    project_name: str | None = None,
+) -> dict:
+    """Resolve a workspace + project pair from any combination of id/name.
+
+    Precedence:
+
+    - When ``project_id`` is provided it is trusted verbatim and returned
+      without extra API calls (workspace_id echoed if given, else pulled
+      from the env fallback).
+    - Otherwise ``project_name`` + a workspace scope are required. The
+      workspace scope is resolved in this order: ``workspace_id`` arg ->
+      ``BLAZEMETER_WORKSPACE_ID`` env var -> ``workspace_name`` lookup
+      via ``GET /api/v4/workspaces``. If none of those yield a scope,
+      the resolver returns an error dict.
+    - Project name is then matched against
+      ``GET /api/v4/projects?workspaceId=<id>&name=<name>``. Zero or
+      many matches -> error dict; exactly one match -> success.
+
+    Returns:
+        dict with keys:
+          - ``status``: "success" | "error"
+          - ``workspace_id`` and ``project_id`` on success
+          - ``project_name`` echoed on success (from the API response)
+          - ``error`` on failure (human-readable)
+    """
+    if project_id and isinstance(project_id, str) and project_id.strip():
+        return {
+            "status": "success",
+            "workspace_id": (workspace_id or BLAZEMETER_WORKSPACE_ID or "").strip() or None,
+            "project_id": project_id.strip(),
+            "project_name": project_name,
+            "source": "explicit_project_id",
+        }
+
+    resolved_workspace_id = (workspace_id or "").strip() or BLAZEMETER_WORKSPACE_ID
+    verify_ssl = get_ssl_verify_setting()
+
+    if not resolved_workspace_id and workspace_name:
+        async with httpx.AsyncClient(
+            verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS,
+        ) as client:
+            url = (
+                f"{BLAZEMETER_API_BASE}/workspaces"
+                f"?accountId={BLAZEMETER_ACCOUNT_ID}"
+            )
+            resp = await client.get(url, headers=get_headers())
+            resp.raise_for_status()
+            workspaces = resp.json().get("result", [])
+        matches = [
+            w for w in workspaces
+            if str(w.get("name", "")).strip().lower() == workspace_name.strip().lower()
+        ]
+        if len(matches) == 1:
+            resolved_workspace_id = str(matches[0].get("id"))
+        elif len(matches) == 0:
+            return {
+                "status": "error",
+                "error": f"No BlazeMeter workspace named '{workspace_name}'.",
+            }
+        else:
+            return {
+                "status": "error",
+                "error": (
+                    f"Multiple BlazeMeter workspaces named '{workspace_name}' "
+                    f"({len(matches)}); pass workspace_id explicitly."
+                ),
+            }
+
+    if not resolved_workspace_id:
+        return {
+            "status": "error",
+            "error": (
+                "Unable to resolve workspace_id: pass workspace_id, "
+                "workspace_name, or set BLAZEMETER_WORKSPACE_ID."
+            ),
+        }
+
+    if not project_name or not str(project_name).strip():
+        return {
+            "status": "error",
+            "error": "project_name is required when project_id is not provided.",
+        }
+
+    project_name_str = str(project_name).strip()
+    pagination_limit = bz_config.get("pagination_limit", 100)
+
+    async with httpx.AsyncClient(
+        verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS,
+    ) as client:
+        url = (
+            f"{BLAZEMETER_API_BASE}/projects"
+            f"?workspaceId={resolved_workspace_id}"
+            f"&name={project_name_str}"
+            f"&limit={pagination_limit}"
+        )
+        resp = await client.get(url, headers=get_headers())
+        resp.raise_for_status()
+        projects = resp.json().get("result", [])
+
+    matches = [
+        p for p in projects
+        if str(p.get("name", "")).strip().lower() == project_name_str.lower()
+    ]
+    if len(matches) == 1:
+        p = matches[0]
+        return {
+            "status": "success",
+            "workspace_id": str(resolved_workspace_id),
+            "project_id": str(p.get("id")),
+            "project_name": p.get("name"),
+            "source": "name_lookup",
+        }
+    if not matches:
+        return {
+            "status": "error",
+            "error": (
+                f"No BlazeMeter project named '{project_name_str}' in "
+                f"workspace {resolved_workspace_id}."
+            ),
+        }
+    return {
+        "status": "error",
+        "error": (
+            f"Multiple BlazeMeter projects named '{project_name_str}' in "
+            f"workspace {resolved_workspace_id} ({len(matches)}); pass "
+            "project_id explicitly."
+        ),
+    }
+
+
+async def create_test(
+    project_id: str,
+    name: str,
+    jmx_filename: str,
+) -> dict:
+    """Create a new Taurus / JMeter script-mode BlazeMeter test.
+
+    Uses ``POST /api/v4/tests`` with the minimum required body for a
+    JMeter script test:
+
+    ::
+
+        {
+          "projectId": <int>,
+          "name": <str>,
+          "configuration": {
+            "type": "taurus",
+            "filename": "<jmx-filename>",
+            "testMode": "script",
+            "scriptType": "jmeter"
+          }
+        }
+
+    Args:
+        project_id: Numeric BlazeMeter project id (as a string).
+        name: Test name to display in the BlazeMeter UI.
+        jmx_filename: The JMX file name that will be uploaded via
+            ``upload_test_files`` in the next step. Must match the
+            basename of the JMX being pushed.
+
+    Returns:
+        dict with keys:
+          - ``status``: "success" | "error"
+          - ``test_id`` on success
+          - ``test_name`` echoed on success
+          - ``project_id`` echoed on success
+          - ``configuration`` echoed on success (as returned by the API)
+          - ``error`` on failure
+    """
+    if not project_id or not str(project_id).strip():
+        return {"status": "error", "error": "project_id is required."}
+    if not name or not str(name).strip():
+        return {"status": "error", "error": "name is required."}
+    if not jmx_filename or not str(jmx_filename).strip():
+        return {"status": "error", "error": "jmx_filename is required."}
+
+    project_id_int: Any
+    try:
+        project_id_int = int(str(project_id).strip())
+    except ValueError:
+        project_id_int = str(project_id).strip()
+
+    payload = {
+        "projectId": project_id_int,
+        "name": str(name).strip(),
+        "configuration": {
+            "type": "taurus",
+            "filename": os.path.basename(str(jmx_filename).strip()),
+            "testMode": "script",
+            "scriptType": "jmeter",
+        },
+    }
+
+    verify_ssl = get_ssl_verify_setting()
+    try:
+        async with httpx.AsyncClient(
+            verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS,
+        ) as client:
+            resp = await client.post(
+                f"{BLAZEMETER_API_BASE}/tests",
+                headers=get_headers({"Content-Type": "application/json"}),
+                json=payload,
+            )
+            resp.raise_for_status()
+            result = resp.json().get("result", {})
+    except httpx.HTTPStatusError as he:
+        return {
+            "status": "error",
+            "error": (
+                f"BlazeMeter create_test failed (HTTP "
+                f"{he.response.status_code}): {he.response.text[:500]}"
+            ),
+        }
+    except Exception as e:
+        return {"status": "error", "error": f"BlazeMeter create_test failed: {e}"}
+
+    return {
+        "status": "success",
+        "test_id": str(result.get("id")),
+        "test_name": result.get("name"),
+        "project_id": str(result.get("projectId")) if result.get("projectId") is not None else None,
+        "configuration": result.get("configuration"),
+    }
+
+
+async def upload_test_files(
+    test_id: str,
+    paths: List[str],
+    ctx: Context = None,
+) -> dict:
+    """Attach one or more local files to an existing BlazeMeter test.
+
+    Uses ``POST /api/v4/tests/{testId}/files`` (one multipart request per
+    file, single ``file`` field). The order of ``paths`` is preserved so
+    callers can push the JMX first and data files after.
+
+    Args:
+        test_id: BlazeMeter test id returned by ``create_test``.
+        paths: List of local file paths. Each must exist.
+        ctx: Optional FastMCP context for per-file progress logging.
+
+    Returns:
+        dict with keys:
+          - ``status``: "success" | "partial" | "error"
+          - ``test_id`` echoed
+          - ``total_files``, ``uploaded``, ``failed``
+          - ``results``: list of per-file dicts with ``status``, ``file``,
+            ``size_bytes``, ``size_mb``, and ``error`` on failure.
+    """
+    if not test_id or not str(test_id).strip():
+        return {"status": "error", "error": "test_id is required."}
+    if not isinstance(paths, list) or not paths:
+        return {"status": "error", "error": "paths must be a non-empty list."}
+
+    resolved_paths: list[str] = []
+    for p in paths:
+        if not p or not isinstance(p, str):
+            return {"status": "error", "error": f"Invalid path entry: {p!r}"}
+        if not os.path.isfile(p):
+            return {"status": "error", "error": f"File not found: {p}"}
+        resolved_paths.append(p)
+
+    verify_ssl = get_ssl_verify_setting()
+    upload_url = f"{BLAZEMETER_API_BASE}/tests/{test_id}/files"
+    results: list[dict] = []
+
+    for file_path in resolved_paths:
+        file_name = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
+        try:
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
+            async with httpx.AsyncClient(
+                verify=verify_ssl, timeout=httpx.Timeout(600.0),
+            ) as client:
+                files = {"file": (file_name, file_bytes, "application/octet-stream")}
+                resp = await client.post(
+                    upload_url,
+                    headers=get_headers(),
+                    files=files,
+                )
+                resp.raise_for_status()
+            results.append({
+                "status": "success",
+                "file": file_name,
+                "size_bytes": file_size,
+                "size_mb": round(file_size / (1024 * 1024), 2),
+            })
+            if ctx:
+                await ctx.info(f"Uploaded {file_name} to test {test_id}")
+        except httpx.HTTPStatusError as he:
+            results.append({
+                "status": "failed",
+                "file": file_name,
+                "error": (
+                    f"HTTP {he.response.status_code}: "
+                    f"{he.response.text[:300]}"
+                ),
+            })
+            if ctx:
+                await ctx.error(
+                    f"Upload failed for {file_name}: HTTP {he.response.status_code}"
+                )
+        except Exception as e:
+            results.append({
+                "status": "failed",
+                "file": file_name,
+                "error": str(e),
+            })
+            if ctx:
+                await ctx.error(f"Upload failed for {file_name}: {e}")
+
+    succeeded = [r for r in results if r["status"] == "success"]
+    failed = [r for r in results if r["status"] == "failed"]
+    if not failed:
+        overall = "success"
+    elif succeeded:
+        overall = "partial"
+    else:
+        overall = "error"
+
+    return {
+        "status": overall,
+        "test_id": str(test_id),
+        "total_files": len(resolved_paths),
+        "uploaded": len(succeeded),
+        "failed": len(failed),
+        "results": results,
+    }

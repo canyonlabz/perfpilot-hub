@@ -1,6 +1,6 @@
 # 📚 Documentation Overview
 
-Welcome to the **Documentation Hub** for the **MCP Performance Testing Suite**!
+Welcome to the **Documentation Hub** for **PerfPilot-Hub**!
 This folder contains all reference materials, specifications, templates, and technical guides used across the suite of MCP servers.
 
 The goal of this directory is to help end-users, contributors, and performance engineers quickly understand:
@@ -144,7 +144,7 @@ blazemeter-mcp
 
 ➡️ *Useful for developers integrating MCP servers into automated pipelines or toolchains.*
 
-> **On the horizon:** The suite currently runs on **FastMCP 2.0**, where each MCP server is registered and started independently. A migration to **FastMCP 3.0** is planned, which introduces support for a **unified MCP gateway** -- a single entry point that exposes all servers and their tools under one roof. Stay tuned.
+> **Current state:** The suite runs on **FastMCP 3.4.x**. Each MCP server can run standalone or be accessed through the **PerfPilot Hub** (Gateway MCP) — a unified MCP gateway that exposes all servers and their tools under one endpoint. See [gateway-mcp/README.md](../mcp-perf-suite/gateway-mcp/README.md) for details.
 
 ---
 
@@ -180,7 +180,26 @@ A technical reference explaining how the PerfAnalysis MCP handles large JTL/CSV 
 
 ---
 
-### 🧩 **10. Architecture & Flow Docs (Future Expansion)**
+### 🔗 **10. A2A New-JMX Pipeline Guide (`agent-framework/a2a_new_jmx_pipeline_guide.md`)**
+
+A reference for upstream AI agent frameworks and the PerfPilot Web UI that
+need to drive the *new-JMX* pipeline (generate → push to Git → local
+smoke → provision BlazeMeter test), including:
+
+* Which surfaces the pipeline supports (A2A, Web UI, Cursor/MCP)
+* Full A2A metadata schema (`environment`, `scm`, `blazemeter`,
+  `test_run_id`)
+* A minimal example A2A payload that a `curl` or Python client can send
+* User-attributed vs user-agnostic GitHub token flow (per-request vs
+  server env var)
+* Which HITL gates apply to the pipeline and where they fire
+
+➡️ *Use this if you are integrating an upstream framework (or a
+custom UI) with the PerfPilot orchestrator's script-creation pipeline.*
+
+---
+
+### 🧩 **11. Architecture & Flow Docs (Future Expansion)**
 
 Potential documents coming later:
 
@@ -207,13 +226,19 @@ docs/
 ├── large_file_handling.md            ← Large JTL file handling & limitations
 ├── perfanalysis_techniques_guide.md ← Analytical techniques & algorithms reference
 │
+├── agent-framework/
+│   └── a2a_new_jmx_pipeline_guide.md ← A2A + Web UI new-JMX pipeline metadata reference
+│
 ├── config_reference.md        ← (Planned)
 ├── mcp_tools_index.md         ← (Planned)
 │
 ├── changelogs/
 │   ├── CHANGELOG-2026-01.md   ← January 2026 changes
 │   ├── CHANGELOG-2026-02.md   ← February 2026 changes
-│   └── CHANGELOG-2026-03.md   ← March 2026 changes
+│   ├── CHANGELOG-2026-03.md   ← March 2026 changes
+│   ├── CHANGELOG-2026-04.md   ← April 2026 changes
+│   ├── CHANGELOG-2026-05.md   ← May 2026 changes
+│   └── CHANGELOG-2026-06.md   ← June 2026 changes
 │
 ├── architecture_overview.md   ← (Future)
 └── examples/                  ← Example templates, configs, outputs

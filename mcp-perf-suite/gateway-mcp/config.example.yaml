@@ -18,6 +18,7 @@ servers:
   perfreport: true
   confluence: true
   perfmemory: true
+  github: true
   # Local-only servers
   msteams: true
   sharepoint: true

@@ -440,12 +440,17 @@ milestone
 - **Folder conventions, four-file agent pattern, per-agent config
   schema, async + lazy-import rules:** [AGENTS.md](./AGENTS.md)
 - **PerfPilot Hub (the MCP gateway PerfPilot Agents calls into):**
-  [../gateway-mcp/README.md](../gateway-mcp/README.md)
-- **The MCP servers behind the gateway:** [JMeter](../jmeter-mcp/),
-  [BlazeMeter](../blazemeter-mcp/), [Datadog](../datadog-mcp/),
-  [PerfAnalysis](../perfanalysis-mcp/), [PerfReport](../perfreport-mcp/),
-  [Confluence](../confluence-mcp/), [PerfMemory](../perfmemory-mcp/)
-- **Post-test results hub (Streamlit UI):** [../streamlit-ui/](../streamlit-ui/)
+  [gateway-mcp/README.md](../mcp-perf-suite/gateway-mcp/README.md)
+- **The MCP servers behind the gateway:** [JMeter](../mcp-perf-suite/jmeter-mcp/),
+  [BlazeMeter](../mcp-perf-suite/blazemeter-mcp/), [Datadog](../mcp-perf-suite/datadog-mcp/),
+  [PerfAnalysis](../mcp-perf-suite/perfanalysis-mcp/), [PerfReport](../mcp-perf-suite/perfreport-mcp/),
+  [Confluence](../mcp-perf-suite/confluence-mcp/), [PerfMemory](../mcp-perf-suite/perfmemory-mcp/),
+  [GitHub](../mcp-perf-suite/github-mcp/)
+- **A2A + Web UI new-JMX pipeline metadata reference:**
+  [docs/agent-framework/a2a_new_jmx_pipeline_guide.md](../docs/agent-framework/a2a_new_jmx_pipeline_guide.md)
+- **Environment name → BlazeMeter workspace/project + host + cert profile mapping:**
+  [backend/config/environments.example.yaml](./backend/config/environments.example.yaml)
+- **Post-test results hub (Streamlit UI):** [streamlit-ui/](../mcp-perf-suite/streamlit-ui/)
 - **AG2 (the multi-agent framework PerfPilot is built on):**
   [docs.ag2.ai](https://docs.ag2.ai/)
 - **A2A protocol spec:** [google.github.io/A2A](https://google.github.io/A2A/)

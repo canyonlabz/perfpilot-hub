@@ -1,0 +1,98 @@
+# Agent Framework - Environment Mappings
+# ---------------------------------------
+# Copy this file to `environments.yaml` and tune for your deployment.
+# `environments.yaml` is gitignored; the framework falls back to this
+# `.example` file when the real file is absent (same pattern as
+# `agents.example.yaml`).
+#
+# Purpose:
+#   Map an environment NAME received in A2A / Web UI metadata (QA, UAT,
+#   PERF, etc.) to the concrete targets a performance run needs:
+#     - Application hostname / base URL under test.
+#     - Certificate / test-user profile (for mutual TLS or authenticated
+#       flows).
+#     - BlazeMeter workspace + project for provisioning tests.
+#
+#   Sections:
+#     1. environments - one entry per named environment.
+#     2. cert_profiles - reusable auth profiles referenced by name from
+#        each environment entry (kept separate so the same profile can be
+#        shared across environments).
+#
+# The metadata field in each environment is freeform and intended for
+# human context (surfaced in logs / summaries). It has no schema.
+
+schema_version: "1.0"
+
+# =============================================================================
+# Environments
+# =============================================================================
+# Each key is the environment name that appears in A2A metadata as
+# `environment: "QA"` (case-sensitive; align with the string your upstream
+# framework sends).
+#
+# `blazemeter.workspace_id` / `project_id` are preferred (numeric BlazeMeter
+# IDs). If unknown, use `workspace_name` / `project_name` and the resolver
+# will look them up at run time. If both id and name are provided, id wins.
+#
+# A2A callers MAY override the resolved BlazeMeter target by sending
+# `blazemeter.workspaceId` / `projectId` in the metadata block; overrides
+# always win over the file.
+environments:
+
+  QA:
+    hostname: https://qa.example.com
+    cert_profile: qa-user
+    blazemeter:
+      workspace_id: "00000"
+      project_id: "00000"
+    tags: ["qa"]
+    metadata:
+      description: QA environment for functional + smoke performance runs
+
+  UAT:
+    hostname: https://uat.example.com
+    cert_profile: uat-user
+    blazemeter:
+      workspace_id: "00000"
+      project_id: "00000"
+    tags: ["uat"]
+    metadata:
+      description: UAT environment for pre-release performance runs
+
+  PERF:
+    hostname: https://perf.example.com
+    cert_profile: perf-user
+    blazemeter:
+      # Example of name-based lookup instead of numeric ids.
+      workspace_name: "Performance"
+      project_name: "Checkout"
+    tags: ["perf", "load"]
+    metadata:
+      description: Dedicated performance environment (load / stress)
+
+# =============================================================================
+# Certificate / test-user profiles
+# =============================================================================
+# Each key is referenced from `environments.<name>.cert_profile` above.
+# `jks_path` / `p12_path` are local file paths on the machine running the
+# performance test (or the container that mounts them). Do NOT commit real
+# .jks / .p12 files - reference paths only. The framework never reads the
+# credential material itself; downstream tools (JMeter, browser automation)
+# consume the paths.
+cert_profiles:
+
+  qa-user:
+    jks_path: /local/path/to/qa.jks
+    test_user_email: qa.tester@example.com
+    p12_path: /local/path/to/qa.p12
+
+  uat-user:
+    jks_path: /local/path/to/uat.jks
+    test_user_email: uat.tester@example.com
+    p12_path: /local/path/to/uat.p12
+
+  perf-user:
+    jks_path: /local/path/to/perf.jks
+    test_user_email: perf.tester@example.com
+    p12_path: /local/path/to/perf.p12

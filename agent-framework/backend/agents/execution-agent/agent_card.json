@@ -38,9 +38,9 @@
       "description": "Launches a pre-existing performance test against the configured load-testing vendor (BlazeMeter today). Wraps the underlying `blazemeter_start_test` MCP tool 1:1 and returns the dynamic vendor-side run identifier the rest of the pipeline correlates against. NOT idempotent: each call provisions fresh load generators and consumes the vendor's quota, so the agent makes a single attempt and surfaces transport / 4xx / 5xx errors verbatim — the caller decides whether to retry. Caller must have already created the test definition in the vendor UI / API; uploading a JMX is out of scope for F3.8 (gated on the future JMeter upload MCP tool). The agent-tool name is vendor-agnostic on purpose: a future feature can swap the MCP wiring to Gatling / Locust / k6 without breaking this skill's contract.",
       "tags": ["execution", "start", "blazemeter", "non-idempotent"],
       "examples": [
-        "Start the BlazeMeter test 14491287.",
+        "Start the BlazeMeter test 12345678.",
         "Kick off a fresh performance run for the kobrakai smoke test.",
-        "Launch the load test against test_id=14491287 and give me the run_id."
+        "Launch the load test against test_id=12345678 and give me the run_id."
       ],
       "inputModes": ["text/plain", "application/json"],
       "outputModes": ["text/plain", "application/json"]

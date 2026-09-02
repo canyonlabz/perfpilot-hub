@@ -1,7 +1,7 @@
 # 🚦 PerfReport MCP Server
 
 Welcome to the **PerfReport MCP Server**!
-This Python-based MCP server is built using FastMCP to generate easy-to-share, stakeholder-ready performance reports from your BlazeMeter and APM (e.g. Datadog, Dynatrace, AppDynamics, etc) analysis workflows.
+This Python-based MCP server is built using FastMCP 3.4.x to generate easy-to-share, stakeholder-ready performance reports from your BlazeMeter and Datadog analysis workflows.
 
 ---
 
@@ -21,8 +21,8 @@ This Python-based MCP server is built using FastMCP to generate easy-to-share, s
 
 ## ⚡ Prerequisites
 
-- Python 3.12.4 or higher
-- Access to BlazeMeter and APM MCP artifacts
+- Python 3.12+
+- Access to BlazeMeter and Datadog MCP artifacts
 - Setup your `config.yaml` and `chart_colors.yaml` file
 
 ---
@@ -32,8 +32,8 @@ This Python-based MCP server is built using FastMCP to generate easy-to-share, s
 ### 1. Clone the repository
 
 ```
-git clone https://github.com/canyonlabz/mcp-perf-suite.git
-cd perfreport-mcp
+git clone https://github.com/canyonlabz/perfpilot-hub.git
+cd perfpilot-hub/mcp-perf-suite/perfreport-mcp
 ```
 
 ### 2. Create/activate virtual environment
@@ -265,4 +265,13 @@ for full-stack, end-to-end performance test reporting.
 ## 🙌 Contributing
 
 💡 Suggestions, issues, and PRs are always welcome!
-Built with FastMCP, Matplotlib, and love.
+
+---
+
+## 📜 License
+
+This project is part of the PerfPilot-Hub suite. See the repository root for license information.
+
+---
+
+Built with ❤️ using FastMCP 3.4.x and Matplotlib.
