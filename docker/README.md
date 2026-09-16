@@ -1,340 +1,499 @@
-# 🛩️ PerfPilot Hub — Docker Deployment
+# 📦 PerfPilot Hub — Docker deployment guide
 
-Run the complete PerfPilot Hub MCP gateway as a single Docker container, exposing all
-7 performance testing MCP servers over HTTP transport.
+This folder contains everything needed to run PerfPilot Hub in containers on
+your local machine. Each MCP server ships as its own independent Docker image,
+each sub-folder ships its own `Dockerfile` + `docker-compose.yml` + `.env.example`,
+and two top-level compose files (`docker-compose-full-{mac,windows}.yaml`) bring
+the whole stack up together.
 
-## 📦 What's Included
-
-The Docker image bundles:
-
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| Python | 3.12 | MCP server runtime |
-| FastMCP | v3.4.1 | MCP framework (subprocess proxy mode) |
-| JMeter | 5.6.3 | Performance test execution |
-| OpenJDK | 21 | JMeter runtime |
-| JMeter Plugins | 7 plugins | Custom Thread Groups, Parallel Controller, HTTP/2, WebSocket, etc. |
-
-### MCP Servers (7 Docker-eligible)
-
-| Server | Tools |
-|--------|-------|
-| ⚡ BlazeMeter MCP | Test run management, artifact downloads |
-| 📈 Datadog MCP | Metrics, logs, APM traces |
-| 🧪 JMeter MCP | Script generation, correlation, smoke testing |
-| 🔍 PerfAnalysis MCP | Bottleneck analysis, SLA validation |
-| 📊 PerfReport MCP | Report generation, charts |
-| 📚 Confluence MCP | Page publishing |
-| 🧠 PerfMemory MCP | Lessons-learned RAG (requires PostgreSQL) |
-
-> **Not included:** MS Teams MCP and SharePoint MCP are excluded — they require Microsoft
-> Graph API OAuth flows that are incompatible with headless container operation for this version.
+> 📌 **Looking for the pre-refactor monolithic Docker setup?**
+>
+> The Phase 1 refactor (per-MCP images, baked-in configs, `DEPLOYMENT_MODE`
+> toggle) replaces the earlier monolithic gateway container. If you prefer the
+> older single-image layout — or you need a stable checkpoint to compare
+> against — use the **[v1.1.0 release](https://github.com/canyonlabz/perfpilot-hub/releases/tag/v1.1.0)**
+> (FastMCP 3.4.x, last stable before the Docker refactor):
+>
+> ```bash
+> git clone --branch v1.1.0 https://github.com/canyonlabz/perfpilot-hub.git
+> ```
+>
+> All releases live at
+> [github.com/canyonlabz/perfpilot-hub/releases](https://github.com/canyonlabz/perfpilot-hub/releases).
 
 ---
 
-## ✅ Prerequisites
+## 🚀 1. Overview
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS)
-  or [Rancher Desktop](https://rancherdesktop.io/)
-- Docker Compose v2+ (included with Docker Desktop)
-- API credentials for the services you plan to use (BlazeMeter, Datadog, etc.)
+PerfPilot Hub is a collection of Model Context Protocol (MCP) servers plus an
+AI-agent framework that automates performance-testing workflows (JMeter runs,
+BlazeMeter cloud tests, Datadog observability, PerfAnalysis, PerfReport,
+Confluence publishing, and a PostgreSQL-backed memory layer).
 
----
+**Design principles applied throughout `docker/`:**
 
-## 🚀 Quick Start
+- **Per-MCP images.** No monolithic image. Each MCP (`blazemeter`, `datadog`,
+  `jmeter`, `perfanalysis`, `perfreport`, `confluence`, `perfmemory`, `github`,
+  `playwright`) plus the gateway, agent backend, and UI has its own Dockerfile.
+- **Baked-in configs.** All YAML / JSON configs are `COPY`'d into each image at
+  build time. There are **zero** `./config/*:ro` bind mounts in any compose
+  file — configs never travel over a bind mount at runtime.
+- **`DEPLOYMENT_MODE` toggle.** A single env var flips human-readable console
+  logs (`local`) into OTel-shaped JSON to stdout (`cloud`). Same image, both
+  modes. No dual Dockerfiles.
+- **Independence Contract.** Each Dockerfile builds from its own sub-folder
+  plus the MCP source tree. Only three tightly-scoped cross-MCP config `COPY`s
+  are allowed, all documented in §13.
 
-### 1. ⚙️ Configure Environment Variables
-
-```bash
-# From the docker/ directory:
-cp .env.gateway.example .env.gateway
-```
-
-Edit `.env.gateway` and fill in your API credentials. At minimum you'll want:
-- BlazeMeter API key/secret (for test run data)
-- Datadog API/App keys (for infrastructure metrics)
-- OpenAI API key (for PerfMemory embeddings)
-
-### 2. 🧩 Configure MCP Server Settings
-
-Each MCP server has configuration files in `docker/config/<server>/`. Copy the
-example files and customize:
-
-```bash
-# Example: configure all servers (Linux/macOS)
-cd docker/config
-for dir in */; do
-  cd "$dir"
-  for f in *.example.*; do
-    cp "$f" "${f/.example/}"
-  done
-  cd ..
-done
-```
-
-```powershell
-# Example: configure all servers (Windows PowerShell)
-cd docker\config
-Get-ChildItem -Recurse -Filter "*.example.*" | ForEach-Object {
-    $newName = $_.Name -replace '\.example', ''
-    Copy-Item $_.FullName (Join-Path $_.DirectoryName $newName)
-}
-```
-
-The real config files (without `.example`) are gitignored — customize freely.
-
-### 3. 🐳 Build and Run
-
-**Gateway standalone** (no database):
-
-```bash
-# Windows
-docker compose -f docker-compose-gateway-windows.yaml up --build
-
-# macOS
-docker compose -f docker-compose-gateway-mac.yaml up --build
-```
-
-**Full stack** (gateway + PerfMemory PostgreSQL database):
-
-```bash
-# Windows
-docker compose -f docker-compose-full-windows.yaml up --build
-
-# macOS
-docker compose -f docker-compose-full-mac.yaml up --build
-```
-
-### 4. 🖱️ Connect Cursor/Claude
-
-Update your Cursor `mcp.json` to use the Docker gateway:
-
-```jsonc
-{
-  "perfpilot-hub": {
-    "url": "http://localhost:8000/mcp"
-  }
-}
-```
-
-This single entry replaces the individual stdio MCP server configurations.
-You get 7 of the 9 servers (MS Teams and SharePoint are excluded from Docker).
-
-### 5. 🩺 Verify
-
-```bash
-# Health check
-curl http://localhost:8000/health
-# Expected: {"status": "healthy", "server": "perfpilot-hub"}
-```
+Local development runs Docker Compose from this folder. Cloud deployment (Azure /
+Aspire) is a Phase 2 concern — same images, different orchestration.
 
 ---
 
-## 🧭 Compose File Reference
+## 📋 2. Prerequisites
 
-| File | Use Case |
-|------|----------|
-| 🪟 `docker-compose-gateway-windows.yaml` | Gateway only (Windows) — connect to external DB |
-| 🍎 `docker-compose-gateway-mac.yaml` | Gateway only (macOS) — connect to external DB |
-| 🪟 `docker-compose-full-windows.yaml` | Gateway + PostgreSQL (Windows) — self-contained |
-| 🍎 `docker-compose-full-mac.yaml` | Gateway + PostgreSQL (macOS) — self-contained |
-| 🐘 `docker-compose-windows.yaml` | PostgreSQL only (existing, for local PerfMemory dev) |
-| 🍎 `docker-compose-mac.yaml` | PostgreSQL only (existing, for local PerfMemory dev) |
+New to Docker? Here's the shortest path to a working stack.
 
-### 🪟 Windows vs 🍎 macOS Differences
+### 2.1 A Docker engine
 
-The gateway container itself is identical on both platforms. The macOS variants add
-`user: "999:999"` and explicit `PGDATA` to the PostgreSQL service to avoid file
-permission issues with Docker Desktop on macOS.
+Pick one — both are confirmed working with this repo:
+
+| Engine | Notes |
+|---|---|
+| [🐳 Docker Desktop](https://www.docker.com/products/docker-desktop/) | Original, most common. Free for personal / small-business use; check licensing for enterprise. |
+| [🐄 Rancher Desktop](https://rancherdesktop.io/) | Open-source alternative, no licensing fees. Uses `containerd` or `dockerd` under the hood. Same `docker` and `docker compose` commands. |
+
+Both must ship **Docker Engine 20.10+** and **Docker Compose v2** (the `docker
+compose` command, not the older `docker-compose` script).
+
+**Verify after install:**
+
+```bash
+docker --version              # → Docker version 24.x or newer
+docker compose version        # → Docker Compose version v2.x.x
+docker info                   # → succeeds without errors
+```
+
+### 2.2 System resources
+
+The full stack runs **14 containers**. Recommended minimums for a smooth
+experience:
+
+- **CPU**: 4 cores (2 minimum, but startup will be slow)
+- **RAM**: 8 GB assigned to the Docker VM (6 GB minimum). Set in Docker
+  Desktop → Settings → Resources, or Rancher Desktop → Preferences → Virtual Machine.
+- **Disk**: ~15 GB free after images build. The JMeter image alone is ~1.5 GB
+  (Java + JMeter + plugins).
+
+### 2.3 Operating system
+
+| OS | Status | Notes |
+|---|---|---|
+| 🪟 Windows 10/11 | ✅ Confirmed | Use `docker-compose-full-windows.yaml`. Docker Desktop with the WSL2 backend is the standard setup. |
+| 🍎 macOS 13+ (Intel or Apple Silicon) | ✅ Confirmed | Use `docker-compose-full-mac.yaml`. The Mac file sets `user: "999:999"` and `PGDATA` on the database to work around a Docker Desktop VirtioFS quirk (§9.2). |
+| 🐧 Linux | ⚠️ Untested | Should work with the Windows compose file, but has not been validated against this repo. |
+
+### 2.4 Git
+
+You'll need `git` to clone this repo. On Windows install [Git for Windows](https://git-scm.com/download/win);
+on macOS `xcode-select --install` or `brew install git`.
+
+### 2.5 What you should have ready before starting
+
+Not everything is required for every workflow, but if you plan to bring the
+full stack up you'll want most of these:
+
+- 🔑 **BlazeMeter** API key + secret + account ID + workspace ID
+- 🔑 **Datadog** API key + application key
+- 🔑 **Confluence** — either a Cloud API token or an on-prem PAT
+- 🔑 **OpenAI** or **Azure OpenAI** or **Ollama** access (used by both the agent
+  chat model and the PerfMemory embedding model)
+- 🔑 **GitHub** personal access token
+- 🔒 **PostgreSQL** password (you pick this — used for the local `perfmem-pgvector-age`
+  container)
+- 🏢 *(optional)* **Corporate CA bundle** (PEM) if your network runs an
+  HTTPS-intercepting proxy (Zscaler, Norton 360, BlueCoat, etc.). See §9.
+
+Every secret goes into `docker/.env` (copied from `docker/.env.example`).
+Nothing is baked into images.
 
 ---
 
-## 🗂️ Directory Structure
+## 🏷️ 3. Canonical naming convention
+
+Every container, image, and compose service uses one of the following
+canonical names. There is no legacy `perf-*` or `perfmemory-db` after Phase 1.
+
+| Component | Image / Container name | Sub-folder |
+|---|---|---|
+| MCP — BlazeMeter | `perfpilot-mcp-blazemeter` | `docker/blazemeter-mcp/` |
+| MCP — Datadog | `perfpilot-mcp-datadog` | `docker/datadog-mcp/` |
+| MCP — JMeter | `perfpilot-mcp-jmeter` | `docker/jmeter-mcp/` |
+| MCP — PerfAnalysis | `perfpilot-mcp-perfanalysis` | `docker/perfanalysis-mcp/` |
+| MCP — PerfReport | `perfpilot-mcp-perfreport` | `docker/perfreport-mcp/` |
+| MCP — Confluence | `perfpilot-mcp-confluence` | `docker/confluence-mcp/` |
+| MCP — PerfMemory | `perfpilot-mcp-perfmemory` | `docker/perfmemory-mcp/` |
+| MCP — GitHub | `perfpilot-mcp-github` | `docker/github-mcp/` |
+| MCP — Playwright *(vendor)* | `perfpilot-mcp-playwright` | `docker/playwright-mcp/` |
+| Gateway (aggregator) | `perfpilot-mcp-gateway` | `docker/gateway-mcp/` |
+| Agent backend — A2A | `perfpilot-a2a` | `docker/agent-backend/` |
+| Agent backend — AG-UI | `perfpilot-agui` | `docker/agent-backend/` *(same Dockerfile, two image tags)* |
+| Frontend | `perfpilot-ui` | `docker/agent-frontend/` |
+| Database | `perfmem-pgvector-age` | `docker/postgresql/` |
+
+Compose service names match image names, so `docker compose ps` output and
+image tags always align.
+
+---
+
+## 🌐 4. Port allocation
+
+MCPs are grouped in the `81xx` range for easy firewall rules. Agent backend on
+`810x`, UI on `8080`, database on the standard `5432`.
+
+| Service | Port | Endpoint path |
+|---|---|---|
+| `perfmem-pgvector-age` | `5432` | (raw postgres protocol) |
+| `perfpilot-ui` | `8080` | `/` |
+| `perfpilot-a2a` | `8101` | `/` (FastAPI + SSE) |
+| `perfpilot-agui` | `8102` | `/` (FastAPI + CopilotKit bridge) |
+| `perfpilot-mcp-blazemeter` | `8110` | `/perfpilot-mcp-blazemeter/mcp` |
+| `perfpilot-mcp-datadog` | `8111` | `/perfpilot-mcp-datadog/mcp` |
+| `perfpilot-mcp-jmeter` | `8112` | `/perfpilot-mcp-jmeter/mcp` |
+| `perfpilot-mcp-perfanalysis` | `8113` | `/perfpilot-mcp-perfanalysis/mcp` |
+| `perfpilot-mcp-perfreport` | `8114` | `/perfpilot-mcp-perfreport/mcp` |
+| `perfpilot-mcp-confluence` | `8115` | `/perfpilot-mcp-confluence/mcp` |
+| `perfpilot-mcp-perfmemory` | `8116` | `/perfpilot-mcp-perfmemory/mcp` |
+| `perfpilot-mcp-playwright` | `8117` | `/mcp` *(vendor image, no prefix)* |
+| `perfpilot-mcp-github` | `8118` | `/perfpilot-mcp-github/mcp` |
+| `perfpilot-mcp-gateway` | `8125` | `/perfpilot-mcp-gateway/mcp` *(aggregates the 8 MCPs above)* |
+
+Cursor / Claude Desktop / any MCP client should point at
+`http://localhost:8125/perfpilot-mcp-gateway/mcp` — the gateway exposes every
+mounted MCP under its own namespace (`jmeter.*`, `blazemeter.*`, etc.).
+
+---
+
+## 📁 5. Directory layout
 
 ```
 docker/
-├── Dockerfile.gateway                   # Gateway image (multi-stage build)
-├── entrypoint.sh                        # Container startup (JKS + JMeter props)
-├── requirements.gateway.txt             # Consolidated Python dependencies
-├── .env.gateway.example                 # Environment variable template
-├── docker-compose-gateway-windows.yaml  # Gateway standalone (Windows)
-├── docker-compose-gateway-mac.yaml      # Gateway standalone (macOS)
-├── docker-compose-full-windows.yaml     # Gateway + DB (Windows)
-├── docker-compose-full-mac.yaml         # Gateway + DB (macOS)
-├── config/                              # MCP server config templates
-│   ├── gateway/                         # Gateway config (transport, disabled servers)
-│   ├── blazemeter/                      # BlazeMeter API settings
-│   ├── datadog/                         # Environments, custom queries
-│   ├── perfanalysis/                    # SLAs, analysis thresholds
-│   ├── perfreport/                      # Report sections, chart config
-│   ├── confluence/                      # Confluence connection settings
-│   ├── jmeter/                          # JMeter paths, correlation config
-│   └── perfmemory/                      # Embedding settings, taxonomy
-├── certs/                               # Client certificates (optional)
-│   ├── corporate/                       # Place CA PEM bundles here (gitignored)
-│   └── jmeter/                          # Place .jks files here (gitignored)
-├── data/                                # PostgreSQL data volume (auto-created)
-├── Dockerfile.pgvector-age              # PostgreSQL image (existing)
-├── docker-compose-windows.yaml          # DB standalone (existing)
-└── docker-compose-mac.yaml              # DB standalone (existing)
+├── README.md                              (this file)
+├── docker-compose-full-mac.yaml           (macOS full-stack: user + PGDATA workarounds)
+├── docker-compose-full-windows.yaml       (Windows/WSL2 full-stack)
+├── .env.example                           (union of all secrets; copy to .env)
+│
+├── certs/                                 (all optional; empty by default)
+│   ├── corporate/                         (CA PEM bundles for HTTPS-intercepting proxy)
+│   ├── jmeter/                            (JMeter-only: .jks client keystores)
+│   └── playwright/                        (Playwright-only: .p12 / .pem test-user certs)
+│
+├── data/                                  (gitignored; local postgres data lives here)
+│   └── pgvectordb/                        (bind-mounted into perfmem-pgvector-age)
+│
+├── postgresql/                            (perfmem-pgvector-age image)
+├── gateway-mcp/                           (perfpilot-mcp-gateway image)
+├── playwright-mcp/                        (perfpilot-mcp-playwright image, vendor)
+├── agent-backend/                         (perfpilot-a2a + perfpilot-agui images)
+├── agent-frontend/                        (perfpilot-ui image)
+│
+├── blazemeter-mcp/                        (perfpilot-mcp-blazemeter image)
+├── datadog-mcp/                           (perfpilot-mcp-datadog image)
+├── jmeter-mcp/                            (perfpilot-mcp-jmeter image)
+├── perfanalysis-mcp/                      (perfpilot-mcp-perfanalysis image)
+├── perfreport-mcp/                        (perfpilot-mcp-perfreport image)
+├── confluence-mcp/                        (perfpilot-mcp-confluence image)
+├── perfmemory-mcp/                        (perfpilot-mcp-perfmemory image)
+└── github-mcp/                            (perfpilot-mcp-github image)
+```
+
+Every sub-folder contains at minimum a `Dockerfile`, a `docker-compose.yml`,
+and a `.env.example`. Most also contain a `config/` folder (baked into the
+image) and a `README.md`.
+
+---
+
+## 🔀 6. Endpoint routing and `MCP_HTTP_PREFIX`
+
+Each FastMCP-based MCP reads three env vars at startup:
+
+- `MCP_TRANSPORT=http` — always `http` in Docker (stdio is the local-dev default)
+- `HTTP_PORT=<port>` — the listen port (see §4)
+- `MCP_HTTP_PREFIX=/perfpilot-mcp-<name>` — the URL path prefix
+
+And it calls:
+
+```python
+mcp.run(
+    transport="http",
+    host="0.0.0.0",
+    port=int(os.environ["HTTP_PORT"]),
+    path=os.environ["MCP_HTTP_PREFIX"] + "/mcp",
+)
+```
+
+Endpoint = `http://<host>:<port>/perfpilot-mcp-<name>/mcp`.
+
+**Playwright is the sole exception.** It wraps Microsoft's vendor image which
+does not accept a path prefix — its endpoint is `/mcp` only. Agents call it
+directly at `http://perfpilot-mcp-playwright:8117/mcp`, bypassing the gateway.
+
+**The gateway dials each mounted MCP** via `MCP_URL_<NAME>` env vars, which
+default to the compose-network DNS values baked into `docker/gateway-mcp/config/config.yaml`:
+
+```
+MCP_URL_BLAZEMETER   → http://perfpilot-mcp-blazemeter:8110/perfpilot-mcp-blazemeter/mcp
+MCP_URL_DATADOG      → http://perfpilot-mcp-datadog:8111/perfpilot-mcp-datadog/mcp
+... etc.
+```
+
+Override any of them in `docker/.env` for split-mode / debugging setups.
+
+---
+
+## ⚙️ 7. `DEPLOYMENT_MODE` contract
+
+A single env var switches log format and secret source. **Same image, both
+modes.**
+
+### 7.1 `DEPLOYMENT_MODE=local`
+
+- Human-readable console output via structlog's `ConsoleRenderer`.
+- Secrets read from `docker/.env` (copied from `docker/.env.example`).
+- Used for local development and manual smoke-testing.
+
+Example log line:
+
+```
+2026-09-10 23:22:00 [info     ] connected-to-blazemeter        workspace_id=12345
+```
+
+### 7.2 `DEPLOYMENT_MODE=cloud`
+
+- OTel-shaped JSON emitted to stdout (fields per OpenTelemetry Logs Semantic
+  Conventions: `timestamp`, `severity_text`, `severity_number`, `body`,
+  `trace_id`, `span_id`, `attributes`, `resource.service.name`).
+- Secrets read from **injected env vars** (Vault / Azure Key Vault / Aspire user-secrets).
+  No `.env` file is loaded in cloud mode.
+- Used by the Phase 2 Aspire deployment on Azure.
+
+Example log line:
+
+```json
+{"timestamp":"2026-09-10T23:22:00.123Z","severity_text":"INFO","severity_number":9,"body":"connected-to-blazemeter","trace_id":"","span_id":"","attributes":{},"resource.service.name":"perfpilot-mcp-blazemeter","workspace_id":12345}
 ```
 
 ---
 
-## 🧪 JMeter Configuration
+## 🧩 8. Standalone (per-component) usage
 
-### 🔐 TLS Client Certificates (JKS)
-
-For corporate environments that require client certificate authentication:
-
-1. Place your `.jks` keystore file in `docker/certs/jmeter/`
-2. Set in `.env.gateway`:
-   ```
-   JMETER_JKS_FILE=your-keystore.jks
-   JMETER_JKS_PWD=your_keystore_password
-   ```
-
-Both variables must be set together. The entrypoint script configures JMeter's
-`system.properties` with the keystore path and password at container startup.
-
-### 🛠️ JMeter Properties
-
-To override `jmeter.properties` settings (e.g., `CookieManager.save.cookies=true`):
-
-**Option A — Environment variable (single property):**
-```
-JMETER_COOKIE_SAVE=true
-```
-
-**Option B — Properties file (multiple overrides):**
-Edit `docker/config/jmeter/jmeter-overrides.properties` with any properties you need.
-These are appended to `jmeter.properties` at container startup.
-
-### 🔌 Bundled JMeter Plugins
-
-The image includes these plugins (installed via JMeter Plugin Manager):
-
-| Plugin ID | Description |
-|-----------|-------------|
-| `jpgc-casutg` | Custom Thread Groups (Ultimate, Stepping, Concurrency) |
-| `bzm-parallel` | Parallel Controller |
-| `bzm-http2` | HTTP/2 Sampler |
-| `jpgc-functions` | Custom JMeter Functions |
-| `jpgc-json` | JSON Plugins |
-| `jpgc-tst` | Throughput Shaping Timer |
-| `websocket-samplers` | WebSocket Samplers (Peter Doornbosch) |
-
-To customize the plugin list at build time:
+Every sub-folder ships its own `docker-compose.yml` and `.env.example` for
+isolated testing. The pattern is always the same:
 
 ```bash
-docker build -f docker/Dockerfile.gateway \
-  --build-arg JMETER_PLUGINS="jpgc-casutg,bzm-parallel,bzm-http2,websocket-samplers" \
-  -t perf-gateway .
+cd docker/<component>/
+cp .env.example .env         # then edit .env with real values
+docker compose up --build -d
 ```
+
+- Windows PowerShell: `Copy-Item .env.example .env` instead of `cp`.
+- The build context is `../..` (repo root), so the compose file can `COPY`
+  from both `docker/<component>/` and `mcp-perf-suite/<mcp>/`.
+
+**Standalone gateway** — brings up `perfpilot-mcp-gateway` alone. The 8 MCP
+URLs default to `host.docker.internal` in the standalone `.env.example`, so
+you can bring up each MCP in its own compose and dial them from the gateway
+container without shared networking.
+
+Each sub-folder README (see §14) documents its own healthcheck endpoint,
+required secrets, and any component-specific quirks (JMeter's JKS mount,
+Playwright's `--config` flags, etc.).
 
 ---
 
-## 🔐 Corporate CA / HTTPS-Intercepting Proxy
+## 🏗️ 9. Full-stack usage
 
-If your environment uses an HTTPS-intercepting proxy (common in corporate networks)
-or security tools that re-sign TLS certificates (Norton 360, Zscaler, etc.), the
-Docker build will fail when downloading JMeter, plugins, or Python packages because
-the container cannot verify the proxy's certificates.
+Two OS-specific compose files bring the entire 14-container stack up at once.
 
-The `Dockerfile.gateway` supports an optional `ENABLE_CORP_CA` build arg that
-installs your CA certificate bundle into the image at build time.
+### 9.1 Windows (Docker Desktop / WSL2)
 
-### Setup
-
-1. **Place your CA PEM bundle** in `docker/certs/corporate/`:
-
-   ```bash
-   # Copy your corporate CA bundle (PEM format)
-   cp /path/to/your/ca-bundle.pem docker/certs/corporate/ca-bundle.pem
-   ```
-
-   The `docker/certs/corporate/` directory is gitignored — your certificates
-   will not be committed to the repository.
-
-2. **Set `ENABLE_CORP_CA=true` in your `.env.gateway`:**
-
-   ```env
-   ENABLE_CORP_CA=true
-   ```
-
-3. **Rebuild:**
-
-   ```bash
-   docker compose -f docker-compose-full-mac.yaml up --build    # or your compose variant
-   ```
-
-   The docker-compose files automatically pass `ENABLE_CORP_CA` as a build arg
-   to the Dockerfile — no compose file edits needed.
-
-### What it does
-
-When `ENABLE_CORP_CA=true` and PEM files exist in `docker/certs/corporate/`:
-
-| Stage | Action |
-|-------|--------|
-| `jmeter-layer` (build) | Installs CA into the OS trust store (`update-ca-certificates`) so `wget` can download JMeter and plugins. Also imports into Java's `cacerts` keystore so the JMeter Plugin Manager CLI works. |
-| `final` (runtime) | Copies the CA bundle to `/etc/ssl/certs/corporate-ca.pem` and sets `SSL_CERT_FILE` so Python/httpx can make HTTPS calls through the proxy at runtime. |
-
-When `ENABLE_CORP_CA` is not set or `false` (the default), no CA processing occurs
-and the build behaves identically to a standard environment.
-
-### Troubleshooting
-
-For detailed solutions to corporate proxy issues (wget SSL failures, Java PKIX
-errors, Python `SSL_CERT_FILE` not found, architecture mismatches), see:
-
-[`docs/troubleshooting/docker-gateway-macos-build-and-runtime.md`](../docs/troubleshooting/docker-gateway-macos-build-and-runtime.md)
-
----
-
-## 🧯 Troubleshooting
-
-### 🚫 Container fails to start
-
-Check the logs:
-```bash
-docker compose -f docker-compose-gateway-windows.yaml logs perf-gateway
+```powershell
+cd docker\
+Copy-Item .env.example .env
+# Edit .env with your secrets
+docker compose -f docker-compose-full-windows.yaml up --build
 ```
 
-Common issues:
-- **Missing config files** — ensure you copied all `.example` files (Step 2 above)
-- **Port 8000 already in use** — stop other services on that port or change `GATEWAY_PORT`
-- **Health check failing** — the gateway needs ~15 seconds to start all subprocess proxies
-
-### 🧠 PerfMemory can't connect to database
-
-If using the full-stack compose:
-- The gateway waits for PostgreSQL to be healthy before starting (`depends_on` with health check)
-- Ensure `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` are set in `.env.gateway`
-- Check if the `data/pgvectordb` directory has correct permissions (macOS users: use the mac compose variant)
-
-### 🔌 Cursor can't connect
-
-- Verify the container is running: `docker ps | grep perf-gateway`
-- Test the health endpoint: `curl http://localhost:8000/health`
-- Check that your `mcp.json` uses `http://localhost:8000/mcp` (not `/health`)
-
-### ♻️ Rebuilding after code changes
+### 9.2 macOS (Docker Desktop / VirtioFS)
 
 ```bash
-docker compose -f docker-compose-gateway-windows.yaml up --build
+cd docker/
+cp .env.example .env
+# Edit .env with your secrets
+docker compose -f docker-compose-full-mac.yaml up --build
 ```
 
-The `--build` flag forces a fresh image build, picking up any source code changes.
+The Mac file adds two settings to `perfmem-pgvector-age` that the Windows file
+does not need:
+
+- `user: "999:999"` — forces the container process to run as UID 999 (the image's
+  postgres user), so it can chown the bind-mounted data folder.
+- `PGDATA: /var/lib/postgresql/18/docker/pgdata` — points `initdb` at a
+  sub-directory inside the bind mount, so it can create + chown its own folder
+  instead of the mount root (which Docker Desktop for Mac's VirtioFS won't
+  allow).
+
+Without these two settings, PostgreSQL will fail to initialize on macOS.
+
+### 9.3 Startup and healthchecks
+
+- Every image ships a Dockerfile `HEALTHCHECK` that curls its own MCP endpoint
+  (or `pg_isready` for postgres).
+- Gateway `depends_on` all 8 mounted MCPs with `condition: service_healthy`,
+  so it does not start until every backing MCP responds to a probe.
+- Agents (`perfpilot-a2a`, `perfpilot-agui`) `depends_on` the gateway,
+  Playwright, and the database — all `service_healthy`.
+- UI (`perfpilot-ui`) `depends_on` the agent backend.
+
+Full-stack cold-start typically takes 60–90 seconds. Use `docker compose ps`
+to watch health status; use `docker compose logs -f <service>` to trace a
+specific container.
+
+### 9.4 Tearing down
+
+```bash
+docker compose -f docker-compose-full-<os>.yaml down
+```
+
+Postgres data survives because it lives on the host bind mount
+(`docker/data/pgvectordb/`). To reset the database entirely, add `-v` (removes
+volumes) and delete `docker/data/pgvectordb/` from the host.
 
 ---
 
-## 🔒 Security Notes
+## 🔐 10. Corporate CA / HTTPS-intercepting proxy
 
-- **Starlette >= 1.2.1** is pinned in `requirements.gateway.txt` to mitigate
-  [CVE-2026-48710](https://arstechnica.com/information-technology/2026/05/millions-of-ai-agents-imperiled-by-critical-vulnerability-in-open-source-package/)
-  (host header injection / authentication bypass)
-- API keys are passed via `.env.gateway` which is gitignored — never commit credentials
-- JKS keystore passwords are passed via environment variables, not baked into the image
-- Config and cert volumes are mounted read-only (`:ro`) into the container;
-  the artifacts volume is read-write so MCP servers can write test results
+If your machine runs a TLS-intercepting proxy (Zscaler, Norton 360, BlueCoat)
+or you're inside a corporate network with a private CA, every image needs the
+corporate CA installed into its trust store.
+
+**Enable with two steps:**
+
+1. Place your CA bundle (PEM format, may be a concatenation of multiple certs)
+   at `docker/certs/corporate/ca-bundle.pem`.
+2. Set `ENABLE_CORP_CA=true` in `docker/.env`.
+3. Rebuild every image: `docker compose ... up --build`.
+
+Every Python image installs the CA into:
+
+- The OS trust store (`update-ca-certificates`).
+- `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` env vars.
+
+The **Playwright image** additionally installs the CA into:
+
+- The Chromium NSS database (`certutil`).
+- Node.js's `NODE_EXTRA_CA_CERTS`.
+- Adds `--ignore-https-errors` as a belt-and-suspenders fallback.
+
+The **JMeter image** additionally imports the CA into Java's `cacerts`
+keystore (via `keytool`).
+
+Nothing about `ENABLE_CORP_CA=false` (the default) installs any corporate cert
+— you can safely ignore this whole section if you're not behind a proxy.
+
+---
+
+## 📜 11. Cert drop points
+
+Three sub-folders under `docker/certs/` are recognized. Every image sees only
+the cert store(s) it needs:
+
+| Folder | Consumed by | File types | Purpose |
+|---|---|---|---|
+| `docker/certs/corporate/` | Every image *(when `ENABLE_CORP_CA=true`)* | `*.pem` | Corporate CA bundles for HTTPS-intercepting proxies. |
+| `docker/certs/jmeter/` | `perfpilot-mcp-jmeter` only | `*.jks` | JMeter TLS client keystores (JKS format). File name + password go into `.env` via `JMETER_JKS_FILE` / `JMETER_JKS_PWD`. |
+| `docker/certs/playwright/` | `perfpilot-mcp-playwright` only | `*.p12`, `*.pem` | Test-user browser digital certs. CN filter + passphrase go into `.env` via `PLAYWRIGHT_CERT_AUTO_SELECT_CN` / `PLAYWRIGHT_CERT_PASSPHRASE`. |
+
+All three are optional at build time — the folders are committed as empty
+directories (each has a `.gitkeep`). JMeter does not read `.p12`/`.pem`;
+Playwright does not read `.jks`. Corporate CA is unrelated to either
+authentication store.
+
+---
+
+## 🔄 12. Legacy → canonical migration
+
+Anyone who cloned or forked this repo before Phase 1's Docker restructure will
+find their local workflows broken until they update to the new names. Here's
+the mapping:
+
+| Old (pre-Phase 1) | New (Phase 1+) |
+|---|---|
+| `perf-gateway:8888` (monolithic image) | `perfpilot-mcp-gateway:8125` (aggregator) + 8 per-MCP images (`8110`–`8118`) |
+| `perfmemory-db:5432` (compose service) | `perfmem-pgvector-age:5432` |
+| `playwright-mcp:8931` | `perfpilot-mcp-playwright:8117` |
+| `agent-a2a:8001` | `perfpilot-a2a:8101` |
+| `agent-agui:8002` | `perfpilot-agui:8102` |
+| `frontend:3000` | `perfpilot-ui:8080` |
+| `docker/.env.gateway` (operator file) | `docker/.env` |
+| `docker/.env.gateway.example` | `docker/.env.example` *(union of all secrets)* |
+| `docker/Dockerfile.gateway.example` (monolithic) | `docker/<mcp>/Dockerfile` × 9 |
+| `docker/entrypoint.sh` (shared) | `docker/<mcp>/entrypoint.sh` × per-MCP |
+| `docker/config/<mcp>/config.yaml` (bind-mounted) | `docker/<mcp>/config/config.yaml` *(baked into image)* |
+| MCP endpoint `/mcp` (single path) | `/perfpilot-mcp-<name>/mcp` *(namespaced per MCP)* |
+
+Cursor / MCP clients: update the server URL from
+`http://localhost:8888/mcp` → `http://localhost:8125/perfpilot-mcp-gateway/mcp`.
+
+---
+
+## 🤝 13. Independence Contract
+
+Every Dockerfile builds from **its own sub-folder** plus the MCP source tree
+(`mcp-perf-suite/<mcp>/` or `agent-framework/`) plus the optional cert drop
+points. There are exactly **three exceptions** — cross-MCP config file `COPY`s
+that must land at a specific sibling path inside the consumer image:
+
+| Consumer image | Shared file | Destination inside image |
+|---|---|---|
+| `perfpilot-mcp-perfanalysis` | `docker/datadog-mcp/config/environments.json` | `/app/datadog-mcp/environments.json` |
+| `perfpilot-mcp-perfreport` | `docker/datadog-mcp/config/environments.json` | `/app/datadog-mcp/environments.json` |
+| `perfpilot-mcp-confluence` | `docker/perfreport-mcp/config/chart_schema.yaml` | `/app/perfreport-mcp/chart_schema.yaml` |
+
+These three are the **only** permitted cross-folder `COPY`s. Everything else
+must live inside the sub-folder that owns the Dockerfile.
+
+**Manual checklist** when adding or changing a Dockerfile in this folder:
+
+- No `./config/*:ro` bind mounts anywhere in the compose file.
+- Every `docker/<mcp>/config/` folder has a corresponding `COPY docker/<mcp>/config/...`
+  line in its sibling Dockerfile (configs are baked, not mounted).
+- The `utils/logging_config.py` module emits console output when
+  `DEPLOYMENT_MODE=local` and OTel-shaped JSON when `DEPLOYMENT_MODE=cloud`.
+- Any cross-folder `COPY` must appear in the three-row table above; otherwise
+  it violates the contract.
+
+---
+
+## 📚 14. Related documentation
+
+- Per-component READMEs live inside each sub-folder — start there for image
+  size, secrets required, healthcheck endpoints, and any quirks specific to
+  that MCP:
+    - [`postgresql/README.md`](postgresql/README.md)
+    - [`gateway-mcp/README.md`](gateway-mcp/README.md)
+    - [`playwright-mcp/README.md`](playwright-mcp/README.md)
+    - [`agent-backend/README.md`](agent-backend/README.md)
+    - [`agent-frontend/README.md`](agent-frontend/README.md)
+    - [`blazemeter-mcp/README.md`](blazemeter-mcp/README.md)
+    - [`datadog-mcp/README.md`](datadog-mcp/README.md)
+    - [`jmeter-mcp/README.md`](jmeter-mcp/README.md)
+    - [`perfanalysis-mcp/README.md`](perfanalysis-mcp/README.md)
+    - [`perfreport-mcp/README.md`](perfreport-mcp/README.md)
+    - [`confluence-mcp/README.md`](confluence-mcp/README.md)
+    - [`perfmemory-mcp/README.md`](perfmemory-mcp/README.md)
+    - [`github-mcp/README.md`](github-mcp/README.md)
+- **Repository-level documentation**:
+    - [Repository root README](../README.md) — overall project overview.
+    - [`mcp-perf-suite/README.md`](../mcp-perf-suite/README.md) — MCP source tree.
+    - [`agent-framework/README.md`](../agent-framework/README.md) — agent backend + UI source tree.
