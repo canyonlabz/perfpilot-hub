@@ -338,10 +338,10 @@ docker/perfanalysis-mcp/config/config.yaml
 docker/perfanalysis-mcp/config/slas.yaml
 docker/perfmemory-mcp/config/config.yaml
 docker/perfmemory-mcp/config/taxonomy.yaml
-docker/config/perfreport/config.yaml
-docker/config/perfreport/report_config.yaml
-docker/config/perfreport/chart_schema.yaml
-docker/config/perfreport/chart_colors.yaml
+docker/perfreport-mcp/config/config.yaml
+docker/perfreport-mcp/config/report_config.yaml
+docker/perfreport-mcp/config/chart_schema.yaml
+docker/perfreport-mcp/config/chart_colors.yaml
 
 # Ignore the following AG2 Agent Framework local configuration files (operators
 # copy from .example versions). The .env file is already covered by the global
