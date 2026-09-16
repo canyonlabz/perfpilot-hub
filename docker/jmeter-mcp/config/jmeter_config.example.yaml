@@ -1,0 +1,162 @@
+thread_group:
+  num_threads: 1                       # Default number of virtual users  
+  ramp_time: 1                        # Default ramp-up time in seconds
+  loops: 1                             # Default number of loops per thread
+
+cookie_manager:
+  enabled: true                         # Enable/disable Cookie Manager
+  # Additional settings can go here if enabled
+
+user_defined_variables:
+  enabled: true
+  variables: {
+    "thinkTime": 5000,                  # Interaction time between browser steps (in milliseconds)
+    "pacing": 10000,                    # Pacing time between thread loops (in milliseconds)
+    "VERBOSE_LOGGING": true             # Enable/disable verbose logging for debugging (used for AI troubleshooting; set to true for detailed logs, false for cleaner output)
+  }  # e.g., {"bearer_token": ""}
+
+csv_dataset_config:
+  enabled: false                        # Set to true if you want to use CSV data
+  csv_file_path: "testdata_csv"         # Relative path for CSV files; Relative to the location of the generated JMX file
+  filename: "test_data.csv"             # Default name; Update with the actual path and filename.
+  ignore_first_line: true               # Skip the header line in the CSV file
+  variable_names: "userId,password"     # Comma-separated variable names in the CSV file
+  delimiter: ","
+  recycle_on_end: true
+  stop_thread_on_error: false
+  sharing_mode: "shareMode.all"         # Options: shareMode.all, shareMode.group, shareMode.thread
+  generate_mock_data: false             # Set to true if you want to generate mock data using LLM
+  # Additional settings can go here if enabled
+
+controller_config:
+  enabled: true
+  controller_type: "simple"             # Options: simple, transaction, etc.
+  # Additional settings can go here if enabled
+
+http_sampler:
+  auto_redirects: true
+  post_body_raw: true
+
+sampler_naming:
+  enabled: true                          # Enable/disable sampler naming convention (TC##_S##_METHOD /path)
+  # When enabled with controllers: TC01_S01_GET /, TC01_S02_POST /api, TC02_S01_GET /page, etc.
+  # When enabled without controllers (flat mode): TC01_S01_GET /, TC01_S02_POST /api, etc.
+  # When disabled: GET /, POST /api (default JMeter naming)
+
+http2_headers:
+  exclude_pseudo_headers: true          # Exclude HTTP/2 pseudo-headers (:method, :path, :scheme, :authority, :status) from Header Manager
+
+test_action_config:
+  enabled: true
+  action: "pause"                       # Options: pause, stop, start next thread loop, go to next iteration of current loop, etc.
+  duration: 5000                        # Default duration in milliseconds for the action if value is not set in user-defined variables
+  test_action_name: "Think Time"        # Name of the test action for identification
+
+results_collector_config:
+  view_results_tree: true               # Enable/disable the View Results Tree listener
+  view_results_tree_settings: 
+    save_response_data: false           # Save response data in the View Results Tree
+    save_request_headers: false         # Save request headers in the View Results Tree
+    save_response_headers: false        # Save response headers in the View Results Tree
+  aggregate_report: true                # Enable/disable the Aggregate Report listener
+  aggregate_report_settings: 
+    save_response_data: false           # Save response data in the Aggregate Report
+    save_request_headers: false         # Save request headers in the Aggregate Report
+    save_response_headers: false        # Save response headers in the Aggregate Report
+  response_time_graph: false            # Enable/disable the Response Time Graph listener
+  response_time_graph_settings: 
+    save_response_data: false           # Save response data in the Response Time Graph
+    save_request_headers: false         # Save request headers in the Response Time Graph
+    save_response_headers: false        # Save response headers in the Response Time Graph
+  summary_report: false                 # Enable/disable the Summary Report listener
+  summary_report_settings: 
+    save_response_data: false           # Save response data in the Summary Report
+    save_request_headers: false         # Save request headers in the Summary Report
+    save_response_headers: false        # Save response headers in the Summary Report
+  # Additional settings can go here if enabled
+
+hostname_parameterization:
+  enabled: true
+  csv_filename: "environment.csv"
+  csv_subfolder: "testdata_csv"    # Relative to JMX location
+  
+  # Default patterns for hostname categorization (applied in order: most specific first)
+  # Patterns are case-insensitive substring matches against the hostname
+  default_patterns:
+    auth_internal:
+      patterns: ["internal.login", "internal.auth", "login.internal", "auth.internal"]
+      variable_prefix: "authInternalHostname"
+    auth:
+      patterns: ["login", "auth", "sso", "oauth", "identity", "accounts", "signin"]
+      variable_prefix: "authHostname"
+    static:
+      patterns: ["cdn", "static", "assets", "media", "images", "fonts"]
+      variable_prefix: "staticHostname"
+    # app is the default category (catches everything else)
+    app:
+      variable_prefix: "envHostname"
+  
+  # Optional: Additional patterns (merged with defaults)
+  # Users can add custom categories here
+  # additional_patterns:
+  #   api:
+  #     patterns: ["api."]
+  #     variable_prefix: "apiHostname"
+
+extractor_placement:
+  # Controls whether extractors are added for all occurrences or just the first
+  # Options: "first_occurrence" | "all_occurrences"
+  mode: "first_occurrence"
+  
+  # Exception list: Variables that should always have extractors on ALL occurrences
+  # Useful for OAuth parameters in redirect chains where values may change
+  always_all_occurrences:
+    - "oauth_state"
+    - "oauth_nonce"
+    - "oauth_client_id"
+    - "oauth_redirect_uri"
+    - "oauth_response_mode"
+    - "oauth_code"
+    - "access_token"
+    - "bearer_token"
+    - "id_token"
+    # Add custom SSO tokens here if needed:
+    # - "cdssotoken"
+    # - "sso_nonce"
+
+# OAuth/SSO token configuration
+oauth_config:
+  enabled: true
+  
+  # OAuth token headers to parameterize
+  # Maps header name (lowercase) to JMeter variable name
+  token_headers:
+    authorization: "bearer_token"     # Authorization: Bearer ${bearer_token}
+    # Add custom SSO nonce headers here if needed:
+    # x-sso-nonce: "sso_nonce"
+  
+  # OAuth token URL parameters to parameterize
+  # These tokens in URLs will be replaced with ${variable_name}
+  token_url_params:
+    cdssotoken: "cdssotoken"          # ?cdssotoken=... -> ?cdssotoken=${cdssotoken}
+    # Add other SSO tokens here if needed:
+    # ssotoken: "ssotoken"
+  
+  # Generic nonce cookie keywords (case-insensitive)
+  # Cookies containing these keywords will be extracted as nonce values
+  nonce_cookie_keywords:
+    - "nonce"
+    - "csrftoken"
+  
+  # JSON response fields containing OAuth tokens
+  # Maps field name (case-insensitive) to JMeter variable name
+  token_json_fields:
+    cdssoToken: "cdssotoken"
+    tokenId: "token_id"
+    access_token: "access_token"
+    id_token: "bearer_token"
+
+# Future extensions can include more settings such as:
+# advanced_options:
+#   timeout: 5000
+#   protocol: HTTPS

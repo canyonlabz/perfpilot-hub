@@ -1,0 +1,120 @@
+# =============================================================================
+# Correlation Configuration
+# =============================================================================
+#
+# This file defines naming rules and lookup tables for algorithmic correlation
+# naming. The correlation analysis engine uses these mappings to automatically
+# generate meaningful JMeter variable names from detected correlations.
+#
+# SETUP:
+#   1. Copy this file to 'correlation_config.yaml' in the same directory
+#   2. Customize the mappings below for your application
+#   3. The local 'correlation_config.yaml' is git-ignored
+#
+# If 'correlation_config.yaml' does not exist, the engine falls back to the
+# defaults defined in this example file.
+# =============================================================================
+
+naming:
+  # ---------------------------------------------------------------------------
+  # Case style for generated variable names
+  # ---------------------------------------------------------------------------
+  case_style: "snake_case"
+
+  # ---------------------------------------------------------------------------
+  # OAuth / SSO parameter → variable name mapping
+  #
+  # When a correlation's source_key or value_type matches an OAuth parameter,
+  # the variable name is looked up from this table instead of applying
+  # camelCase→snake_case conversion.
+  # ---------------------------------------------------------------------------
+  oauth_params:
+    state: "oauth_state"
+    nonce: "oauth_nonce"
+    client_id: "oauth_client_id"
+    redirect_uri: "oauth_redirect_uri"
+    response_type: "oauth_response_type"
+    response_mode: "oauth_response_mode"
+    scope: "oauth_scope"
+    code: "oauth_code"
+    code_challenge: "oauth_code_challenge"
+    code_verifier: "oauth_code_verifier"
+    code_challenge_method: "oauth_code_challenge_method"
+    id_token: "id_token"
+    access_token: "access_token"
+    refresh_token: "refresh_token"
+    subject_token: "subject_token"
+
+  # ---------------------------------------------------------------------------
+  # OAuth token field → variable name mapping
+  #
+  # Maps JSON response field names from authentication endpoints to variable
+  # names. These fields are detected in token endpoint responses.
+  # ---------------------------------------------------------------------------
+  oauth_token_fields:
+    cdssotoken: "cdsso_token"
+    ssotoken: "sso_token"
+    tokenid: "token_id"
+    access_token: "access_token"
+    id_token: "id_token"
+    refresh_token: "refresh_token"
+
+  # ---------------------------------------------------------------------------
+  # Application-specific key → variable name overrides
+  #
+  # Add custom mappings for your application's field names. These take
+  # precedence over the default camelCase→snake_case conversion.
+  #
+  # Example: If your API returns "entityGuid" but you want the JMeter variable
+  # to be called "product_guid", add the mapping here.
+  # ---------------------------------------------------------------------------
+  custom_mappings: {}
+    # entityGuid: "product_guid"
+    # productDataSourceId: "data_source_id"
+    # transactionRef: "txn_reference"
+
+  # ---------------------------------------------------------------------------
+  # Timestamp naming patterns
+  #
+  # Orphan epoch timestamps (cache-busting parameters like "_t") are named
+  # based on the request URL context.
+  # ---------------------------------------------------------------------------
+  timestamp_patterns:
+    # URL substring → variable name prefix
+    # If the request URL contains the substring (case-insensitive),
+    # the timestamp variable is named "{prefix}_{step_number}"
+    signalr: "signalr_timestamp"
+    signalrhub: "signalr_timestamp"
+
+    # Default prefix when no URL pattern matches
+    default: "cache_timestamp"
+
+  # ---------------------------------------------------------------------------
+  # Source location → extractor type mapping
+  #
+  # Determines which JMeter extractor type to use based on where the
+  # correlation value was found in the response.
+  # ---------------------------------------------------------------------------
+  extractor_types:
+    response_json: "json_extractor"
+    response_header: "regex_extractor"
+    response_redirect_url: "regex_extractor"
+    response_set_cookie: "regex_extractor"
+    response_html_form: "regex_extractor"
+    response_entra_config: "regex_extractor"
+    response_wsfed_form: "boundary_extractor"
+    response_body_url: "regex_extractor"
+
+  # ---------------------------------------------------------------------------
+  # Regex expression templates for non-JSON extractors
+  #
+  # Python format strings. Available placeholders:
+  #   {key}   - The source_key / parameter name / header name
+  # ---------------------------------------------------------------------------
+  regex_templates:
+    response_header: "{key}:\\s*([^\\r\\n]+)"
+    response_redirect_url: "[?&]{key}=([^&]+)"
+    response_set_cookie: "{key}=([^;]+)"
+    response_html_form: "name=\"{key}\".*?value=\"([^\"]*)\""
+    response_entra_config: "\"{key}\":\"(.*?)\""
+    response_body_url: "[?&]{key}=([^&\"<\\s]+)"
