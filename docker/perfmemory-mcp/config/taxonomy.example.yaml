@@ -1,0 +1,207 @@
+# =============================================================================
+# PerfMemory Taxonomy — Example Configuration
+# =============================================================================
+# Copy this file to taxonomy.yaml and customize for your team.
+# The local taxonomy.yaml is gitignored and should not be committed.
+#
+# Purpose:
+#   Standardize naming conventions across PTEs so that semantic search,
+#   graph traversal, and future database consolidation work reliably.
+#
+# How it works:
+#   - Core definitions (environment_types, auth_flow_types, etc.) ship with
+#     sensible defaults. Add your own entries as needed.
+#   - Applications and environments are user-defined per team/org.
+#   - During ingestion, PerfMemory resolves aliases to canonical names and
+#     warns if a value is not in the taxonomy.
+# =============================================================================
+
+# ----------------------------------------
+# Core Taxonomy: Environment Types
+# ----------------------------------------
+# Canonical environment categories. Each entry has a name and a list of
+# aliases that resolve to that canonical name during ingestion.
+# Add your own entries or extend the aliases as needed.
+environment_types:
+  - name: dev
+    aliases: [development, local, localhost]
+  - name: qa
+    aliases: [quality-assurance, test, testing]
+  - name: uat
+    aliases: [user-acceptance, acceptance, user-acceptance-testing]
+  - name: staging
+    aliases: [stg, pre-prod, preprod, pre-production]
+  - name: perf
+    aliases: [performance, load-test, pt, perf-test]
+  - name: prod
+    aliases: [production, live, prd]
+
+# ----------------------------------------
+# Core Taxonomy: Auth Flow Types
+# ----------------------------------------
+# Authentication flow categories used when recording debug sessions.
+# Aliases allow PTEs to use shorthand or vendor-specific names.
+auth_flow_types:
+  - name: none
+    aliases: [no-auth, anonymous, public]
+  - name: oauth_auth_code
+    aliases: [oauth, oauth2, oauth2-auth-code, authorization-code]
+  - name: oauth_pkce
+    aliases: [pkce, msal-pkce, proof-key]
+  - name: oauth_client_credentials
+    aliases: [client-credentials, service-to-service, machine-to-machine, m2m]
+  - name: saml
+    aliases: [saml2, saml-sso, saml2.0]
+  - name: entra_id
+    aliases: [azure-ad, aad, microsoft-entra, entra, azure-active-directory]
+  - name: msal
+    aliases: [microsoft-auth-library, microsoft-authentication]
+  - name: basic
+    aliases: [basic-auth, http-basic]
+  - name: api_key
+    aliases: [apikey, x-api-key, api-token]
+  - name: bearer
+    aliases: [bearer-token, jwt, json-web-token]
+  - name: custom_sso
+    aliases: [sso, single-sign-on, openam, ping-federate, okta]
+  - name: token_chain
+    aliases: [chained-auth, multi-step-auth, token-exchange]
+
+# ----------------------------------------
+# Core Taxonomy: Error Categories
+# ----------------------------------------
+# Standardized error categories for debug attempts. Used for filtering
+# and graph-based pattern matching across projects.
+error_categories:
+  - name: "HTTP 4xx Error"
+    aliases: ["client error", "4xx", "4xx error"]
+  - name: "HTTP 5xx Error"
+    aliases: ["server error", "5xx", "5xx error", "internal server error"]
+  - name: "Authentication Error"
+    aliases: ["auth error", "login failure", "401", "401 unauthorized",
+              "wrong token", "missing oidc params", "missing sso cookie"]
+  - name: "Authorization Error"
+    aliases: ["forbidden", "403", "403 forbidden", "access denied"]
+  - name: "Correlation Error"
+    aliases: ["missing correlation", "dynamic value", "unresolved variable",
+              "literal variable", "variable overwrite", "extractor conflict"]
+  - name: "Connection Error"
+    aliases: ["connection refused", "connection timeout", "socket error", "connection reset"]
+  - name: "Timeout Error"
+    aliases: ["response timeout", "read timeout", "gateway timeout", "504"]
+  - name: "Data Validation Error"
+    aliases: ["assertion failure", "data mismatch", "unexpected response", "response assertion"]
+  - name: "SSL/TLS Error"
+    aliases: ["ssl error", "certificate error", "tls handshake", "ssl handshake"]
+  - name: "Redirect Error"
+    aliases: ["redirect loop", "too many redirects", "302 loop",
+              "cookie redirect", "lost cookie on redirect"]
+  - name: "Script Error"
+    aliases: ["xml corruption", "jmx corruption", "malformed xml",
+              "invalid jmx", "script corruption"]
+
+# ----------------------------------------
+# Core Taxonomy: Protocol Types
+# ----------------------------------------
+# NOTE: This category is not yet consumed by any MCP tool or query path.
+# Defined for future use — will be wired in when there's a concrete use case
+# where protocol filtering helps Cursor make better debugging decisions.
+protocol_types:
+  - name: http
+    aliases: [http/1.1, http1]
+  - name: https
+    aliases: [tls, http/s, http-secure]
+  - name: websocket
+    aliases: [ws, wss, web-socket]
+  - name: grpc
+    aliases: [grpc-web, g-rpc]
+  - name: jdbc
+    aliases: [database, sql, db-connection]
+  - name: jms
+    aliases: [messaging, mq, message-queue, activemq, rabbitmq]
+
+# =============================================================================
+# User-Defined: Applications
+# =============================================================================
+# Terminology: "application" (here) = "system_under_test" (relational DB column)
+# = "Project" node (Apache AGE knowledge graph). These are a one-to-one mapping.
+#
+# Define your applications (systems under test) here. Each application has:
+#   - name:       Full/proper name (what business stakeholders call it)
+#   - alias:      Short name or acronym (what the team uses daily)
+#                 Stored in the DB as system_alias.
+#   - aliases:    (Optional) Additional lookup names for matching only.
+#                 These are NOT stored in the DB — they are used solely for
+#                 resolving alternative names to the canonical application.
+#                 Useful for historical name variants, acronym expansions,
+#                 or common misnomers that should map to the same application.
+#   - services:   List of microservices/APIs within this application
+#                 NOTE: This list is informational only — not yet consumed by any
+#                 MCP tool, search query, or validation path. The service_name
+#                 column in the database IS used for filtering, but it is stored
+#                 as freeform text and not validated against this list.
+#                 Future enhancement when there is a concrete need (see E-004).
+#   - auth_type:  Default auth flow type (maps to auth_flow_types above)
+#   - auth_alias: Human-friendly description of the auth implementation
+#
+# These entries are used for:
+#   1. Alias resolution — if a PTE types the alias or any entry in aliases,
+#      PerfMemory resolves it to the canonical application name
+#   2. Taxonomy validation — warn if system_under_test is not registered
+#   3. Service lookups — associate services with their parent application
+#
+# EXAMPLES (replace with your own):
+applications:
+  - name: "Online Shopping Portal"
+    alias: "OSP"
+    aliases:
+      - "Online Shopping App"
+      - "OSP Portal"
+    services:
+      - name: "cart-service"
+      - name: "checkout-api"
+      - name: "product-catalog-api"
+      - name: "payment-gateway"
+      - name: "user-profile-service"
+    auth_type: "entra_id"
+    auth_alias: "Corporate EntraID SSO with PKCE"
+
+  - name: "Enterprise Inventory Management"
+    alias: "EIM"
+    aliases:
+      - "Enterprise Inventory"
+      - "Inventory Management System"
+    services:
+      - name: "inventory-api"
+      - name: "warehouse-sync"
+      - name: "reporting-service"
+      - name: "purchase-order-api"
+      - name: "supplier-integration"
+    auth_type: "saml"
+    auth_alias: "Vendor SAML 2.0 Federation"
+
+# =============================================================================
+# User-Defined: Environments
+# =============================================================================
+# Define your specific environments here. Each environment maps to a
+# canonical type from environment_types above. This allows PTEs to use
+# environment-specific names (QA1, QA2, STG-East) while maintaining
+# the ability to search by canonical type (qa, staging).
+#
+# EXAMPLES (replace with your own):
+environments:
+  - name: "QA1"
+    type: "qa"
+    description: "Primary QA environment — East US region"
+  - name: "QA2"
+    type: "qa"
+    description: "Secondary QA environment — West US region"
+  - name: "QA3"
+    type: "qa"
+    description: "QA environment for integration testing"
+  - name: "STG-East"
+    type: "staging"
+    description: "Staging environment — East US region"
+  - name: "PERF-01"
+    type: "perf"
+    description: "Dedicated performance testing environment"

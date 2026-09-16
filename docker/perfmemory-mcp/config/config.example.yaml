@@ -1,0 +1,73 @@
+# PerfMemory MCP — Configuration
+# Copy this file to config.yaml and adjust as needed.
+# For platform-specific overrides, create config.windows.yaml or config.mac.yaml.
+
+# ----------------------------------------
+# Server
+# ----------------------------------------
+server:
+  name: "perfmemory-mcp"
+  version: "0.3.0-beta"
+  description: "PerfMemory MCP Server — persistent memory and lessons-learned layer with pgvector + Apache AGE"
+  build:
+    date: "2026-05-16"
+
+# ----------------------------------------
+# Vector Similarity Search
+# ----------------------------------------
+search:
+  # Minimum cosine similarity score (0.0 - 1.0) to include a match in results.
+  # Lower values return more results but with less relevance.
+  # Recommended: 0.55 - 0.65 for broad recall, 0.70+ for high precision.
+  similarity_threshold: 0.60
+
+  # Maximum number of results to return from a similarity search.
+  top_k: 5
+
+  # HNSW ef_search parameter — controls how many candidates the index evaluates
+  # during a search. Higher values improve recall at the cost of query speed.
+  # Only matters at scale (hundreds+ of attempts). Default pgvector value is 40.
+  ef_search: 40
+
+# ----------------------------------------
+# Graph (Apache AGE)
+# ----------------------------------------
+graph:
+  # Enable or disable the graph layer. When false, PerfMemory uses vector-only
+  # search and skips all graph operations (no AGE extension required).
+  enabled: true
+
+  # Name of the AGE graph. Must match the graph created by 001_create_graph.sql.
+  graph_name: perf_knowledge
+
+  # Weight given to vector similarity vs graph relevance when merging results
+  # in find_similar_attempts. Must sum to 1.0.
+  vector_weight: 0.6
+  graph_weight: 0.4
+
+  # Minimum cosine similarity for creating embedding-based SIMILAR_TO edges
+  # between attempts at ingestion time.
+  embedding_edge_threshold: 0.82
+
+  # Maximum number of embedding-based SIMILAR_TO edges per attempt.
+  # Deterministic edges (via shared ErrorPattern) are unlimited.
+  max_embedding_edges: 3
+
+# ----------------------------------------
+# General
+# ----------------------------------------
+general:
+  enable_debug: false
+
+# ----------------------------------------
+# Taxonomy
+# ----------------------------------------
+taxonomy:
+  # Path to the taxonomy YAML (relative to perfmemory-mcp/).
+  # Falls back to taxonomy.example.yaml if taxonomy.yaml is not found.
+  path: taxonomy.yaml
+
+  # When true, store_debug_session and store_debug_attempt will REJECT inserts
+  # if a taxonomy value is not defined. When false (default), unrecognized values
+  # produce a warning in the response but the insert proceeds.
+  strict: false
