@@ -326,7 +326,7 @@ mcp-perf-suite/perfreport-mcp/tests/**
 # Ignore Docker gateway config files (users copy from .example versions)
 docker/config/gateway/config.yaml
 docker/blazemeter-mcp/config/config.yaml
-docker/config/confluence/config.yaml
+docker/confluence-mcp/config/config.yaml
 docker/config/datadog/config.yaml
 docker/config/datadog/environments.json
 docker/config/datadog/custom_queries.json
