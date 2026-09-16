@@ -266,16 +266,14 @@ package-lock.json
 # Ignore docker data and local YAML files for Docker Compose, which may contain sensitive information or be specific to individual environments
 docker/data/*
 docker/docker-compose.yaml
-docker/Dockerfile.gateway
-docker/Dockerfile.pgvector-age
-docker/Dockerfile.agent-backend
-docker/Dockerfile.agent-frontend
-docker/Dockerfile.playwright-mcp
 docker/ca-bundle.pem
 docker/certs/jmeter/*.jks
 !docker/certs/jmeter/.gitkeep
 docker/certs/corporate/*
 !docker/certs/corporate/.gitkeep
+# Playwright test-user client certs (local secrets, not committed)
+docker/certs/playwright/*
+!docker/certs/playwright/.gitkeep
 
 # ignore performance test results and logs
 mcp-perf-suite/artifacts/*
