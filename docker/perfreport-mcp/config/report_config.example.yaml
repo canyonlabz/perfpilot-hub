@@ -1,0 +1,224 @@
+# report_config.example.yaml - Report display configuration template for PerfReport MCP
+# 
+# This file controls the look and feel of generated performance reports.
+# Copy this file to 'report_config.yaml' and customize as needed.
+#
+# Note: This configuration is separate from config.yaml which handles global settings
+# like file paths. This file is specifically for report appearance and content options.
+
+version: "1.1"
+
+# Infrastructure table display options
+# =====================================
+# These settings control what columns are displayed in infrastructure metric tables.
+# 
+# Why you might disable allocation columns:
+# - Some environments have no limits set at the pod/container level (scale-on-demand cloud configurations)
+# - When limits are managed at the node-pool level, pod-level allocation is unavailable
+# - Displaying allocation columns with no data can cause confusion
+# - You may want to focus on actual usage (cores, GB) rather than utilization percentages
+#
+# When to keep allocation columns enabled:
+# - Your Kubernetes pods/containers have CPU and memory limits defined
+# - You want to show utilization as a percentage of allocated resources
+# - Your team relies on allocation data for capacity planning
+
+infrastructure_tables:
+  # CPU Utilization (%) table settings
+  # Affects the table in section "4.2 CPU Utilization by Service/Host"
+  cpu_utilization:
+    show_allocated_column: true    # Show "Allocated" column (e.g., "4 cores")
+  
+  # CPU Core Usage table settings
+  # Affects the table in section "4.2.1 CPU Core Usage by Service/Host"
+  cpu_core_usage:
+    show_allocated_column: true    # Show "Allocated (Cores)" column
+    # Unit configuration for comparison report tables
+    # Options: "cores" (default) or "millicores"
+    unit:
+      type: "millicores"
+
+  # Memory Utilization (%) table settings
+  # Affects the table in section "4.3 Memory Utilization by Service/Host"
+  memory_utilization:
+    show_allocated_column: true    # Show "Allocated" column (e.g., "8.00 GB")
+  
+  # Memory Usage (GB/MB) table settings
+  # Affects the table in section "4.3.1 Memory Usage by Service/Host"
+  memory_usage:
+    show_allocated_column: true    # Show "Allocated (GB)" column
+    # Unit configuration for comparison report tables
+    # Options: "gb" (default) or "mb"
+    unit:
+      type: "mb"
+
+# Revisable sections configuration
+# =================================
+# These settings control which report sections are available for AI-assisted revision.
+# Each section can be enabled/disabled independently.
+# Default: All sections disabled (false). User must explicitly enable.
+#
+# When enabled, AI can generate improved verbiage for these sections by:
+# 1. Reviewing raw data from BlazeMeter, Datadog, and PerfAnalysis outputs
+# 2. Creating revised content in artifacts/{run_id}/reports/revisions/
+# 3. Assembling a new report with the AI-revised sections
+#
+# Workflow:
+# 1. Run create_performance_test_report() to generate first draft
+# 2. Enable desired sections below (set enabled: true)
+# 3. Run discover_revision_data() to get data manifest and provide additional context
+# 4. AI (Cursor) reads data files and generates revised content
+# 5. Run prepare_revision_context() to save each revision (supports versioning: v1, v2, etc.)
+# 6. Run revise_performance_test_report() to assemble final revised report
+#
+# Multiple revisions are supported (HITL - Human-In-The-Loop):
+# - Each call to prepare_revision_context creates a new version (_v1.md, _v2.md, etc.)
+# - User can review and request additional revisions with feedback
+# - revise_performance_test_report can use a specific version or the latest
+
+revisable_sections:
+  # Single-run report sections
+  # ==========================
+  single_run:
+    # Section 1.0 - Executive Summary
+    # Current placeholder: {{EXECUTIVE_SUMMARY}}
+    # AI placeholder: {{AI_EXECUTIVE_SUMMARY}}
+    executive_summary:
+      enabled: false
+      placeholder: "EXECUTIVE_SUMMARY"
+      ai_placeholder: "AI_EXECUTIVE_SUMMARY"
+      output_file: "AI_EXECUTIVE_SUMMARY"    # Version suffix added automatically (_v1.md, _v2.md)
+      description: "High-level test outcome summary with key metrics and findings"
+    
+    # Section 2.0 - Key Observations
+    # Current placeholder: {{KEY_OBSERVATIONS}}
+    # AI placeholder: {{AI_KEY_OBSERVATIONS}}
+    key_observations:
+      enabled: false
+      placeholder: "KEY_OBSERVATIONS"
+      ai_placeholder: "AI_KEY_OBSERVATIONS"
+      output_file: "AI_KEY_OBSERVATIONS"
+      description: "Bullet-point observations about test performance and issues"
+    
+    # Section 2.1 - Issues Observed
+    # Current placeholder: {{ISSUES_TABLE}}
+    # AI placeholder: {{AI_ISSUES_TABLE}}
+    issues_table:
+      enabled: false
+      placeholder: "ISSUES_TABLE"
+      ai_placeholder: "AI_ISSUES_TABLE"
+      output_file: "AI_ISSUES_TABLE"
+      description: "Table of issues and errors observed during test execution"
+    
+    # Section 6.2 - JMeter Log Analysis
+    # Current placeholder: {{JMETER_LOG_ANALYSIS}}
+    # AI placeholder: {{AI_JMETER_LOG_ANALYSIS}}
+    jmeter_log_analysis:
+      enabled: false
+      placeholder: "JMETER_LOG_ANALYSIS"
+      ai_placeholder: "AI_JMETER_LOG_ANALYSIS"
+      output_file: "AI_JMETER_LOG_ANALYSIS"
+      description: "JMeter/BlazeMeter log error analysis with categorization, affected APIs, and JTL correlation"
+    
+    # Section 7.0 - Bottleneck Identification
+    # Current placeholder: {{BOTTLENECK_ANALYSIS}}
+    # AI placeholder: {{AI_BOTTLENECK_ANALYSIS}}
+    bottleneck_analysis:
+      enabled: false
+      placeholder: "BOTTLENECK_ANALYSIS"
+      ai_placeholder: "AI_BOTTLENECK_ANALYSIS"
+      output_file: "AI_BOTTLENECK_ANALYSIS"
+      description: "Bottleneck identification with degradation thresholds, severity breakdown, and per-endpoint findings"
+    
+    # Section 4.4 - Application KPI Analysis
+    # Current placeholder: {{KPI_ANALYSIS_SECTION}}
+    # AI placeholder: {{AI_KPI_ANALYSIS_SECTION}}
+    kpi_analysis:
+      enabled: false
+      placeholder: "KPI_ANALYSIS_SECTION"
+      ai_placeholder: "AI_KPI_ANALYSIS_SECTION"
+      output_file: "AI_KPI_ANALYSIS_SECTION"
+      description: "Application KPI metric analysis with per-service/host tables, trend indicators, and insights from kpi_analysis.json"
+    
+    # Section 5.2 - KPI Correlations
+    # Current placeholder: {{KPI_CORRELATION_SECTION}}
+    # AI placeholder: {{AI_KPI_CORRELATION_SECTION}}
+    kpi_correlation:
+      enabled: false
+      placeholder: "KPI_CORRELATION_SECTION"
+      ai_placeholder: "AI_KPI_CORRELATION_SECTION"
+      output_file: "AI_KPI_CORRELATION_SECTION"
+      description: "KPI-to-performance correlation analysis with strength indicators, notable pairs, and insights from correlation_analysis.json"
+
+  # Comparison report sections
+  # ===========================================================
+  comparison:
+    # Section 1.0 - Executive Summary
+    executive_summary:
+      enabled: false
+      placeholder: "EXECUTIVE_SUMMARY"
+      ai_placeholder: "AI_EXECUTIVE_SUMMARY"
+      output_file: "AI_EXECUTIVE_SUMMARY"
+      description: "Comparison summary across multiple test runs"
+    
+    # Section 1.1 - Key Findings
+    key_findings:
+      enabled: false
+      placeholder: "KEY_FINDINGS_BULLETS"
+      ai_placeholder: "AI_KEY_FINDINGS_BULLETS"
+      output_file: "AI_KEY_FINDINGS_BULLETS"
+      description: "Key findings from comparing test runs"
+    
+    # Section 3.0 - Issues Summary
+    issues_summary:
+      enabled: false
+      placeholder: "ISSUES_SUMMARY"
+      ai_placeholder: "AI_ISSUES_SUMMARY"
+      output_file: "AI_ISSUES_SUMMARY"
+      description: "Summary of issues across compared runs"
+    
+    # Section 1.2 - Overall Performance Trend
+    # Current placeholder: {{OVERALL_TREND_SUMMARY}}
+    # AI placeholder: {{AI_OVERALL_TREND_SUMMARY}}
+    overall_trend_summary:
+      enabled: false
+      placeholder: "OVERALL_TREND_SUMMARY"
+      ai_placeholder: "AI_OVERALL_TREND_SUMMARY"
+      output_file: "AI_OVERALL_TREND_SUMMARY"
+      description: "Overall performance trend narrative comparing key metrics across test runs"
+    
+    # Section 6.0 - Correlation Insights
+    # Current placeholder: {{CORRELATION_INSIGHTS_SECTION}}
+    # AI placeholder: {{AI_CORRELATION_INSIGHTS_SECTION}}
+    correlation_insights_section:
+      enabled: false
+      placeholder: "CORRELATION_INSIGHTS_SECTION"
+      ai_placeholder: "AI_CORRELATION_INSIGHTS_SECTION"
+      output_file: "AI_CORRELATION_INSIGHTS_SECTION"
+      description: "Performance-infrastructure correlation analysis across compared runs"
+    
+    # Section 6.0 - Correlation Key Observations
+    # Current placeholder: {{CORRELATION_KEY_OBSERVATIONS}}
+    # AI placeholder: {{AI_CORRELATION_KEY_OBSERVATIONS}}
+    correlation_key_observations:
+      enabled: false
+      placeholder: "CORRELATION_KEY_OBSERVATIONS"
+      ai_placeholder: "AI_CORRELATION_KEY_OBSERVATIONS"
+      output_file: "AI_CORRELATION_KEY_OBSERVATIONS"
+      description: "Key observations from performance-infrastructure correlations across runs"
+
+# Future configuration options (planned)
+# ======================================
+# The following options are planned for future releases:
+#
+# display_options:
+#   decimal_precision: 2           # Number of decimal places for numeric values
+#   empty_value_placeholder: "N/A" # Text to display for missing values
+#   date_format: "YYYY-MM-DD"      # Date format for report headers
+#   time_format: "HH:mm:ss"        # Time format for timestamps
+#
+# chart_options:
+#   default_width: 1280            # Default chart width in pixels
+#   default_height: 720            # Default chart height in pixels
+#   show_grid: true                # Show grid lines on charts
+#   include_legend: true           # Include legend on multi-series charts

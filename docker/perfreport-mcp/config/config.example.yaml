@@ -1,0 +1,22 @@
+server:
+  name: "perfreport-mcp"
+  version: "0.9.0-rc.1"
+  description: "Performance Report MCP Server for generating performance test reports and charts"
+  build:
+    date: "2026-04-19"
+
+general:
+  enable_debug: False   # Enable/disable debug mode
+  enable_logging: True  # Enable/disable logging
+
+artifacts:
+  # Dynamically resolved to {repo_root}/artifacts when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  artifacts_path: ""
+
+perf_report:
+  time_zone: "America/New_York"  # Set the time zone
+  apm_tool: "datadog"  # Options: datadog, newrelic, appdynamics, dynatrace
+  # Dynamically resolved to {repo_root}/perfreport-mcp/templates when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  templates_path: ""

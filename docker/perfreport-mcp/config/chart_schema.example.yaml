@@ -1,0 +1,707 @@
+# chart_schema.yaml - Chart specifications for PerfReport MCP
+version: "1.1"
+
+# Chart naming convention for CUSTOM charts:
+# Format: [CHART_PLACEHOLDER: SECTION_METRIC_CHARTTYPE]
+# Examples:
+#   - RESP_TIME_P95_LINE (single-axis)
+#   - RESP_TIME_P90_VUSERS_DUALAXIS (dual-axis)
+#   - TOP_SLOWEST_APIS_BAR (horizontal bar)
+#   - CORR_PERF_INFRA_HEATMAP (heatmap)
+#   - CPU_UTILIZATION_STACKED (stacked area)
+
+defaults:
+  resolution:
+    width: 1920
+    height: 1080
+    dpi: 100
+  time_granularity: "1min"  # Pandas resample frequency
+  font_size:
+    title: 16
+    axis_label: 12
+    tick_label: 10
+    legend: 10
+  confluence:
+    image_height: 250  # Default height (px) for embedded images in Confluence
+
+# Legend placement reference (per-chart configurable via include_legend & legend_location):
+#   include_legend: true/false        - Whether to show the legend (default: false)
+#   legend_location: "<position>"     - Where to place the legend (default: "upper left")
+#   legend_fontsize: <int>            - Font size for legend text (default: 8)
+#
+# Standard positions (inside chart area):
+#   "upper left", "upper right", "lower left", "lower right",
+#   "center left", "center right", "upper center", "lower center",
+#   "center", "best"
+#
+# Outside-chart positions (avoids overlapping data):
+#   "below"  - Centered below the chart (horizontal layout)
+#   "above"  - Centered above the chart (horizontal layout)
+#   "right"  - To the right of the chart (vertical layout)
+
+charts:
+  # ===== SECTION 2: SLA & ERRORS =====
+  
+  - id: "ERROR_RATE_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: ERROR_RATE_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Error Rate Over Time"
+    description: "Time-series view of error occurrences during test execution"
+    x_axis:
+      label: "Time (hh:mm)"
+    y_axis:
+      label: "Error Count"
+    colors: ["error"]
+    show_grid: true
+    include_legend: false
+    
+  # ===== SECTION 3: RESPONSE TIME & THROUGHPUT =====
+  
+  - id: "RESP_TIME_P90_VUSERS_DUALAXIS"
+    placeholder: "{{CHART_PLACEHOLDER: RESP_TIME_P90_VUSERS_DUALAXIS}}"
+    chart_type: "dual_axis_line"
+    title: "Response Time (P90) vs Virtual Users"
+    description: "Correlation between load and 90th percentile response time"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis_left:
+      label: "90th Percentile Response Time (ms)"
+    y_axis_right:
+      label: "Virtual Users"
+    colors: ["primary", "secondary"]
+    show_grid: true
+    include_legend: false
+    
+  - id: "THROUGHPUT_HITS_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: THROUGHPUT_HITS_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Throughput Over Time"
+    description: "Transaction throughput (hits/sec) throughout test execution"
+    x_axis:
+      label: "Time (hh:mm)"
+    y_axis:
+      label: "Throughput (req/sec)"
+    colors: ["primary"]
+    show_grid: true
+    include_legend: false
+    
+  - id: "TOP_SLOWEST_APIS_BAR"
+    placeholder: "{{CHART_PLACEHOLDER: TOP_SLOWEST_APIS_BAR}}"
+    chart_type: "horizontal_bar"
+    title: "Top API SLA Violators"
+    description: "APIs with highest P90 response times exceeding SLA"
+    data_sources:
+      primary: "performance_analysis.json"
+      json_path: "api_analysis"
+    x_axis:
+      label: "P90 Response Time"
+      column: "p90_response_time"
+    y_axis:
+      label: "API Name"
+      column: "api_name"
+    unit:
+      type: "minutes"  # Display unit: "ms", "seconds", or "minutes"
+    limit: 10  # Top N violators (configurable)
+    sort: "descending"
+    filter_condition: "sla_compliant == False"  # Only show violators
+    sla_threshold:
+      # SLA thresholds are resolved per-API from slas.yaml (PerfAnalysis MCP).
+      # The 'source' field reads the per-API sla_threshold_ms from analysis output.
+      # No hardcoded default -- value comes from the analysis data.
+      source: "sla_threshold_ms"
+      show_line: true
+      line_style: "dashed"
+      line_color: "error"
+    output_filename: "top_sla_violators_{run_id}.png"
+    colors: ["error", "warning"]
+    fill_alpha: 0.85  # Bar opacity (0.0 transparent, 1.0 solid)
+    show_grid: true
+    include_legend: false
+
+  # ===== SECTION 4: INFRASTRUCTURE (LINE CHARTS) =====
+
+  - id: "CPU_UTILIZATION_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_UTILIZATION_LINE}}"
+    chart_type: "single_axis_line"
+    title: "CPU Utilization - {resource_name}"
+    description: "CPU utilization (%) for a specific host or Kubernetes service"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "CPU Utilization (%)"
+    colors: ["primary"]
+    show_grid: true
+    include_legend: false
+
+  - id: "CPU_UTILIZATION_VUSERS_DUALAXIS"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_UTILIZATION_VUSERS_DUALAXIS}}"
+    chart_type: "dual_axis_line"
+    title: "CPU Utilization vs Virtual Users"
+    description: "Correlation between load (virtual users) and CPU utilization (%) across infrastructure"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis_left:
+      label: "CPU Utilization (%)"
+    y_axis_right:
+      label: "Virtual Users"
+    colors: ["primary", "secondary"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  - id: "MEMORY_UTILIZATION_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: MEMORY_UTILIZATION_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Memory Utilization - {resource_name}"
+    description: "Memory utilization (%) for a specific host or Kubernetes service"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Memory Utilization (%)"
+    colors: ["secondary"]
+    show_grid: true
+    include_legend: false
+
+  - id: "MEMORY_UTILIZATION_VUSERS_DUALAXIS"
+    placeholder: "{{CHART_PLACEHOLDER: MEMORY_UTILIZATION_VUSERS_DUALAXIS}}"
+    chart_type: "dual_axis_line"
+    title: "Memory Utilization vs Virtual Users"
+    description: "Correlation between load (virtual users) and memory utilization (%) across infrastructure"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis_left:
+      label: "Memory Utilization (%)"
+    y_axis_right:
+      label: "Virtual Users"
+    colors: ["warning", "secondary"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  # ===== SECTION 4A.2: INFRASTRUCTURE (RAW USAGE) =====
+  # These charts show actual resource usage rather than percentage utilization
+  # Useful for capacity planning and comparing against allocated resources
+  
+  - id: "CPU_CORES_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_CORES_LINE}}"
+    chart_type: "single_axis_line"
+    title: "CPU Core Usage - {resource_name}"
+    description: "CPU core usage for a specific host or Kubernetes service"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "CPU Usage (Millicores)"
+    # Unit configuration: "cores" (default) or "millicores"
+    unit:
+      type: "millicores"  # Options: "cores", "millicores"
+    colors: ["primary"]
+    show_grid: true
+    include_legend: false
+
+  - id: "MEMORY_USAGE_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: MEMORY_USAGE_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Memory Usage MB - {resource_name}"
+    description: "Memory usage for a specific host or Kubernetes service"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Memory Usage (MB)"
+    # Unit configuration: "gb" (default) or "mb"
+    unit:
+      type: "mb"  # Options: "gb", "mb"
+    colors: ["warning"]
+    show_grid: true
+    include_legend: false
+
+  # ===== SECTION 4B: INFRASTRUCTURE (MULTI-LINE) =====
+  # Multi-line charts show ALL hosts/services on a single chart
+  # Used in default report template for consolidated view
+
+  - id: "CPU_UTILIZATION_MULTILINE"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_UTILIZATION_MULTILINE}}"
+    chart_type: "multi_line"
+    title: "CPU Utilization - All Services"
+    description: "CPU utilization (%) for all hosts/services on a single chart"
+    confluence:
+      image_height: 300  # Slightly larger for multi-line readability
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "CPU Utilization (%)"
+    # Colors: Uses 'multi_line' palette from chart_colors.yaml
+    # To override, uncomment and specify: colors: ["primary", "secondary", ...]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper right"
+
+  - id: "MEMORY_UTILIZATION_MULTILINE"
+    placeholder: "{{CHART_PLACEHOLDER: MEMORY_UTILIZATION_MULTILINE}}"
+    chart_type: "multi_line"
+    title: "Memory Utilization - All Services"
+    description: "Memory utilization (%) for all hosts/services on a single chart"
+    confluence:
+      image_height: 300  # Slightly larger for multi-line readability
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Memory Utilization (%)"
+    # Colors: Uses 'multi_line' palette from chart_colors.yaml
+    # To override, uncomment and specify: colors: ["secondary", "primary", "warning", "info", "error"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper right"
+
+  # ===== SECTION 4C: INFRASTRUCTURE COMPARISON (BAR CHARTS) =====
+  # Vertical bar charts for comparing resource usage across test runs
+  # Used in comparison reports to visualize performance trends
+  # X-axis: Test runs, Y-axis: Metric values
+  
+  #
+  # Aggregation types:
+  #   "peak" - Maximum observed value during the test run (useful for capacity planning)
+  #   "avg"  - Average value across the test run (useful for steady-state trend comparison)
+  #   "p90"  - 90th percentile value (planned - requires PerfAnalysis enhancement)
+  
+  - id: "CPU_PEAK_CORE_COMPARISON_BAR"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_PEAK_CORE_COMPARISON_BAR}}"
+    chart_type: "vertical_bar"
+    title: "Peak CPU Core Usage Comparison - {resource_name}"
+    description: "Compare peak CPU core usage across test runs for a specific resource"
+    aggregation: "peak"  # Options: "peak", "avg", "p90" (future)
+    x_axis:
+      label: "Test Run"
+    y_axis:
+      label: "Peak CPU Usage (Millicores)"
+    # Unit configuration: "cores" (default) or "millicores"
+    unit:
+      type: "millicores"  # Options: "cores", "millicores"
+    # Colors: Uses 'comparison' palette from chart_colors.yaml (navy-blue gradient)
+    # To override, uncomment and specify: colors: ["primary", "secondary", ...]
+    show_grid: true
+    include_legend: false
+    show_value_labels: true  # Display values above bars
+
+  - id: "MEMORY_PEAK_USAGE_COMPARISON_BAR"
+    placeholder: "{{CHART_PLACEHOLDER: MEMORY_PEAK_USAGE_COMPARISON_BAR}}"
+    chart_type: "vertical_bar"
+    title: "Peak Memory Usage Comparison - {resource_name}"
+    description: "Compare peak memory usage across test runs for a specific resource"
+    aggregation: "peak"  # Options: "peak", "avg", "p90" (future)
+    x_axis:
+      label: "Test Run"
+    y_axis:
+      label: "Peak Memory Usage (MB)"
+    # Unit configuration: "gb" (default) or "mb"
+    unit:
+      type: "mb"  # Options: "gb", "mb"
+    # Colors: Uses 'comparison' palette from chart_colors.yaml (navy-blue gradient)
+    # To override, uncomment and specify: colors: ["warning", "info", "primary", "secondary", "error"]
+    show_grid: true
+    include_legend: false
+    show_value_labels: true  # Display values above bars
+
+  - id: "CPU_AVG_CORE_COMPARISON_BAR"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_AVG_CORE_COMPARISON_BAR}}"
+    chart_type: "vertical_bar"
+    title: "Average CPU Core Usage Comparison - {resource_name}"
+    description: "Compare average CPU core usage across test runs for a specific resource"
+    aggregation: "avg"  # Options: "peak", "avg", "p90" (future)
+    x_axis:
+      label: "Test Run"
+    y_axis:
+      label: "Avg CPU Usage (Millicores)"
+    # Unit configuration: "cores" (default) or "millicores"
+    unit:
+      type: "millicores"  # Options: "cores", "millicores"
+    # Colors: Uses 'comparison' palette from chart_colors.yaml (navy-blue gradient)
+    # To override, uncomment and specify: colors: ["primary", "secondary", ...]
+    show_grid: true
+    include_legend: false
+    show_value_labels: true  # Display values above bars
+
+  - id: "MEMORY_AVG_USAGE_COMPARISON_BAR"
+    placeholder: "{{CHART_PLACEHOLDER: MEMORY_AVG_USAGE_COMPARISON_BAR}}"
+    chart_type: "vertical_bar"
+    title: "Average Memory Usage Comparison - {resource_name}"
+    description: "Compare average memory usage across test runs for a specific resource"
+    aggregation: "avg"  # Options: "peak", "avg", "p90" (future)
+    x_axis:
+      label: "Test Run"
+    y_axis:
+      label: "Avg Memory Usage (MB)"
+    # Unit configuration: "gb" (default) or "mb"
+    unit:
+      type: "mb"  # Options: "gb", "mb"
+    # Colors: Uses 'comparison' palette from chart_colors.yaml (navy-blue gradient)
+    # To override, uncomment and specify: colors: ["warning", "info", "primary", "secondary", "error"]
+    show_grid: true
+    include_legend: false
+    show_value_labels: true  # Display values above bars
+
+  # ===== SECTION 5: INFRASTRUCTURE (STACKED AREA) =====
+  # Stacked area charts show per-service container/pod breakdown (k8s only).
+  # Each band represents a container_or_pod (e.g., main container + sidecars).
+  # One chart is generated per service/pod filter.
+  #
+  # Utilization (%) charts require k8s limits to be set. If limits are not
+  # defined, cpu_util_pct/mem_util_pct will be -1 and the chart will return
+  # an error suggesting the raw usage variant instead.
+
+  # --- Percentage Utilization (requires k8s limits) ---
+
+  - id: "CPU_UTILIZATION_STACKED"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_UTILIZATION_STACKED}}"
+    chart_type: "stacked_area"
+    title: "CPU Utilization (%) - {resource_name}"
+    description: "Per-service stacked area chart showing CPU utilization (%) breakdown by container/pod. Requires k8s CPU limits to be set. If limits are not defined, use CPU_USAGE_STACKED instead."
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "CPU Utilization (%)"
+      max: 100
+    fill_alpha: 0.4
+    colors: ["primary", "secondary", "info", "warning"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  - id: "MEM_UTILIZATION_STACKED"
+    placeholder: "{{CHART_PLACEHOLDER: MEM_UTILIZATION_STACKED}}"
+    chart_type: "stacked_area"
+    title: "Memory Utilization (%) - {resource_name}"
+    description: "Per-service stacked area chart showing Memory utilization (%) breakdown by container/pod. Requires k8s Memory limits to be set. If limits are not defined, use MEM_USAGE_STACKED instead."
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Memory Utilization (%)"
+      max: 100
+    fill_alpha: 0.4
+    colors: ["warning", "info", "secondary", "primary"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  # --- Raw Usage (always available, no limits required) ---
+
+  - id: "CPU_USAGE_STACKED"
+    placeholder: "{{CHART_PLACEHOLDER: CPU_USAGE_STACKED}}"
+    chart_type: "stacked_area"
+    title: "CPU Usage ({unit_label}) - {resource_name}"
+    description: "Per-service stacked area chart showing raw CPU usage breakdown by container/pod. Always available regardless of k8s limits."
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "CPU Usage (Millicores)"
+    # Unit configuration: "cores" or "millicores" (default)
+    unit:
+      type: "millicores"  # Options: "cores", "millicores"
+    fill_alpha: 0.4
+    colors: ["primary", "secondary", "info", "warning"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  - id: "MEM_USAGE_STACKED"
+    placeholder: "{{CHART_PLACEHOLDER: MEM_USAGE_STACKED}}"
+    chart_type: "stacked_area"
+    title: "Memory Usage ({unit_label}) - {resource_name}"
+    description: "Per-service stacked area chart showing raw Memory usage breakdown by container/pod. Always available regardless of k8s limits."
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Memory Usage (MB)"
+    # Unit configuration: "gb" or "mb" (default)
+    unit:
+      type: "mb"  # Options: "gb", "mb"
+    fill_alpha: 0.4
+    colors: ["warning", "info", "secondary", "primary"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+    
+  # ===== SECTION 4.4: APPLICATION KPI ANALYSIS =====
+  # KPI charts visualize custom host-based and k8s application metrics
+  # collected via Datadog KPI queries and analyzed by PerfAnalysis.
+  # Data source: kpi_metrics_*.csv files in artifacts/{run_id}/datadog/
+  # CSV columns: env_name, env_tag, scope, hostname, filter,
+  #              container_or_pod, timestamp_utc, metric, value, unit
+
+  # --- Priority KPI Charts ---
+
+  - id: "GC_GEN2_HEAP_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: GC_GEN2_HEAP_LINE}}"
+    chart_type: "single_axis_line"
+    title: "GC Gen2 Heap Size Over Time"
+    description: ".NET Gen2 heap size trend — sustained growth may indicate a memory leak or insufficient GC collection"
+    data_source: "kpi_timeseries"
+    metric_filter: "gc_size_gen2"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Gen2 Heap Size (MB)"
+    unit:
+      type: "mb"  # Raw unit: bytes → display: MB
+    colors: ["kpi_gc_heap"]
+    show_grid: true
+    include_legend: false
+
+  - id: "GC_MEMORY_LOAD_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: GC_MEMORY_LOAD_LINE}}"
+    chart_type: "single_axis_line"
+    title: "GC Memory Load Over Time"
+    description: "GC memory pressure percentage — high values indicate the GC is struggling to reclaim memory"
+    data_source: "kpi_timeseries"
+    metric_filter: "gc_memory_load"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "GC Memory Load (%)"
+    unit:
+      type: "percent"  # Raw unit: percent → display: percent (no conversion)
+    colors: ["kpi_gc_pressure"]
+    show_grid: true
+    include_legend: false
+
+  - id: "SERVER_LATENCY_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: SERVER_LATENCY_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Server-Side Latency (P90) Over Time"
+    description: "Application-reported P90 latency — compare with client-observed response times to isolate network vs app delays"
+    data_source: "kpi_timeseries"
+    metric_filter: "p90_latency"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "P90 Latency (ms)"
+    unit:
+      type: "ms"  # Raw unit: seconds → display: ms
+    colors: ["kpi_latency"]
+    show_grid: true
+    include_legend: false
+
+  - id: "SERVER_THROUGHPUT_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: SERVER_THROUGHPUT_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Server-Side Request Hits Over Time"
+    description: "Application-reported request hits over time — correlates server-side throughput with latency and GC activity"
+    data_source: "kpi_timeseries"
+    metric_filter: "request_hits"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Request Hits"
+    unit:
+      type: "hits"
+    colors: ["kpi_throughput"]
+    show_grid: true
+    include_legend: false
+
+  - id: "HOST_CPU_BREAKDOWN_STACKED"
+    placeholder: "{{CHART_PLACEHOLDER: HOST_CPU_BREAKDOWN_STACKED}}"
+    chart_type: "stacked_area"
+    title: "Host CPU Breakdown - {resource_name}"
+    description: "Host CPU time decomposition (user, system, iowait, stolen, idle) — identifies CPU saturation sources"
+    data_source: "kpi_timeseries"
+    metric_filter:
+      - "host_cpu_user"
+      - "host_cpu_system"
+      - "host_cpu_iowait"
+      - "host_cpu_stolen"
+      - "host_cpu_idle"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "CPU (%)"
+      max: 100
+    unit:
+      type: "percent"  # Raw unit: percent → display: percent (no conversion)
+    fill_alpha: 0.5
+    colors: ["kpi_cpu_user", "kpi_cpu_system", "kpi_cpu_iowait", "kpi_cpu_stolen", "kpi_cpu_idle"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper right"
+
+  - id: "HOST_MEMORY_USAGE_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: HOST_MEMORY_USAGE_LINE}}"
+    chart_type: "single_axis_line"
+    title: "Host Memory Usage - {resource_name}"
+    description: "Host memory usable vs total — monitors available memory headroom under load"
+    data_source: "kpi_timeseries"
+    metric_filter:
+      - "host_mem_usable"
+      - "host_mem_total"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Memory (GB)"
+    unit:
+      type: "gb"  # Raw unit: bytes → display: GB
+    colors: ["kpi_host_mem_usable", "kpi_host_mem_total"]
+    fill_metrics: ["host_mem_usable"]
+    fill_alpha: 0.3
+    show_grid: true
+    include_legend: true
+    legend_location: "upper right"
+
+  - id: "KPI_LATENCY_VUSERS_DUALAXIS"
+    placeholder: "{{CHART_PLACEHOLDER: KPI_LATENCY_VUSERS_DUALAXIS}}"
+    chart_type: "dual_axis_line"
+    title: "Server Latency (P90) vs Virtual Users"
+    description: "Server-side P90 latency correlated with concurrent user load — reveals latency degradation thresholds"
+    data_source: "kpi_performance"
+    metric_filter: "p90_latency"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis_left:
+      label: "P90 Latency (ms)"
+    y_axis_right:
+      label: "Virtual Users"
+    unit:
+      type: "ms"  # Raw unit: seconds → display: ms (left axis)
+    colors: ["kpi_latency", "secondary"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  - id: "HOST_IIS_REQUESTS_MULTILINE"
+    placeholder: "{{CHART_PLACEHOLDER: HOST_IIS_REQUESTS_MULTILINE}}"
+    chart_type: "single_axis_line"
+    title: "IIS Request Methods - {resource_name}"
+    description: "IIS request method volume over time (GET, POST, HEAD)"
+    data_source: "kpi_timeseries"
+    metric_filter:
+      - "host_iis_method_get"
+      - "host_iis_method_post"
+      - "host_iis_method_head"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Requests"
+    unit:
+      type: "requests"
+    colors: ["kpi_iis_get", "kpi_iis_post", "kpi_iis_head"]
+    show_grid: true
+    include_legend: true
+    legend_location: "upper right"
+
+  - id: "HOST_SQL_CONNECTIONS_LINE"
+    placeholder: "{{CHART_PLACEHOLDER: HOST_SQL_CONNECTIONS_LINE}}"
+    chart_type: "single_axis_line"
+    title: "SQL Server User Connections - {resource_name}"
+    description: "SQL Server user connection count over time"
+    data_source: "kpi_timeseries"
+    metric_filter: "host_sql_user_connections"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Connections"
+    unit:
+      type: "connections"
+    colors: ["kpi_sql_connections"]
+    show_grid: true
+    include_legend: false
+
+  - id: "GC_HEAP_ALL_MULTILINE"
+    placeholder: "{{CHART_PLACEHOLDER: GC_HEAP_ALL_MULTILINE}}"
+    chart_type: "single_axis_line"
+    title: "GC Heap Generations - {resource_name}"
+    description: "All GC heap generations over time (Gen0, Gen1, Gen2, LOH)"
+    data_source: "kpi_timeseries"
+    metric_filter:
+      - "gc_size_gen0"
+      - "gc_size_gen1"
+      - "gc_size_gen2"
+      - "gc_size_loh"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis:
+      label: "Heap Size (MB)"
+    unit:
+      type: "mb"  # Raw unit: bytes -> display: MB or GB
+    colors: ["kpi_gc_gen0", "kpi_gc_gen1", "kpi_gc_gen2", "kpi_gc_loh"]
+    line_alpha: 0.85
+    fill_metrics: ["gc_size_gen0", "gc_size_gen1", "gc_size_gen2", "gc_size_loh"]
+    fill_alpha: 0.12
+    show_grid: true
+    include_legend: true
+    legend_location: "upper right"
+
+  - id: "HOST_NETWORK_IO_DUALAXIS"
+    placeholder: "{{CHART_PLACEHOLDER: HOST_NETWORK_IO_DUALAXIS}}"
+    chart_type: "dual_axis_line"
+    title: "Host Network I/O - {resource_name}"
+    description: "Host-level network bytes received vs sent over time"
+    data_source: "kpi_timeseries"
+    metric_filter:
+      - "host_net_bytes_rcvd"
+      - "host_net_bytes_sent"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis_left:
+      label: "Bytes Received (KB)"
+    y_axis_right:
+      label: "Bytes Sent (KB)"
+    unit:
+      type: "kb"  # Raw unit: bytes -> display: KB, MB, or GB
+    colors: ["kpi_network_received", "kpi_network_sent"]
+    fill_alpha: 0.15
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  - id: "HOST_IIS_BYTES_IO_DUALAXIS"
+    placeholder: "{{CHART_PLACEHOLDER: HOST_IIS_BYTES_IO_DUALAXIS}}"
+    chart_type: "dual_axis_line"
+    title: "IIS Bytes I/O - {resource_name}"
+    description: "IIS bytes received vs sent over time"
+    data_source: "kpi_timeseries"
+    metric_filter:
+      - "host_iis_bytes_rcvd"
+      - "host_iis_bytes_sent"
+    x_axis:
+      label: "Time (hh:mm) UTC"
+    y_axis_left:
+      label: "IIS Bytes Received (KB)"
+    y_axis_right:
+      label: "IIS Bytes Sent (KB)"
+    unit:
+      type: "kb"  # Raw unit: bytes -> display: KB, MB, or GB
+    colors: ["kpi_iis_bytes_received", "kpi_iis_bytes_sent"]
+    fill_alpha: 0.15
+    show_grid: true
+    include_legend: true
+    legend_location: "upper left"
+
+  # --- Deferred KPI Charts (TODO) ---
+  # The following charts are planned enhancements that can be added using
+  # the same kpi_timeseries data_source pattern established above.
+  #
+  # NOTE: LOH heap size is included in GC_HEAP_ALL_MULTILINE by default.
+  # Add a separate GC_LOH_HEAP_LINE only if a future analysis need requires isolating LOH.
+  # TODO: HOST_DISK_QUEUE_LINE - Disk queue length over time (single_axis_line, host_disk_queue_length, requests)
+  # TODO: HOST_SQL_COMPILATIONS_LINE - SQL Server compilations (single_axis_line, host_sql_compilations, compilations)
+  # TODO: HOST_PROC_QUEUE_LINE - Processor queue length (single_axis_line, host_proc_queue_length, threads)
+
+  # ===== SECTION 6: CORRELATION =====
+  # CORR_HEATMAP_MATRIX has been deferred. The current correlation_analysis.json
+  # only stores 4 scalar values (not a full NxN matrix), and K8s environments
+  # without resource limits produce None for utilization percentages, making
+  # heatmap rendering unreliable. Can be revisited in the future.
+    
+# Custom chart support
+custom_chart_naming:
+  enabled: true
+  format: "SECTION_METRIC_CHARTTYPE"
+  supported_types:
+    - "LINE"          # Single-axis line chart
+    - "DUALAXIS"      # Dual-axis line chart
+    - "BAR"           # Vertical bar chart (X-axis: categories, Y-axis: values)
+    - "HBAR"          # Horizontal bar chart (Y-axis: categories, X-axis: values)
+    - "STACKED"       # Stacked area chart
+  examples:
+    - "CUSTOM_LATENCY_P99_LINE"
+    - "CUSTOM_ERRORS_VUSERS_DUALAXIS"
+    - "CUSTOM_RUN_COMPARISON_BAR"
+    - "CUSTOM_TOP10_APIS_HBAR"
+    - "CUSTOM_CPU_SERVICES_STACKED"

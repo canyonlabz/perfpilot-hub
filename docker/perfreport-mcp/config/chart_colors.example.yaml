@@ -1,0 +1,104 @@
+# Chart color scheme configuration
+# This file defines color palettes for various chart types.
+# Colors can be specified as hex codes (e.g., "#1f77b4") or named colors.
+
+# -----------------------------------------------
+# Base Colors (used for single-resource charts)
+# -----------------------------------------------
+# These named colors are referenced in chart_schema.yaml via color names
+# like "primary", "secondary", etc.
+primary: "#1f77b4"
+secondary: "#ff7f0e"
+success: "#2ca02c"
+error: "#d62728"
+warning: "#ff9800"
+info: "#17a2b8"
+background: "#ffffff"
+grid: "#e0e0e0"
+
+# -----------------------------------------------
+# KPI Chart Colors
+# -----------------------------------------------
+# Distinct palette for Application KPI charts (Section 4.4).
+# Warm tones for GC/heap metrics visually separate them from
+# the cooler infrastructure blues/greens in Section 4.
+
+# GC heap and pressure (warm reds/oranges)
+kpi_gc_heap: "#E65100"       # Deep orange — GC heap sizes (gen0/gen1/gen2/loh)
+kpi_gc_pressure: "#BF360C"   # Burnt red — GC memory load %
+
+# Application latency (purple — distinct from client-side blue)
+kpi_latency: "#7B1FA2"       # Deep purple — server-side P90/P95/P99 latency
+kpi_throughput: "#00897B"    # Teal — server-side request hits/throughput
+
+# Host CPU breakdown (stacked area — ordered: user, system, iowait, stolen, idle)
+kpi_cpu_user: "#E53935"      # Red — user CPU (typically dominant)
+kpi_cpu_system: "#FF8F00"    # Amber — system/kernel CPU
+kpi_cpu_iowait: "#F4511E"    # Deep orange — I/O wait
+kpi_cpu_stolen: "#AD1457"    # Dark pink — stolen (hypervisor)
+kpi_cpu_idle: "#B0BEC5"      # Blue-gray — idle (low visual weight)
+
+# Host memory (teal/green — distinct from k8s memory charts)
+kpi_host_mem_usable: "#00897B"  # Teal — usable memory
+kpi_host_mem_total: "#B0BEC5"   # Blue-gray — total memory (reference line)
+
+# IIS request methods
+kpi_iis_get: "#1976D2"           # Blue — GET requests
+kpi_iis_post: "#388E3C"          # Green — POST requests
+kpi_iis_head: "#FBC02D"          # Yellow — HEAD requests
+
+# SQL Server metrics
+kpi_sql_connections: "#5E35B1"   # Deep purple — SQL user connections
+
+# Expanded GC heap generations
+kpi_gc_gen0: "#F9C74F"           # Warm gold — Gen0 heap
+kpi_gc_gen1: "#F9844A"           # Soft orange — Gen1 heap
+kpi_gc_gen2: "#C2410C"           # Dark orange — Gen2 heap
+kpi_gc_loh: "#B5179E"            # Magenta — LOH heap
+
+# Host and IIS bytes in/out
+kpi_network_received: "#0288D1"  # Blue — bytes received
+kpi_network_sent: "#C2185B"      # Pink — bytes sent
+kpi_iis_bytes_received: "#00796B" # Teal — IIS bytes received
+kpi_iis_bytes_sent: "#D84315"     # Deep orange — IIS bytes sent
+
+# -----------------------------------------------
+# Multi-Line Chart Colors
+# -----------------------------------------------
+# Used for charts that display multiple hosts/services on the same chart.
+# Colors cycle round-robin when there are more series than colors defined.
+# Supports up to 10 distinct colors for visual differentiation.
+multi_line:
+  # Bright, high-contrast colors that stand out on white backgrounds
+  colors:
+    - "#1f77b4"  # Blue
+    - "#ff7f0e"  # Orange
+    - "#2ca02c"  # Green
+    - "#d62728"  # Red
+    - "#9467bd"  # Purple
+    - "#8c564b"  # Brown
+    - "#e377c2"  # Pink
+    - "#7f7f7f"  # Gray
+    - "#bcbd22"  # Olive
+    - "#17becf"  # Cyan
+
+# -----------------------------------------------
+# Comparison Chart Colors
+# -----------------------------------------------
+# Used for bar charts comparing metrics across multiple test runs.
+# Each test run gets a distinct color from this palette.
+# Supports up to 10 test runs with distinct colors.
+comparison:
+  # Navy-blue gradient palette (light to dark)
+  # Creates a cohesive visual theme for comparing test runs
+  colors:
+    - "#4CC9F0"  # Test Run 1 - Lightest blue
+    - "#4895EF"  # Test Run 2
+    - "#4361EE"  # Test Run 3
+    - "#2B35AF"  # Test Run 4
+    - "#12086F"  # Test Run 5 - Darkest blue
+    - "#560BAD"  # Test Run 6 - Purple transition
+    - "#7209B7"  # Test Run 7
+    - "#B5179E"  # Test Run 8
+    - "#F72585"  # Test Run 9
+    - "#FF006E"  # Test Run 10 - Pink/magenta
