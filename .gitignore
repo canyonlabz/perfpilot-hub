@@ -342,6 +342,7 @@ docker/perfreport-mcp/config/config.yaml
 docker/perfreport-mcp/config/report_config.yaml
 docker/perfreport-mcp/config/chart_schema.yaml
 docker/perfreport-mcp/config/chart_colors.yaml
+docker/github-mcp/config/config.yaml
 
 # Ignore the following AG2 Agent Framework local configuration files (operators
 # copy from .example versions). The .env file is already covered by the global
