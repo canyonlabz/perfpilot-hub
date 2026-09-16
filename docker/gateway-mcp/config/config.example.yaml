@@ -1,0 +1,18 @@
+server:
+  name: "perfpilot-hub"
+  transport: "http"
+  host: "0.0.0.0"
+  port: 8000
+
+servers:
+  # Core servers (Docker-eligible)
+  jmeter: true
+  blazemeter: true
+  datadog: true
+  perfanalysis: true
+  perfreport: true
+  confluence: true
+  perfmemory: true
+  # Local-only servers (disabled in Docker)
+  msteams: false
+  sharepoint: false
