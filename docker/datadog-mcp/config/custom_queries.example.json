@@ -1,0 +1,432 @@
+{
+  "schema_version": "2.0",
+  "apm_queries": {
+    "app_500_errors": {
+      "description": "Application Services - HTTP 500 errors",
+      "query": "service:(my-app-web OR my-worker-sql OR my-worker-http) env:qa-west @http.status_code:500"
+    },
+    "app_all_errors": {
+      "description": "Application Services - All errors",
+      "query": "service:(my-app-web OR my-worker-sql OR my-worker-http) env:qa-west status:error"
+    },
+    "app_slow_requests": {
+      "description": "Application Services - Slow requests (>5s)",
+      "query": "service:(my-app-web OR my-worker-sql OR my-worker-http) env:qa-west @duration:>5000000000"
+    }
+  },
+
+  "log_queries": {
+    "app_error_logs": {
+      "description": "Application Services - Application error logs",
+      "query": "service:my-app-web status:error"
+    },
+    "app_exception_logs": {
+      "description": "Application Services - Logs with stack traces",
+      "query": "service:my-app-web \"Exception\""
+    }
+  },
+
+  "kpi_queries": {
+    "latency_percentiles": {
+      "description": "Latency P90, P95, P99, Max",
+      "scope": "k8s",
+      "interval": 300000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "p90_latency",
+          "query": "p90:trace.aspnet_core.request{env:{{env_tag}},service:{{service_filter}},span.kind:server}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "p95_latency",
+          "query": "p95:trace.aspnet_core.request{env:{{env_tag}},service:{{service_filter}},span.kind:server}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "p99_latency",
+          "query": "p99:trace.aspnet_core.request{env:{{env_tag}},service:{{service_filter}},span.kind:server}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "max_latency",
+          "query": "max:trace.aspnet_core.request{env:{{env_tag}},service:{{service_filter}},span.kind:server}"
+        }
+      ],
+      "formulas": [
+        { "formula": "p90_latency" },
+        { "formula": "p95_latency" },
+        { "formula": "p99_latency" },
+        { "formula": "max_latency" }
+      ]
+    },
+
+    "gc_heap_size": {
+      "description": "GC Heap Size (gen0, gen1, gen2, loh)",
+      "scope": "k8s",
+      "interval": 300000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "gc_size_gen0",
+          "query": "avg:runtime.dotnet.gc.size.gen0{env:{{env_tag}},service:{{service_filter}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "gc_size_gen1",
+          "query": "avg:runtime.dotnet.gc.size.gen1{env:{{env_tag}},service:{{service_filter}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "gc_size_gen2",
+          "query": "avg:runtime.dotnet.gc.size.gen2{env:{{env_tag}},service:{{service_filter}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "gc_size_loh",
+          "query": "avg:runtime.dotnet.gc.size.loh{env:{{env_tag}},service:{{service_filter}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "gc_size_gen0" },
+        { "formula": "gc_size_gen1" },
+        { "formula": "gc_size_gen2" },
+        { "formula": "gc_size_loh" }
+      ]
+    },
+
+    "gc_memory_load": {
+      "description": "GC Memory Load (%)",
+      "scope": "k8s",
+      "interval": 300000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "gc_memory_load",
+          "query": "avg:runtime.dotnet.gc.memory_load{env:{{env_tag}},service:{{service_filter}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "gc_memory_load" }
+      ]
+    },
+
+    "request_hits": {
+      "description": "ASP.NET Core Request Hits",
+      "scope": "k8s",
+      "interval": 300000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "request_hits",
+          "query": "sum:trace.aspnet_core.request.hits{env:{{env_tag}},service:{{service_filter}},span.kind:server}.as_count()"
+        }
+      ],
+      "formulas": [
+        { "formula": "request_hits" }
+      ]
+    },
+
+    "http_errors": {
+      "description": "HTTP Errors by Status Code",
+      "scope": "k8s",
+      "interval": 300000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "http_errors",
+          "query": "sum:trace.http.request.errors{env:{{env_tag}},service:{{service_filter}},span.kind:client} by {http.status_code}.as_count()"
+        }
+      ],
+      "formulas": [
+        { "formula": "http_errors" }
+      ]
+    },
+
+    "host_process_queue_length": {
+      "description": "Process Queue Length",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_proc_queue_length",
+          "query": "system.proc.queue_length{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_proc_queue_length" }
+      ]
+    },
+
+    "host_disk_queue_length": {
+      "description": "Disk Queue Length",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_disk_queue_length",
+          "query": "system.io.avg_q_sz{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_disk_queue_length" }
+      ]
+    },
+
+    "host_cpu_usage": {
+      "description": "CPU Usage (%)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_cpu_idle",
+          "query": "system.cpu.idle{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_cpu_system",
+          "query": "system.cpu.system{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_cpu_iowait",
+          "query": "system.cpu.iowait{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_cpu_user",
+          "query": "system.cpu.user{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_cpu_stolen",
+          "query": "system.cpu.stolen{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_cpu_idle" },
+        { "formula": "host_cpu_system" },
+        { "formula": "host_cpu_iowait" },
+        { "formula": "host_cpu_user" },
+        { "formula": "host_cpu_stolen" }
+      ]
+    },
+
+    "host_memory_breakdown": {
+      "description": "Memory Breakdown",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_mem_usable",
+          "query": "sum:system.mem.usable{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_mem_total",
+          "query": "sum:system.mem.total{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_mem_usable" },
+        { "formula": "host_mem_total" }
+      ]
+    },
+
+    "host_network_traffic": {
+      "description": "Network Traffic (Bytes Per Sec)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_net_bytes_rcvd",
+          "query": "sum:system.net.bytes_rcvd{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_net_bytes_sent",
+          "query": "sum:system.net.bytes_sent{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_net_bytes_rcvd" },
+        { "formula": "host_net_bytes_sent" }
+      ]
+    },
+
+    "host_disk_used": {
+      "description": "Disk Used (By Device)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_disk_used",
+          "query": "sum:system.disk.used{host:{{hostname}}} by {device}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_disk_used" }
+      ]
+    },
+
+    "host_iis_bytes_in_out": {
+      "description": "IIS Bytes In and Out (Per Sec)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_iis_bytes_rcvd",
+          "query": "sum:iis.net.bytes_rcvd{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_bytes_sent",
+          "query": "sum:iis.net.bytes_sent{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_iis_bytes_rcvd" },
+        { "formula": "host_iis_bytes_sent" }
+      ]
+    },
+
+    "host_iis_request_methods": {
+      "description": "IIS Request Methods (Per Sec)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_get",
+          "query": "sum:iis.httpd_request_method.get{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_post",
+          "query": "sum:iis.httpd_request_method.post{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_put",
+          "query": "sum:iis.httpd_request_method.put{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_delete",
+          "query": "sum:iis.httpd_request_method.delete{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_head",
+          "query": "sum:iis.httpd_request_method.head{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_options",
+          "query": "sum:iis.httpd_request_method.options{host:{{hostname}}}"
+        },
+        {
+          "data_source": "metrics",
+          "name": "host_iis_method_trace",
+          "query": "sum:iis.httpd_request_method.trace{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_iis_method_get" },
+        { "formula": "host_iis_method_post" },
+        { "formula": "host_iis_method_put" },
+        { "formula": "host_iis_method_delete" },
+        { "formula": "host_iis_method_head" },
+        { "formula": "host_iis_method_options" },
+        { "formula": "host_iis_method_trace" }
+      ]
+    },
+
+    "host_iis_connections": {
+      "description": "IIS Connections",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_iis_connections",
+          "query": "sum:iis.net.num_connections{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_iis_connections" }
+      ]
+    },
+
+    "host_sql_user_connections": {
+      "description": "SQL Server User Connections",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_sql_user_connections",
+          "query": "sum:sqlserver.stats.connections{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_sql_user_connections" }
+      ]
+    },
+
+    "host_sql_buffer_cache_hit_ratio": {
+      "description": "SQL Server Buffer Cache Hit Ratio",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_sql_buffer_cache_hit_ratio",
+          "query": "avg:sqlserver.buffer.cache_hit_ratio{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_sql_buffer_cache_hit_ratio" }
+      ]
+    },
+
+    "host_sql_lock_waits": {
+      "description": "SQL Server Lock Waits (Per Sec)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_sql_lock_waits",
+          "query": "sum:sqlserver.stats.lock_waits{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_sql_lock_waits" }
+      ]
+    },
+
+    "host_sql_compilations": {
+      "description": "SQL Server SQL Compilations (Per Sec)",
+      "scope": "host",
+      "interval": 60000,
+      "queries": [
+        {
+          "data_source": "metrics",
+          "name": "host_sql_compilations",
+          "query": "sum:sqlserver.stats.sql_compilations{host:{{hostname}}}"
+        }
+      ],
+      "formulas": [
+        { "formula": "host_sql_compilations" }
+      ]
+    }
+  }
+}

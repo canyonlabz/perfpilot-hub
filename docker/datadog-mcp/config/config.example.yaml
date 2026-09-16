@@ -1,0 +1,27 @@
+server:
+  name: "datadog-mcp"
+  version: "0.9.0-rc.1"
+  description: "Datadog MCP Server for infrastructure metrics, logs, and APM trace collection"
+  build:
+    date: "2026-04-19"
+
+general:
+  enable_debug: False   # Enable/disable debug mode
+  enable_logging: True  # Enable/disable logging
+
+artifacts:
+  # Dynamically resolved to {repo_root}/artifacts when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  artifacts_path: ""
+
+datadog:
+  ssl_verification: "disabled"     # Options: "ca_bundle" (use certs from env vars) or "disabled" (skip verification)
+  time_zone: "America/New_York"  # Set the time zone
+  # Dynamically resolved to {repo_root}/datadog-mcp/environments.json when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  environments_json_path: ""
+  # Dynamically resolved to {repo_root}/datadog-mcp/custom_queries.json when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  custom_queries_json_path: ""
+  log_page_limit: 100  # Number of log entries to fetch per page
+  apm_page_limit: 100  # Number of APM traces to fetch per page

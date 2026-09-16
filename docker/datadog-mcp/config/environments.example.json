@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.1",
+  "environments": {
+    "QA1": {
+      "env_tag": "qa1",
+      "kube_namespace": "my-app-qa-eastus",
+      "metadata": {
+        "platform": "Azure Kubernetes",
+        "description": "QA1 environment for testing"
+      },
+      "tags": ["example", "test"],
+      "services": [],
+      "hosts": [],
+      "kubernetes": {
+        "services": [
+          {
+            "service_filter": "my-app-api",
+            "description": "My App microservice"
+          }
+        ],
+        "pods": [
+          {
+            "pod_filter": "app-web*",
+            "description": "App Web Pod"
+          },
+          {
+            "pod_filter": "app-worker*",
+            "description": "App Worker Pod"
+          }
+        ]
+      }
+    },
+    "QA3": {
+      "env_tag": "qa3",
+      "namespace": "my-app-qa3-eastus",
+      "metadata": {
+        "platform": "Azure Kubernetes",
+        "description": "QA3 environment using Datadog-native key aliases (kube_service, namespace)"
+      },
+      "tags": ["example", "test"],
+      "services": [],
+      "hosts": [],
+      "kubernetes": {
+        "services": [
+          {
+            "kube_service": "my-app-api",
+            "description": "My App microservice (using kube_service alias)"
+          }
+        ],
+        "pods": [
+          {
+            "kube_service": "app-web*",
+            "description": "App Web Pod (using kube_service alias)"
+          },
+          {
+            "kube_service": "app-worker*",
+            "description": "App Worker Pod (using kube_service alias)"
+          }
+        ]
+      }
+    },
+    "QA2": {
+      "env_tag": "qa2",
+      "metadata": {
+        "platform": "Windows Servers",
+        "description": "QA2 environment for testing"
+      },
+      "tags": ["example", "test"],
+      "services": [],
+      "hosts": [
+        {"hostname": "az-web-01", "description": "webserver"},
+        {"hostname": "az-web-02", "description": "webserver"},
+        {"hostname": "az-db-01", "description": "database"},
+        {"hostname": "az-db-02", "description": "database"},
+        {"hostname": "az-app-01", "description": "application server"},
+        {"hostname": "az-app-02", "description": "application server"}
+      ],
+      "kubernetes": {
+        "services": []
+      }
+    }
+  }
+}
