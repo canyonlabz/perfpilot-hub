@@ -327,9 +327,9 @@ mcp-perf-suite/perfreport-mcp/tests/**
 docker/config/gateway/config.yaml
 docker/blazemeter-mcp/config/config.yaml
 docker/confluence-mcp/config/config.yaml
-docker/config/datadog/config.yaml
-docker/config/datadog/environments.json
-docker/config/datadog/custom_queries.json
+docker/datadog-mcp/config/config.yaml
+docker/datadog-mcp/config/environments.json
+docker/datadog-mcp/config/custom_queries.json
 docker/config/jmeter/config.yaml
 docker/config/jmeter/jmeter_config.yaml
 docker/config/jmeter/correlation_config.yaml
