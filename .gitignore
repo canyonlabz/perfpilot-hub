@@ -334,8 +334,8 @@ docker/jmeter-mcp/config/config.yaml
 docker/jmeter-mcp/config/jmeter_config.yaml
 docker/jmeter-mcp/config/correlation_config.yaml
 docker/jmeter-mcp/config/jmeter-overrides.properties
-docker/config/perfanalysis/config.yaml
-docker/config/perfanalysis/slas.yaml
+docker/perfanalysis-mcp/config/config.yaml
+docker/perfanalysis-mcp/config/slas.yaml
 docker/config/perfmemory/config.yaml
 docker/config/perfmemory/taxonomy.yaml
 docker/config/perfreport/config.yaml
