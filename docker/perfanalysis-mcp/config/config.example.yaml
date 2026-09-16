@@ -1,0 +1,74 @@
+server:
+  name: "perfanalysis-mcp"
+  version: "0.9.0-rc.1"
+  description: "Performance Analysis MCP Server for BlazeMeter and Datadog correlation"
+  build:
+    date: "2026-04-19"
+
+general:
+  enable_debug: False   # Enable/disable debug mode
+  enable_logging: True  # Enable/disable logging
+
+artifacts:
+  # Dynamically resolved to {repo_root}/artifacts when left empty.
+  # Set an explicit absolute path here only if you need a custom location.
+  artifacts_path: ""
+
+# Performance Analysis Settings
+perf_analysis:
+  # DEPRECATED: response_time_sla is no longer used.
+  # SLA thresholds are now defined in slas.yaml (per-profile, per-API).
+  # See slas.example.yaml for configuration details.
+  # response_time_sla: 5000
+  load_tool: "blazemeter"  # Options: blazemeter, jmeter, gatling
+  apm_tool: "datadog"  # Options: datadog, newrelic, appdynamics, dynatrace
+  statistical_confidence: 0.95
+  anomaly_sensitivity:
+    low: 3.0      # Standard deviations
+    medium: 2.5
+    high: 2.0
+  correlation_threshold: 0.3
+  min_samples_required: 100
+  correlation_granularity_window: 60  # seconds (1 minute)
+  
+  # Infrastructure utilization thresholds
+  resource_thresholds:
+    cpu:
+      high: 80          # CPU usage % - high utilization warning
+      low: 20           # CPU usage % - under-utilization warning
+    memory:
+      high: 85          # Memory usage % - high utilization warning  
+      low: 15           # Memory usage % - under-utilization warning
+
+  # Bottleneck analysis settings
+  # Answers: "At what concurrency does performance degrade, and what is the limiting factor?"
+  bottleneck_analysis:
+    bucket_seconds: 60            # Time bucket width in seconds
+    warmup_buckets: 2             # Buckets to skip at test start (JMeter ramp-up)
+    sustained_buckets: 2          # Consecutive buckets required to confirm a finding
+    persistence_ratio: 0.6        # Min fraction of remaining test that must stay degraded
+    rolling_window_buckets: 3     # Window size for rolling median smoothing (outlier filtering)
+    latency_degrade_pct: 25.0     # P90 latency increase % over baseline to flag degradation
+    error_rate_degrade_abs: 5.0   # Absolute error rate % to flag as degraded
+    throughput_plateau_pct: 5.0   # Throughput growth % below which is considered a plateau
+    # DEPRECATED: sla_p90_ms is no longer used.
+    # SLA thresholds are resolved dynamically from slas.yaml.
+    # sla_p90_ms: null
+    cpu_high_pct: null            # CPU saturation threshold. null = use resource_thresholds.cpu.high
+    memory_high_pct: null         # Memory saturation threshold. null = use resource_thresholds.memory.high
+    raw_metric_degrade_pct: 50.0  # Relative increase from baseline to flag when utilization % unavailable (no K8s limits)
+    max_jtl_rows: null            # null = load all rows; set to e.g. 2000000 to cap memory on very large JTL files
+
+# Output Settings
+output:
+  default_format: "json"
+  include_charts: false
+  precision: 4
+  create_markdown: true
+  create_csv: true
+
+# Data Processing
+data_processing:
+  jmeter_required_columns: ["timeStamp", "elapsed", "label", "responseCode", "success"]
+  datadog_metrics: ["cpu", "memory"]
+  time_window_alignment: "1min"

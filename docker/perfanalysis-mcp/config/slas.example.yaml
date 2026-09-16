@@ -1,0 +1,102 @@
+# =============================================================================
+# SLA Configuration
+# =============================================================================
+# This file is the single source of truth for all SLA thresholds.
+# SLA profiles are agnostic -- they can apply to API testing, E2E testing,
+# or any test type.
+#
+# REQUIRED: This file must exist as 'slas.yaml' for SLA evaluation to run.
+#           Copy this example file and customize it for your environment:
+#             cp slas.example.yaml slas.yaml
+#
+# NOTE: Throughput SLAs (requests/sec) will be supported in a future version.
+# =============================================================================
+
+version: "1.0"
+
+# =============================================================================
+# Default SLA
+# =============================================================================
+# Applied when no SLA profile matches or no sla_id is provided.
+# All fields below are REQUIRED at this level.
+#
+# Fields:
+#   response_time_sla_ms  - Response time threshold in milliseconds.
+#   sla_unit              - The percentile metric to compare against the SLA.
+#                           Options: P90, P95, P99
+#   error_rate_threshold  - Maximum acceptable error rate as a percentage.
+#                           If the actual error rate exceeds this value, the
+#                           API is flagged as non-compliant.
+# =============================================================================
+default_sla:
+  response_time_sla_ms: 5000
+  sla_unit: "P90"
+  error_rate_threshold: 1.0
+
+# =============================================================================
+# SLA Profiles
+# =============================================================================
+# Define one or more SLA profiles below. Each profile has:
+#   - id            (required) Unique identifier, passed as 'sla_id' to tools.
+#   - description   (optional) Human-readable description.
+#   - default_sla   (required) Default thresholds for this profile.
+#                    'response_time_sla_ms' is required; 'sla_unit' and
+#                    'error_rate_threshold' are optional and inherit from
+#                    the file-level default_sla if omitted.
+#   - api_overrides  (optional) List of pattern-based SLA overrides for
+#                    specific APIs or test case groupings.
+#
+# Pattern Matching Precedence (most-specific-first):
+#   1. Full JMeter label   - e.g., "TC01_TS02_/api/orders/export"
+#   2. TC#_TS# or TC#_S#   - e.g., "TC01_TS02_*" (all APIs in that step)
+#   3. TC#                  - e.g., "TC01_*" (all steps and APIs in that case)
+#
+# Within the same specificity level, the first match in file order wins.
+# Patterns use glob-style wildcards (* matches any characters).
+# =============================================================================
+slas:
+  # ===== Order Management APIs =====
+  - id: "order_management"
+    description: "Order Management Service APIs"
+    default_sla:
+      response_time_sla_ms: 5000
+      sla_unit: "P90"
+      error_rate_threshold: 1.0
+    api_overrides:
+      # Bulk export endpoint gets a relaxed SLA
+      - pattern: "*/orders/export*"
+        response_time_sla_ms: 10000
+        error_rate_threshold: 2.0
+        reason: "Bulk export endpoint, inherently slower"
+      # Token refresh should be fast
+      - pattern: "*/oauth/token*"
+        response_time_sla_ms: 500
+        reason: "Critical auth path"
+      # All APIs under Test Case 03, Test Step 01 get a custom SLA
+      - pattern: "TC03_TS01_*"
+        response_time_sla_ms: 3000
+        reason: "Search workflow with complex queries"
+      # All APIs under Test Case 02 get a shared SLA
+      - pattern: "TC02_*"
+        response_time_sla_ms: 4000
+        reason: "Checkout workflow"
+
+  # ===== Customer Portal E2E =====
+  - id: "customer_portal"
+    description: "Customer Portal End-to-End Workflows"
+    default_sla:
+      response_time_sla_ms: 2000
+      sla_unit: "P90"
+      error_rate_threshold: 1.5
+    api_overrides:
+      - pattern: "TC01_*"
+        response_time_sla_ms: 3000
+        reason: "Initial page load transactions"
+
+  # ===== Legacy Services (migration baseline) =====
+  - id: "legacy_services"
+    description: "Legacy services for baseline comparison"
+    default_sla:
+      response_time_sla_ms: 8000
+      sla_unit: "P90"
+      error_rate_threshold: 2.0
