@@ -1,5 +1,48 @@
 # Docker Gateway — macOS Build & Runtime Troubleshooting
 
+> ⚠️ **HISTORICAL DOCUMENT — pre-Phase-1 monolithic gateway**
+>
+> This guide was written when PerfPilot Hub shipped as a **single monolithic
+> Docker image** (`Dockerfile.gateway` → `perfpilot-hub-full:latest`, exposed
+> on port `8000`). The Phase 1 Docker restructure fundamentally reorganized
+> the deployment topology — the specific file names, image names, ports, and
+> `.env` paths referenced below **no longer exist in the current codebase**.
+>
+> **Topology changes at a glance:**
+>
+> | Old (this document) | New (current repo) |
+> |---|---|
+> | Single `Dockerfile.gateway` → monolithic `perfpilot-hub-full:latest` | Per-MCP images: `perfpilot-mcp-<name>` (9 MCPs) + `perfpilot-mcp-gateway` aggregator |
+> | Port `8000`, endpoint `/mcp` | Gateway on `8125` at `/perfpilot-mcp-gateway/mcp`; each MCP on its own `81xx` port |
+> | `.env.gateway` operator file | `docker/.env` (union of all secrets, copied from `docker/.env.example`) |
+> | `docker-compose-full-{mac,windows}.yaml` builds one image | Same file names, but each now orchestrates 14 containers |
+> | Java + Python + Node all in one image | Each stack lives in its own dedicated per-MCP image |
+>
+> **What still applies conceptually:**
+>
+> The five root-cause categories investigated here — corporate CA on the OS
+> trust store (Issue 1), Java PKIX / `cacerts` import (Issue 2), Python
+> `SSL_CERT_FILE` (Issue 3), JKS keystore path handling (Issue 4), and
+> multi-architecture `TARGETARCH` (Issue 5) — are all still relevant to the
+> current per-MCP images. Phase 1 folded corporate-CA install into every
+> Python image, and Java-specific handling now lives inside
+> `docker/jmeter-mcp/Dockerfile` (the only image that ships a JDK).
+>
+> **Where to look for current guidance:**
+>
+> - [`docker/README.md`](../../docker/README.md) — top-level Docker guide
+>   covering the new topology, port allocation, corporate CA setup, cert drop
+>   points, and macOS-specific PostgreSQL workarounds
+> - Each per-MCP sub-folder has its own README with build/run instructions,
+>   env vars, and any component-specific quirks (JMeter's JKS handling,
+>   Playwright's cert store, etc.)
+>
+> This document is retained as a record of the original root-cause
+> investigation. If you are running the current (Phase 1+) setup, consult
+> `docker/README.md` first — the fixes below are informational only.
+
+---
+
 Guide for resolving Docker build and runtime issues when building the PerfPilot Hub
 gateway image on a corporate-managed macOS machine (Apple Silicon) with HTTPS-intercepting
 proxy.

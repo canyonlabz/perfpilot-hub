@@ -92,7 +92,7 @@ perfpilot-hub/
 │   ├── sharepoint-mcp/    # SharePoint artifact storage
 │   ├── artifacts/         # Test artifacts, reports, JTLs, logs, and generated files
 │   └── streamlit-ui/      # Web UI for viewing performance test results
-├── docker/                # Compose files, Dockerfiles, and config templates
+├── docker/                # Per-MCP Dockerfiles, compose files, and full-stack deployment (see docker/README.md)
 └── docs/                  # Public documentation
 ```
 
@@ -253,7 +253,7 @@ PerfPilot is currently being assembled from the original `mcp-perf-suite` projec
 | A2A Server           | Active development                                   |
 | AG-UI Backend        | Active development                                   |
 | CopilotKit Web UI    | Active development                                   |
-| Docker Compose       | Planned / evolving                                   |
+| Docker Compose       | Complete (Phase 1) — per-MCP images, full-stack topology |
 | Public documentation | In progress                                          |
 
 ---
@@ -276,8 +276,22 @@ Then follow the setup instructions inside each major module:
 | --------------- | ------------------ | ------------------------------------------------------------------ |
 | Agent Framework | `agent-framework/` | Multi-agent orchestration, A2A server, AG-UI backend, and frontend |
 | MCP Perf Suite  | `mcp-perf-suite/`  | MCP gateway and specialized performance testing MCP servers        |
-| Docker          | `docker/`          | Local containers, databases, and service orchestration             |
+| Docker          | `docker/`          | Per-MCP images + full-stack Compose ([docker/README.md](docker/README.md)) |
 | Docs            | `docs/`            | Public documentation and architecture notes                        |
+
+### 🐳 Docker deployment (fastest path)
+
+If you'd rather skip module-by-module setup and just run the stack, PerfPilot Hub ships a full-stack Docker Compose deployment:
+
+```bash
+cd docker/
+cp .env.example .env         # populate your API keys / passwords
+docker compose -f docker-compose-full-windows.yaml up --build   # or -mac.yaml
+```
+
+That command builds and starts **14 containers** — the PostgreSQL database, all nine MCP servers, the gateway aggregator, the Playwright browser automation server, the A2A + AG-UI agent backends, and the Next.js UI — with health checks and dependency ordering handled automatically.
+
+See [`docker/README.md`](docker/README.md) for the full deployment guide (prerequisites, port allocation, corporate-CA setup, macOS-specific PostgreSQL notes, per-MCP READMEs, and legacy → canonical migration).
 
 ---
 
@@ -285,9 +299,9 @@ Then follow the setup instructions inside each major module:
 
 Planned areas of work include:
 
-* [ ] Normalize environment configuration across agents, MCPs, and Docker
-* [ ] Add root-level Docker Compose orchestration
-* [ ] Add one-command local startup for database, MCP gateway, agents, and UI
+* [x] ~~Normalize environment configuration across agents, MCPs, and Docker~~ — ✅ Implemented (unified `docker/.env.example`, per-MCP `.env.example`, `DEPLOYMENT_MODE` toggle)
+* [x] ~~Add root-level Docker Compose orchestration~~ — ✅ Implemented (`docker/docker-compose-full-{mac,windows}.yaml` orchestrating 14 containers)
+* [x] ~~Add one-command local startup for database, MCP gateway, agents, and UI~~ — ✅ Implemented (`docker compose -f docker-compose-full-<os>.yaml up --build`)
 * [ ] Expand specialist agents beyond the first working vertical slices
 * [ ] Add human-in-the-loop approval cards in the Web UI
 * [ ] Add persistent multi-thread conversation history
