@@ -35,7 +35,7 @@ COPY docker/perfanalysis-mcp/config/config.yaml ./perfanalysis-mcp/config.yaml
 COPY docker/perfanalysis-mcp/config/slas.yaml ./perfanalysis-mcp/slas.yaml
 COPY docker/datadog-mcp/config/environments.json /app/datadog-mcp/environments.json
 COPY docker/perfanalysis-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -46,7 +46,7 @@ ENV OTEL_SERVICE_NAME=perfpilot-mcp-perfanalysis
 
 EXPOSE 8113
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -sS -o /dev/null http://localhost:8113/perfpilot-mcp-perfanalysis/mcp || exit 1
+    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
 
 WORKDIR /app/perfanalysis-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]

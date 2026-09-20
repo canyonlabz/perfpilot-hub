@@ -126,7 +126,7 @@ Choose one of three providers via `EMBEDDING_PROVIDER`:
 
 | Variable | Standalone default | Full-stack value | Purpose |
 |---|---|---|---|
-| `POSTGRES_HOST` | `localhost` | `perfmem-pgvector-age` | Database host |
+| `POSTGRES_HOST` | `host.docker.internal` | `perfmem-pgvector-age` | Database host — see note below |
 | `POSTGRES_PORT` | `5432` | `5432` | Database port |
 | `POSTGRES_DB` | `perfmemory` | `perfmemory` | Database name |
 | `POSTGRES_USER` | `perfadmin` | `perfadmin` | Database user |
@@ -134,6 +134,16 @@ Choose one of three providers via `EMBEDDING_PROVIDER`:
 | `POSTGRES_SSLMODE` | `prefer` | `prefer` | SSL mode (`disable`, `prefer`, `require`, `verify-ca`, `verify-full`) |
 | `POSTGRES_SSLROOTCERT` | *(unset)* | *(unset)* | Optional path to CA cert for `verify-ca` / `verify-full` |
 
+> 🌐 **Networking note — `POSTGRES_HOST` for standalone deployments.**
+> The MCP runs as a container. `localhost` inside a container resolves to
+> the container itself, not your host and not the DB container. When the
+> DB is started separately via `docker/postgresql/` (a different Docker
+> network), use `POSTGRES_HOST=host.docker.internal` — Docker Desktop's
+> magic hostname that resolves to the host, where the DB's port 5432 is
+> bound. For the full-stack compose (both containers on the shared
+> network), use `POSTGRES_HOST=perfmem-pgvector-age` (the DB container's
+> name). The full-stack `docker/.env` already sets this correctly.
+>
 > 🔒 **Security note** — `.env` contains sensitive credentials and is
 > gitignored by default. It must not be committed. Only `.env.example`
 > (with empty values) is tracked in the repository.
@@ -222,6 +232,7 @@ for the full three-layer story.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Container restart loop with `psycopg2.OperationalError: could not connect to server` | Postgres not running, wrong host, or wrong credentials | Verify the [`perfpilot-mcp-postgresql`](../postgresql/README.md) container is up and `.env` values match |
+| Tool call returns `Connection refused ... at "localhost" ... port 5432` (MCP itself is healthy) | `POSTGRES_HOST=localhost` in the standalone `.env`. Inside a container, `localhost` is the container itself, not the host or DB. | Change `.env` to `POSTGRES_HOST=host.docker.internal` (standalone) or `POSTGRES_HOST=perfmem-pgvector-age` (full-stack), then `docker restart perfpilot-mcp-perfmemory`. See §🗄️ PostgreSQL connection note above. |
 | Container restart loop with `psycopg2.OperationalError: FATAL: database "perfmemory" does not exist` | Postgres running but database not initialized | Restart the postgres container; the entrypoint auto-creates the `perfmemory` database on first launch |
 | Embedding calls fail with `401 Unauthorized` | Wrong API key for the selected `EMBEDDING_PROVIDER` | Regenerate the key and update `.env` |
 | Embedding calls succeed but semantic search returns unrelated results | Wrong embedding model or mismatched dimensions between stored and query embeddings | Verify `OPENAI_EMBEDDING_MODEL` (or Azure / Ollama equivalent) matches the model used to store the original entries; regenerate embeddings if needed |

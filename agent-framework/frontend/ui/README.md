@@ -55,7 +55,7 @@ No manual configuration is required for local development. The app is
 pre-configured to:
 
 - Run on **port 3000**
-- Proxy `/api/*` requests to the AG-UI backend on **port 8002**
+- Proxy `/api/*` requests to the AG-UI backend on **port 8102**
 - Proxy `/health` to the backend health endpoint
 - Connect to the `perfpilot-orchestrator` agent via CopilotKit
 
@@ -118,14 +118,14 @@ cd agent-framework
 python agui_server.py
 ```
 
-This starts the AG-UI bridge on **port 8002**, which:
+This starts the AG-UI bridge on **port 8102**, which:
 - Serves the `/copilotkit/` SSE streaming endpoint
 - Hosts thread CRUD under `/api/threads/*`
 - Hosts the conversation message history under `/api/threads/{id}/messages`
 - Connects to PostgreSQL for persistent conversation state
 - Dispatches to the real AG2 orchestrator agent
 
-Wait for `Uvicorn running on http://0.0.0.0:8002` before proceeding.
+Wait for `Uvicorn running on http://0.0.0.0:8102` before proceeding.
 
 ### Step 3 — Start the frontend
 
@@ -172,14 +172,14 @@ Browser (localhost:3000)
 │   └── POST /api/copilotkit
 │
 ├── Next.js API Route (CopilotKit Runtime + HttpAgent)
-│   └── Forwards to http://localhost:8002/copilotkit/
+│   └── Forwards to http://localhost:8102/copilotkit/
 │       (with browser cookie for user identity)
 │
 ├── Next.js Rewrites (next.config.js)
-│   ├── /api/* → http://localhost:8002/api/*
-│   └── /health → http://localhost:8002/health
+│   ├── /api/* → http://localhost:8102/api/*
+│   └── /health → http://localhost:8102/health
 │
-└── AG-UI Bridge (port 8002, agui_server.py)
+└── AG-UI Bridge (port 8102, agui_server.py)
     └── AG2 Orchestrator → Specialist Agents
 ```
 
@@ -230,7 +230,7 @@ Browser (localhost:3000)
 
 ## Changing Ports
 
-The default ports (3000 for frontend, 8002 for backend) may conflict with other
+The default ports (3000 for frontend, 8102 for backend) may conflict with other
 services on your machine. All port references are configurable — here is the
 complete list of files to update.
 
@@ -246,15 +246,15 @@ npm run dev -- --port 3001
 No file edits are needed for the frontend port itself. However, the **backend
 CORS allowlist** must be updated to accept the new origin (see below).
 
-### Backend AG-UI port (default: 8002)
+### Backend AG-UI port (default: 8102)
 
 | # | File | What to change |
 |---|------|----------------|
 | 1 | `.env` | Set `AGUI_PORT=8082` (or your chosen port) |
-| 2 | `frontend/ui/next.config.js` | Update both `destination` URLs from `http://localhost:8002` to `http://localhost:8082` |
-| 3 | `frontend/ui/app/api/copilotkit/route.ts` | Update the `HttpAgent` URL from `http://localhost:8002/copilotkit/` to `http://localhost:8082/copilotkit/` |
+| 2 | `frontend/ui/next.config.js` | Update both `destination` URLs from `http://localhost:8102` to `http://localhost:8082` |
+| 3 | `frontend/ui/app/api/copilotkit/route.ts` | Update the `HttpAgent` URL from `http://localhost:8102/copilotkit/` to `http://localhost:8082/copilotkit/` |
 
-### Backend A2A port (default: 8001)
+### Backend A2A port (default: 8101)
 
 | # | File | What to change |
 |---|------|----------------|
@@ -276,8 +276,8 @@ AGUI_CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
 | Setting | Default | Env var | Files with hardcoded references |
 |---------|---------|---------|--------------------------------|
 | Frontend dev server | 3000 | (CLI `--port`) | — |
-| AG-UI backend | 8002 | `AGUI_PORT` | `next.config.js`, `route.ts` |
-| A2A server | 8001 | `A2A_PORT` | `orchestrator/agent.py` (overridable via `PERFPILOT_A2A_BASE_URL`) |
+| AG-UI backend | 8102 | `AGUI_PORT` | `next.config.js`, `route.ts` |
+| A2A server | 8101 | `A2A_PORT` | `orchestrator/agent.py` (overridable via `PERFPILOT_A2A_BASE_URL`) |
 | CORS origins | localhost:3000 | `AGUI_CORS_ORIGINS` | `agui_server.py` (fallback list) |
 | Gateway MCP | 8000 | `GATEWAY_MCP_URL` | `.env` |
 | PostgreSQL | 5432 | `PERFAGENT_STATE_PORT` | `.env` |

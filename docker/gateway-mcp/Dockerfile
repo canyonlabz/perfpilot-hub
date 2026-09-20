@@ -37,7 +37,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY mcp-perf-suite/gateway-mcp/ ./gateway-mcp/
 COPY docker/gateway-mcp/config/config.yaml ./gateway-mcp/config.yaml
 COPY docker/gateway-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -48,7 +48,7 @@ ENV OTEL_SERVICE_NAME=perfpilot-mcp-gateway
 
 EXPOSE 8125
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -f http://localhost:8125/health || exit 1
+    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
 
 WORKDIR /app/gateway-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]

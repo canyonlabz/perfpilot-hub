@@ -70,7 +70,7 @@ retries: 2
 # 4. Timeouts
 # =============================================================================
 # Soft timeout for any single tool call the orchestrator makes against
-# its own A2A surface (port 8001). Long-running specialist work is
+# its own A2A surface (port 8101). Long-running specialist work is
 # polled via `check_task_status`; this timeout governs the call to start
 # / status-check, not the duration of the underlying load test.
 timeout_seconds: 60
@@ -120,12 +120,12 @@ pipeline:
 # 8. Tool loop parameters (A2A multi-turn execution)
 # =============================================================================
 # Controls the multi-turn tool-execution loop used when the orchestrator
-# runs via the A2A surface (port 8001). The loop lets the orchestrator
+# runs via the A2A surface (port 8101). The loop lets the orchestrator
 # call its four tools (list_available_specialists, delegate_to_specialist,
 # check_task_status, request_human_approval) and feed results back to the
 # LLM until a final text reply is produced.
 #
-# The Web UI path (port 8002) is unaffected — CopilotKit manages its own
+# The Web UI path (port 8102) is unaffected — CopilotKit manages its own
 # loop independently.
 max_tool_rounds: 10              # Max LLM round-trips before forced exit
 max_consecutive_repeats: 3       # Exit if same non-polling tool called N times identically

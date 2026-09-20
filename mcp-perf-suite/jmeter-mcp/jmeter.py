@@ -945,12 +945,17 @@ mcp.disable(tags={"deprecated"})
 # -----------------------------
 if __name__ == "__main__":
     from utils.logging_config import configure_logging
+    from utils.mcp_utils import register_health_route
 
     configure_logging()
     try:
         if os.environ.get("MCP_TRANSPORT", "stdio") == "http":
             prefix = os.environ.get("MCP_HTTP_PREFIX", "/perfpilot-mcp-jmeter")
             port = int(os.environ.get("HTTP_PORT", "8112"))
+
+            # Register the prefixed /health route (HTTP transport only).
+            register_health_route(mcp, prefix, "perfpilot-mcp-jmeter")
+
             mcp.run(
                 transport="http",
                 host="0.0.0.0",

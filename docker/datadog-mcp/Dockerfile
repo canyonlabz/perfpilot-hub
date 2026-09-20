@@ -35,7 +35,7 @@ COPY docker/datadog-mcp/config/config.yaml ./datadog-mcp/config.yaml
 COPY docker/datadog-mcp/config/environments.json ./datadog-mcp/environments.json
 COPY docker/datadog-mcp/config/custom_queries.json ./datadog-mcp/custom_queries.json
 COPY docker/datadog-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -46,7 +46,7 @@ ENV OTEL_SERVICE_NAME=perfpilot-mcp-datadog
 
 EXPOSE 8111
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -sS -o /dev/null http://localhost:8111/perfpilot-mcp-datadog/mcp || exit 1
+    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
 
 WORKDIR /app/datadog-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]

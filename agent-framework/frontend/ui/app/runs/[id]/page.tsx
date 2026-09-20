@@ -95,7 +95,7 @@ export default function RunDetailPage() {
                 Failed to load run details
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Make sure the AG-UI backend is running on port 8002.
+                Make sure the AG-UI backend is running on port 8102.
               </p>
               <button
                 onClick={() => loadDetail()}

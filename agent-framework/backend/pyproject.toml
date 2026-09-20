@@ -14,7 +14,7 @@ dependencies = [
   # MCP client - reaches the PerfPilot Hub gateway (perf-gateway:8000)
   "fastmcp>=3.4.2,<4",
 
-  # FastAPI + ASGI for the A2A server (port 8001) and AG-UI bridge (port 8002)
+  # FastAPI + ASGI for the A2A server (port 8101) and AG-UI bridge (port 8102)
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.32.0",
 

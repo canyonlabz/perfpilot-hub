@@ -305,7 +305,6 @@ services:
       - "--headless"
       - "--browser"
       - "chromium"
-      - "--save-trace"
       - "--output-dir"
       - "/home/node/output"
     volumes:

@@ -54,8 +54,8 @@ RUN npm ci
 COPY agent-framework/frontend/ui/ ./
 
 # ── Environment defaults ─────────────────────────────────────────────
-ENV AGUI_BACKEND_URL=http://localhost:8002
-ENV A2A_BACKEND_URL=http://localhost:8001
+ENV AGUI_BACKEND_URL=http://localhost:8102
+ENV A2A_BACKEND_URL=http://localhost:8101
 ENV FRONTEND_PORT=3000
 
 EXPOSE 3000

@@ -9,7 +9,7 @@
 #   • Vendor image (Microsoft playwright-mcp). Endpoint is `/mcp`, not
 #     `/perfpilot-mcp-playwright/mcp` — the vendor image does not accept
 #     a path prefix, so MCP_TRANSPORT / MCP_HTTP_PREFIX are NOT set here.
-#   • Browser settings (browser, headless, save-trace, output-dir) are
+#   • Browser settings (browser, headless, output-dir) are
 #     passed via CLI flags rather than a mounted config.json so this
 #     compose file has no config bind mounts.
 #   • Traces / HAR files are written under `/home/node/output` inside
@@ -45,7 +45,6 @@ services:
       - "--headless"
       - "--browser"
       - "chromium"
-      - "--save-trace"
       - "--output-dir"
       - "/home/node/output"
     volumes:

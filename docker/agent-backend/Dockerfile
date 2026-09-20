@@ -5,22 +5,23 @@
 # Docker-compose creates two services from this image, each
 # with a different CMD:
 #
-#   A2A Server:  CMD ["python", "a2a_server.py"]     -> port 8001
-#   AG-UI Server: CMD ["python", "agui_server.py"]   -> port 8002
+#   A2A Server:  CMD ["python", "a2a_server.py"]     -> port 8101
+#   AG-UI Server: CMD ["python", "agui_server.py"]   -> port 8102
 #
 # Build (standard):
-#   docker build -f docker/Dockerfile.agent-backend -t perf-agent-backend .
+#   docker build -f docker/agent-backend/Dockerfile -t perfpilot-a2a .
 #
 # Build (corporate CA / HTTPS-intercepting proxy):
 #   1. Place your CA PEM bundle(s) in docker/certs/corporate/
-#   2. Set ENABLE_CORP_CA=true in docker/.env.gateway
+#   2. Set ENABLE_CORP_CA=true in docker/.env (or docker/agent-backend/.env
+#      for the standalone workflow)
 #   3. Rebuild via docker-compose (the compose files pass it as a build arg)
 #
 # Run A2A server:
-#   docker run -p 8001:8001 perf-agent-backend
+#   docker run -p 8101:8101 perfpilot-a2a
 #
 # Run AG-UI server:
-#   docker run -p 8002:8002 perf-agent-backend python agui_server.py
+#   docker run -p 8102:8102 perfpilot-a2a python agui_server.py
 # =============================================================================
 
 FROM python:3.12-slim
@@ -66,15 +67,33 @@ COPY agent-framework/backend/ ./
 # ── Environment defaults ─────────────────────────────────────────────
 ENV PERFPILOT_DOCKER=true
 
-# Ports: A2A server (8001), AG-UI server (8002)
+# Ports: A2A server (8101), AG-UI server (8102)
 # Only one runs per container instance; both are exposed for flexibility.
-EXPOSE 8001 8002
+EXPOSE 8101 8102
 
-# Health check probes the A2A server by default.
-# Override HEALTHCHECK_PORT for AG-UI containers.
-ENV HEALTHCHECK_PORT=8001
+# Liveness probe auto-derives its target port from the running server.
+# See docker/agent-backend/healthcheck.sh for the full resolution order:
+#   1. HEALTHCHECK_PORT env var (explicit override — set by compose files)
+#   2. Auto-detect via /proc/1/cmdline (a2a_server.py -> A2A_PORT,
+#      agui_server.py -> AGUI_PORT)
+#   3. Fall back to A2A default (8101)
+# Compose files pin HEALTHCHECK_PORT explicitly for predictability.
+COPY docker/agent-backend/healthcheck.sh /app/healthcheck.sh
+RUN sed -i 's/\r$//' /app/healthcheck.sh && chmod +x /app/healthcheck.sh
+
+# The two `# dockerfile-utils: ignore` directives below suppress a
+# false-positive "duplicate HEALTHCHECK/CMD" warning from the
+# rcjsuen/dockerfile-utils VS Code linter. The parser mis-counts the
+# `CMD` clause inside the inline `HEALTHCHECK ... CMD ...` form as a
+# separate top-level CMD instruction, then flags both the HEALTHCHECK
+# and the real CMD below as duplicates. Docker itself parses this
+# correctly — this is a linter-only artifact. Per VALIDATOR.md, the
+# ignore comment must appear immediately before the instruction it
+# applies to.
+# dockerfile-utils: ignore
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-    CMD curl -f http://localhost:${HEALTHCHECK_PORT}/health || exit 1
+    CMD /app/healthcheck.sh || exit 1
 
 # Default: A2A server. Docker-compose overrides CMD for AG-UI instances.
+# dockerfile-utils: ignore
 CMD ["python", "a2a_server.py"]

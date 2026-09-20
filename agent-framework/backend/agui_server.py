@@ -1,6 +1,6 @@
-"""AG-UI / CopilotKit bridge for PerfPilot Agents (V2 doc Section 10, port 8002).
+"""AG-UI / CopilotKit bridge for PerfPilot Agents (V2 doc Section 10, port 8102).
 
-A separate FastAPI ASGI app from the A2A surface (port 8001). It exists to
+A separate FastAPI ASGI app from the A2A surface (port 8101). It exists to
 support the human-driven HITL experience through a browser-based React UI
 built on CopilotKit. The two surfaces deliberately stay in different
 processes so:
@@ -36,7 +36,7 @@ Run locally:
 
 Or via uvicorn from the agent-framework folder:
 
-    uvicorn agui_server:app --host 0.0.0.0 --port 8002
+    uvicorn agui_server:app --host 0.0.0.0 --port 8102
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ async def _lifespan(app: FastAPI):
     log.info("AG-UI bridge starting; warming asyncpg pool")
     try:
         await db.get_pool()
-        log.info("AG-UI bridge ready (port=%s)", os.environ.get("AGUI_PORT", "8002"))
+        log.info("AG-UI bridge ready (port=%s)", os.environ.get("AGUI_PORT", "8102"))
     except Exception:
         log.exception(
             "Failed to warm asyncpg pool at startup; routes will retry per request"
@@ -1383,12 +1383,12 @@ app = create_app()
 
 
 def _resolve_port() -> int:
-    raw = os.environ.get("AGUI_PORT", "8002")
+    raw = os.environ.get("AGUI_PORT", "8102")
     try:
         return int(raw)
     except ValueError:
-        log.warning("AGUI_PORT=%r is not an int; falling back to 8002", raw)
-        return 8002
+        log.warning("AGUI_PORT=%r is not an int; falling back to 8102", raw)
+        return 8102
 
 
 def main() -> None:

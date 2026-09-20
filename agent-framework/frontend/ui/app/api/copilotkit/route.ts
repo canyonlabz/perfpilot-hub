@@ -29,7 +29,7 @@ export const POST = async (req: NextRequest) => {
     console.log("[copilotkit/route] X-PerfPilot-Token header set:", !!headers["X-PerfPilot-Token"]);
   }
 
-  const aguiBackend = process.env.AGUI_BACKEND_URL || "http://localhost:8002";
+  const aguiBackend = process.env.AGUI_BACKEND_URL || "http://localhost:8102";
 
   const runtime = new CopilotRuntime({
     agents: {

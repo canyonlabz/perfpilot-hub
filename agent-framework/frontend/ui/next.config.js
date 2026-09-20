@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 
-const aguiBackend = process.env.AGUI_BACKEND_URL || "http://localhost:8002";
-const a2aBackend = process.env.A2A_BACKEND_URL || "http://localhost:8001";
+const aguiBackend = process.env.AGUI_BACKEND_URL || "http://localhost:8102";
+const a2aBackend = process.env.A2A_BACKEND_URL || "http://localhost:8101";
 
 const nextConfig = {
   async rewrites() {

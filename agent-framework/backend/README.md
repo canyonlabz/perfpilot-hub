@@ -12,8 +12,8 @@ The backend serves two audiences through two server surfaces:
 
 | Surface | Port | Who uses it | What it does |
 |---------|------|-------------|--------------|
-| **AG-UI server** | `8002` | Humans via the Web UI (browser) | Powers the chat interface, conversation history, and human approval workflows |
-| **A2A server** | `8001` | Other AI agent frameworks (machine-to-machine) | Lets upstream and downstream AI systems discover and communicate with PerfPilot agents |
+| **AG-UI server** | `8102` | Humans via the Web UI (browser) | Powers the chat interface, conversation history, and human approval workflows |
+| **A2A server** | `8101` | Other AI agent frameworks (machine-to-machine) | Lets upstream and downstream AI systems discover and communicate with PerfPilot agents |
 
 Both surfaces route to the **same agent runtime**. A message sent from the Web UI and a task submitted by an external AI framework hit the same orchestrator, run through the same specialists, and persist to the same database. There is one backend with two entry points.
 
@@ -23,8 +23,8 @@ Both surfaces route to the **same agent runtime**. A message sent from the Web U
 
 ```text
 backend/
-├── a2a_server.py              # A2A server entrypoint (port 8001)
-├── agui_server.py             # AG-UI server entrypoint (port 8002)
+├── a2a_server.py              # A2A server entrypoint (port 8101)
+├── agui_server.py             # AG-UI server entrypoint (port 8102)
 │
 ├── agents/                    # AI agents — one folder per agent
 │   ├── orchestrator/          # Coordinates the full workflow
@@ -103,7 +103,7 @@ Agent-to-agent workflow pipelines that chain multiple specialists together for e
 
 ### `a2a_server.py` and `agui_server.py`
 
-The two server entrypoints sit directly at the `backend/` root. `a2a_server.py` starts the A2A server on port 8001 for machine-to-machine agent communication. `agui_server.py` starts the AG-UI server on port 8002 for browser-based human interaction through the Web UI. Both are FastAPI applications launched with Uvicorn.
+The two server entrypoints sit directly at the `backend/` root. `a2a_server.py` starts the A2A server on port 8101 for machine-to-machine agent communication. `agui_server.py` starts the AG-UI server on port 8102 for browser-based human interaction through the Web UI. Both are FastAPI applications launched with Uvicorn.
 
 ### `core/` *(planned)*
 

@@ -88,24 +88,19 @@ def _mount_remotes() -> None:
 _mount_remotes()
 
 
-# --- Health check endpoint (HTTP transport only) ---
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-
-
-@gateway.custom_route("/health", methods=["GET"])
-async def health_check(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "healthy", "server": "perfpilot-mcp-gateway"})
-
-
 if __name__ == "__main__":
     from utils.logging_config import configure_logging
+    from utils.mcp_utils import register_health_route
 
     configure_logging()
     try:
         if os.environ.get("MCP_TRANSPORT", server_cfg.get("transport", "stdio")) == "http":
             prefix = os.environ.get("MCP_HTTP_PREFIX", "/perfpilot-mcp-gateway")
             port = int(os.environ.get("HTTP_PORT", server_cfg.get("port", 8125)))
+
+            # Register the prefixed /health route (HTTP transport only).
+            register_health_route(gateway, prefix, "perfpilot-mcp-gateway")
+
             gateway.run(
                 transport="http",
                 host=os.environ.get("HTTP_HOST", server_cfg.get("host", "0.0.0.0")),

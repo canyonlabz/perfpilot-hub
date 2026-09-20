@@ -34,7 +34,7 @@ COPY mcp-perf-suite/confluence-mcp/ ./confluence-mcp/
 COPY docker/confluence-mcp/config/config.yaml ./confluence-mcp/config.yaml
 COPY docker/perfreport-mcp/config/chart_schema.yaml /app/perfreport-mcp/chart_schema.yaml
 COPY docker/confluence-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -45,7 +45,7 @@ ENV OTEL_SERVICE_NAME=perfpilot-mcp-confluence
 
 EXPOSE 8115
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -sS -o /dev/null http://localhost:8115/perfpilot-mcp-confluence/mcp || exit 1
+    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
 
 WORKDIR /app/confluence-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]

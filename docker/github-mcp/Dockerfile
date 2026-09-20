@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY mcp-perf-suite/github-mcp/ ./github-mcp/
 COPY docker/github-mcp/config/config.yaml ./github-mcp/config.yaml
 COPY docker/github-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -44,7 +44,7 @@ ENV OTEL_SERVICE_NAME=perfpilot-mcp-github
 
 EXPOSE 8118
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -sS -o /dev/null http://localhost:8118/perfpilot-mcp-github/mcp || exit 1
+    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
 
 WORKDIR /app/github-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]

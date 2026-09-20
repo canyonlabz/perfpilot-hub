@@ -37,7 +37,7 @@ COPY docker/perfreport-mcp/config/chart_schema.yaml ./perfreport-mcp/chart_schem
 COPY docker/perfreport-mcp/config/chart_colors.yaml ./perfreport-mcp/chart_colors.yaml
 COPY docker/datadog-mcp/config/environments.json /app/datadog-mcp/environments.json
 COPY docker/perfreport-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -48,7 +48,7 @@ ENV OTEL_SERVICE_NAME=perfpilot-mcp-perfreport
 
 EXPOSE 8114
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -sS -o /dev/null http://localhost:8114/perfpilot-mcp-perfreport/mcp || exit 1
+    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
 
 WORKDIR /app/perfreport-mcp
 ENTRYPOINT ["/app/entrypoint.sh"]
