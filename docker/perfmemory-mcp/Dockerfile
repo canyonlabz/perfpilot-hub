@@ -7,9 +7,19 @@
 
 FROM python:3.12-slim
 
+# Base tooling:
+#   bash            required by entrypoint.sh
+#   tini            PID 1 for clean signal forwarding
+#   ca-certificates OS trust store management
+#   wget            HEALTHCHECK probe against the /health endpoint
+#   curl            retained for parity with existing tooling
+#   libpq-dev       psycopg2 (PostgreSQL client) build requirement
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    bash \
+    tini \
     ca-certificates \
+    wget \
+    curl \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,8 +44,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY mcp-perf-suite/perfmemory-mcp/ ./perfmemory-mcp/
 COPY docker/perfmemory-mcp/config/config.yaml ./perfmemory-mcp/config.yaml
 COPY docker/perfmemory-mcp/config/taxonomy.yaml ./perfmemory-mcp/taxonomy.yaml
-COPY docker/perfmemory-mcp/entrypoint.sh /app/entrypoint.sh
-RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+COPY docker/perfmemory-mcp/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+ && chmod +x /usr/local/bin/entrypoint.sh \
+ && groupadd --system app \
+ && useradd  --system --gid app --home-dir /app --shell /usr/sbin/nologin app \
+ && chown -R app:app /app
+
+USER app
 
 ENV PERFPILOT_DOCKER=true
 ENV DEPLOYMENT_MODE=local
@@ -45,8 +61,12 @@ ENV HTTP_PORT=8116
 ENV OTEL_SERVICE_NAME=perfpilot-mcp-perfmemory
 
 EXPOSE 8116
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -f http://localhost:${HTTP_PORT}${MCP_HTTP_PREFIX}/health || exit 1
+
+# Probe the FastMCP /health endpoint (GET, returns 200 + small JSON body).
+# `-O /dev/null` forces GET instead of wget's default HEAD, so FastMCP
+# does not spawn a Streamable HTTP session per probe and no 405 is logged.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${HTTP_PORT}${MCP_HTTP_PREFIX}/health" || exit 1
 
 WORKDIR /app/perfmemory-mcp
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
