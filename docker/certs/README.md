@@ -89,24 +89,27 @@ Digital certificates used by the Playwright MCP's Chromium browser for
 |---|---|
 | Consumed by | `perfpilot-mcp-playwright` only |
 | File types | `*.p12`, `*.pem` |
-| Where installed | Baked into the image at `/home/node/certs/` |
-| Related env vars | `PLAYWRIGHT_CERT_PASSPHRASE` (unlocks `.p12`), `PLAYWRIGHT_CERT_AUTO_SELECT_CN` (Common Name filter) |
+| Where installed | Baked into the image at `/certs/`; also imported into Chromium's NSS database (`~/.pki/nssdb` and `~/.local/share/pki/nssdb`) at container start |
+| Related env vars | `PLAYWRIGHT_CERT_FILE` (basename or absolute path of the cert to load), `PLAYWRIGHT_CERT_PASSPHRASE` (unlocks `.p12`), `PLAYWRIGHT_CERT_AUTO_SELECT_PATTERN` (Chromium `AutoSelectCertificateForUrls` policy pattern — defaults to wildcard `*`) |
 
 To use:
 
-1. Place your certificate files (`.p12` or `.pem`) in `docker/certs/playwright/`
-2. Set both variables in `docker/playwright-mcp/.env`:
+1. Place your certificate file (`.p12` or `.pem`) in `docker/certs/playwright/`
+2. Set the variables in `docker/playwright-mcp/.env`:
 
     ```env
+    PLAYWRIGHT_CERT_FILE=testuser.p12
     PLAYWRIGHT_CERT_PASSPHRASE=your_p12_passphrase
-    PLAYWRIGHT_CERT_AUTO_SELECT_CN=TestUser1
     ```
 
-3. Rebuild: `docker compose up --build -d` (from `docker/playwright-mcp/`)
+3. Optionally narrow the auto-select scope with
+   `PLAYWRIGHT_CERT_AUTO_SELECT_PATTERN` (default is wildcard `*`, which
+   offers the cert to every host that requests mTLS).
 
-The `AUTO_SELECT_CN` filter must match the Common Name in the certificate
-subject exactly. See the [`playwright-mcp/README.md`](../playwright-mcp/README.md#-client-certificate-authentication-mtls)
-for the full workflow.
+4. Rebuild: `docker compose up --build -d` (from `docker/playwright-mcp/`)
+
+See [`playwright-mcp/README.md`](../playwright-mcp/README.md#-client-certificate-authentication-mtls)
+for the full workflow and troubleshooting notes.
 
 ---
 

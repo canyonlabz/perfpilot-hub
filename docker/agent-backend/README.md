@@ -200,7 +200,8 @@ tree (accessed via the MCPs, not directly).
 ## 🩺 Health check
 
 Each container ships a Docker `HEALTHCHECK` that curls its own `/health`
-endpoint every 30 seconds. First probe fires after a 15-second grace period.
+endpoint every 30 seconds. First probe fires after a 30-second grace period.
+Up to 3 retries before marking unhealthy.
 
 ```bash
 # Overall status:

@@ -186,9 +186,11 @@ either architecture.
 
 ## 🩺 Health check
 
-The container ships a built-in Docker `HEALTHCHECK` that curls its own endpoint
-every 30 seconds. The first probe fires after a **30-second** grace period
-(longer than other MCPs because of the JVM + Python cold start).
+The container ships a built-in Docker `HEALTHCHECK` that probes its own
+`/health` endpoint via `wget` every 30 seconds. First probe fires after a
+30-second grace period (the JVM + Python cold start is slower than other
+MCPs — expect the container to sit in `starting` state for the full grace
+window on first launch). Up to 3 retries before marking unhealthy.
 
 ```bash
 # Overall status:

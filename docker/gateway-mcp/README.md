@@ -151,13 +151,13 @@ build time (no runtime bind mounts):
 
 ## 🩺 Health check
 
-The container ships a built-in Docker `HEALTHCHECK` that curls its `/health`
-endpoint every 30 seconds. First probe fires after a 20-second grace period.
+The container ships a built-in Docker `HEALTHCHECK` that probes its
+`/health` endpoint via `wget` every 30 seconds. First probe fires after a
+30-second grace period. Up to 3 retries before marking unhealthy.
 
-Unlike the other MCPs, the gateway's healthcheck targets `/health` (a
-dedicated JSON endpoint) rather than `/mcp`. This is because the gateway's
-`/health` endpoint returns the mount status of each upstream MCP, which is
-more informative than a bare protocol probe.
+The gateway's `/health` endpoint returns the mount status of each upstream
+MCP as JSON, so a green healthcheck confirms not just that the gateway is
+alive but that every mounted MCP responded during the last probe.
 
 ```bash
 # Overall status:

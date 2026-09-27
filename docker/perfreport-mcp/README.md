@@ -157,9 +157,10 @@ for the full policy.
 
 ## 🩺 Health check
 
-The container ships a built-in Docker `HEALTHCHECK` that curls its own endpoint
-every 30 seconds. The first probe fires after a 20-second grace period (image
-cold start).
+The container ships a built-in Docker `HEALTHCHECK` that probes its own
+`/health` endpoint via `wget` every 30 seconds. First probe fires after a
+30-second grace period (image cold start). Up to 3 retries before marking
+unhealthy.
 
 ```bash
 # Overall status:

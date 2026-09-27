@@ -17,9 +17,10 @@ MCP can then convert into `.jmx` load-test scripts.
 | 📦 Container | `perfpilot-mcp-playwright` |
 | 🌐 Port | `8117` |
 | 🔗 Endpoint | `http://localhost:8117/mcp` *(no path prefix — see §🔀)* |
-| 🖼️ Base image | `mcp/playwright:latest` *(Microsoft [playwright-mcp](https://github.com/microsoft/playwright-mcp) v0.0.74)* |
-| 🌐 Browser | Chromium (headless) |
-| 📂 Source | Vendor image; no local Python source. See [Microsoft's repository](https://github.com/microsoft/playwright-mcp) |
+| 🖼️ Base image | `mcr.microsoft.com/playwright:v1.63.0-noble` |
+| 📦 MCP package | `@playwright/mcp@0.0.80` (installed via `npm ci`) |
+| 🌐 Browser | Chromium only (headless) — Firefox and WebKit stripped from `/ms-playwright/` at build time |
+| 📂 Source | Microsoft [playwright-mcp](https://github.com/microsoft/playwright-mcp) via npm |
 
 ---
 
@@ -43,18 +44,10 @@ For the complete tool inventory and browser automation reference, see the
 
 ## 🚀 Quick start (standalone)
 
-⚠️ **Base image prerequisite.** This image layers on top of Microsoft's
-`mcp/playwright:latest`, which must exist locally before the PerfPilot
-Dockerfile can build. Build the base image first:
+The image builds directly from Microsoft's official Playwright base image on
+Docker Hub / GHCR — no separate base-image build is required.
 
-```bash
-git clone https://github.com/microsoft/playwright-mcp.git
-cd playwright-mcp
-git checkout v0.0.74
-docker build -t mcp/playwright:latest .
-```
-
-Then run this MCP standalone in three steps:
+Run this MCP standalone in three steps:
 
 ```bash
 # 1. Copy the environment template (optional — mostly needed for mTLS)
@@ -125,13 +118,16 @@ All environment variables for this MCP are optional.
 |---|---|---|
 | `HTTP_PORT` | `8117` | Listen port |
 | `ENABLE_CORP_CA` | `false` | Set to `true` at build time if you're behind an HTTPS-intercepting corporate proxy (see §🏢) |
-| `PLAYWRIGHT_CERT_PASSPHRASE` | *(unset)* | Passphrase for `.p12` client certificate files in `docker/certs/playwright/` |
-| `PLAYWRIGHT_CERT_AUTO_SELECT_CN` | *(unset)* | Common Name (CN) filter — Playwright auto-selects the matching cert when a target site presents an mTLS challenge |
+| `PLAYWRIGHT_CERT_FILE` | *(unset)* | Basename (e.g. `testuser.p12`) or absolute path of a client-certificate file to load from `/certs/`. Skipped silently when unset. |
+| `PLAYWRIGHT_CERT_PASSPHRASE` | *(unset)* | Passphrase for `.p12` client-certificate files (paired with `PLAYWRIGHT_CERT_FILE`) |
+| `PLAYWRIGHT_CERT_AUTO_SELECT_PATTERN` | `*` (wildcard) | Chromium `AutoSelectCertificateForUrls` policy pattern. Defaults to wildcard so the loaded cert is offered to every host that requests mTLS. Set a narrower pattern to restrict scope. |
 
-**Browser configuration** is provided via CLI flags in `docker-compose.yml`
-(rather than a mounted config file), so `HTTP_PORT` is the only server-level
-variable. To adjust browser settings (headless mode, browser type, output
-directory, etc.), edit the `command:` block in `docker/playwright-mcp/docker-compose.yml`.
+**Browser configuration** is baked into `/app/config.json` inside the image
+(transport, browser mode, output paths). Cert-related runtime overrides are
+provided via the environment variables above and applied by
+`docker/playwright-mcp/entrypoint.sh` at container start. To adjust the
+baked-in browser config, edit `docker/playwright-mcp/config/config.json` and
+rebuild.
 
 ---
 
@@ -146,22 +142,30 @@ directory, etc.), edit the `command:` block in `docker/playwright-mcp/docker-com
 ## 🔐 Client-certificate authentication (mTLS)
 
 If your target application requires TLS client certificates (`.p12` or `.pem`
-format), Playwright can authenticate via test-user certs baked into the image:
+format), Playwright can authenticate via a certificate loaded from
+`docker/certs/playwright/`:
 
-1. Place your certificate files (`.p12` or `.pem`) in `docker/certs/playwright/`
-2. Set two variables in `docker/playwright-mcp/.env`:
+1. Place your certificate file (`.p12` or `.pem`) in `docker/certs/playwright/`
+2. Set the two variables in `docker/playwright-mcp/.env`:
 
     ```env
+    PLAYWRIGHT_CERT_FILE=testuser.p12
     PLAYWRIGHT_CERT_PASSPHRASE=your_p12_passphrase
-    PLAYWRIGHT_CERT_AUTO_SELECT_CN=TestUser1
     ```
 
-3. Rebuild the image: `docker compose up --build -d`
+    `PLAYWRIGHT_CERT_FILE` accepts either a basename (looked up in `/certs/`
+    inside the container) or an absolute path.
 
-The Dockerfile bakes the contents of `docker/certs/playwright/` into
-`/home/node/certs/`. When a target site presents a client-cert challenge,
-Playwright matches the CN filter against the available certificates and
-uses the passphrase to unlock the selected `.p12`.
+3. Optionally narrow the auto-select scope with
+   `PLAYWRIGHT_CERT_AUTO_SELECT_PATTERN` (default is wildcard `*`).
+
+4. Rebuild the image: `docker compose up --build -d`
+
+At container start, `entrypoint.sh` copies the certificate into Chromium's
+NSS database (both `~/.pki/nssdb` and `~/.local/share/pki/nssdb`) and writes
+an `AutoSelectCertificateForUrls` Chromium policy pointing at the imported
+cert. Chromium presents the cert automatically when a target site issues an
+mTLS challenge — no per-navigation code required.
 
 > 🔒 **Playwright client certificates are sensitive credentials.** They are
 > gitignored by default (`docker/certs/playwright/*`). Never commit them to
@@ -171,17 +175,22 @@ uses the passphrase to unlock the selected `.p12`.
 
 ## 🩺 Health check
 
-The vendor image does not ship a Docker `HEALTHCHECK` directive, so
-`docker compose ps` will show `Up` without a `(healthy)` marker. The
-container is functional as soon as the port is bound (typically within
-a few seconds). Confirm liveness with:
+The image ships a Docker `HEALTHCHECK` directive that probes `/mcp` every
+30 seconds via `wget --spider`. MCP is a stateful protocol, so a bare GET
+returns HTTP 406 — the healthcheck accepts both 200 and 406 as healthy.
 
 ```bash
-curl http://localhost:8117/mcp
+# Overall status:
+docker compose ps
+#            NAME                    STATUS
+# perfpilot-mcp-playwright    Up 30s (healthy)
+
+# Detailed probe history:
+docker inspect --format='{{json .State.Health}}' perfpilot-mcp-playwright | jq
 ```
 
-A successful response (HTTP 200 / 406 / streaming) means the server is
-accepting connections.
+For interactive validation with a real MCP client (Cursor, Claude Desktop,
+etc.), point the client at `http://localhost:8117/mcp`.
 
 ---
 
@@ -211,12 +220,11 @@ for the full context and additional per-image behavior.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Build fails with `pull access denied for mcp/playwright` | Base image `mcp/playwright:latest` not built locally | Build the base image first (see [Quick start](#-quick-start-standalone)) |
 | Chromium fails to load HTTPS pages with `NET::ERR_CERT_AUTHORITY_INVALID` | Corporate CA not imported into Chromium NSS database | Rebuild with `ENABLE_CORP_CA=true` — the Dockerfile handles the `certutil` import automatically |
-| mTLS-protected sites reject the browser | Wrong `PLAYWRIGHT_CERT_AUTO_SELECT_CN` or `.p12` not in `docker/certs/playwright/` | Verify the CN in the certificate subject matches `PLAYWRIGHT_CERT_AUTO_SELECT_CN` exactly |
+| mTLS-protected sites reject the browser | `PLAYWRIGHT_CERT_FILE` not set or the referenced file is missing from `docker/certs/playwright/` | Verify the file exists and the basename matches `PLAYWRIGHT_CERT_FILE`; verify `PLAYWRIGHT_CERT_PASSPHRASE` unlocks the `.p12` |
 | HAR / trace files not appearing on the host | `../../.playwright-mcp` folder missing at the repo root | Create the folder: `mkdir -p ../../.playwright-mcp` |
 | Endpoint returns `404` on `/perfpilot-mcp-playwright/mcp` | Wrong URL path | Playwright uses `/mcp` (no prefix) — see [§🔀 Endpoint routing exception](#-endpoint-routing-exception) |
-| Container starts as root instead of `node` | Compose sets `user: "0:0"` for certutil/NSS access at startup | This is expected — Chromium drops privileges internally |
+| Container starts as root instead of `node` | Compose sets `user: "0:0"` for cross-OS bind-mount write access to the shared `.playwright-mcp/` output folder | This is expected on Windows and macOS Docker Desktop — the container process still runs Playwright normally |
 
 For further diagnostics, inspect the container logs:
 

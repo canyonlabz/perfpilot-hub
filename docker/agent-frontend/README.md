@@ -111,9 +111,10 @@ The image contains a full copy of the compiled Next.js application.
 
 ## 🩺 Health check
 
-The container ships a built-in Docker `HEALTHCHECK` that curls the root
-route (`/`) every 60 seconds. First probe fires after a 30-second grace
-period (Next.js dev mode takes longer to boot than a Python service).
+The container ships a built-in Docker `HEALTHCHECK` that probes the root
+route (`/`) with `wget --spider` every 60 seconds. First probe fires after a
+30-second grace period (Next.js dev mode takes longer to boot than a Python
+service). Up to 5 retries before marking unhealthy.
 
 ```bash
 # Overall status:

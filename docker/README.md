@@ -347,12 +347,16 @@ Without these two settings, PostgreSQL will fail to initialize on macOS.
 
 ### 9.3 Startup and healthchecks
 
-- Every image ships a Dockerfile `HEALTHCHECK` that curls its own MCP endpoint
-  (or `pg_isready` for postgres).
+- Every image ships a Dockerfile `HEALTHCHECK` that probes its own endpoint —
+  `/health` GET via `wget` for all 9 FastMCP MCPs, `/mcp` via `wget --spider`
+  (accepting HTTP 200 or 406) for Playwright, `/health` via `curl -f` for the
+  agent backend, `/` via `wget --spider` for the frontend, and `pg_isready`
+  for PostgreSQL.
 - Gateway `depends_on` all 8 mounted MCPs with `condition: service_healthy`,
   so it does not start until every backing MCP responds to a probe.
-- Agents (`perfpilot-a2a`, `perfpilot-agui`) `depends_on` the gateway,
-  Playwright, and the database — all `service_healthy`.
+- Agents (`perfpilot-a2a`, `perfpilot-agui`) `depends_on` the gateway and the
+  database (`service_healthy`) plus Playwright (`service_started`, since
+  Playwright's health probe uses a non-standard endpoint).
 - UI (`perfpilot-ui`) `depends_on` the agent backend.
 
 Full-stack cold-start typically takes 60–90 seconds. Use `docker compose ps`
@@ -412,7 +416,7 @@ the cert store(s) it needs:
 |---|---|---|---|
 | `docker/certs/corporate/` | Every image *(when `ENABLE_CORP_CA=true`)* | `*.pem` | Corporate CA bundles for HTTPS-intercepting proxies. |
 | `docker/certs/jmeter/` | `perfpilot-mcp-jmeter` only | `*.jks` | JMeter TLS client keystores (JKS format). File name + password go into `.env` via `JMETER_JKS_FILE` / `JMETER_JKS_PWD`. |
-| `docker/certs/playwright/` | `perfpilot-mcp-playwright` only | `*.p12`, `*.pem` | Test-user browser digital certs. CN filter + passphrase go into `.env` via `PLAYWRIGHT_CERT_AUTO_SELECT_CN` / `PLAYWRIGHT_CERT_PASSPHRASE`. |
+| `docker/certs/playwright/` | `perfpilot-mcp-playwright` only | `*.p12`, `*.pem` | Test-user browser digital certs. Filename + passphrase go into `.env` via `PLAYWRIGHT_CERT_FILE` / `PLAYWRIGHT_CERT_PASSPHRASE`. Optional `PLAYWRIGHT_CERT_AUTO_SELECT_PATTERN` (defaults to wildcard `*`) narrows the Chromium `AutoSelectCertificateForUrls` policy scope. |
 
 All three are optional at build time — the folders are committed as empty
 directories (each has a `.gitkeep`). JMeter does not read `.p12`/`.pem`;
