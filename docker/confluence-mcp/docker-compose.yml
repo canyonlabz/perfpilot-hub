@@ -1,0 +1,26 @@
+# =============================================================================
+# perfpilot-mcp-confluence — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # then fill in the Confluence credentials
+#                           # (Cloud V2 or on-prem V1)
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-mcp-confluence:
+    build:
+      context: ../..
+      dockerfile: docker/confluence-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-confluence:latest
+    container_name: perfpilot-mcp-confluence
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8115:8115"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+    restart: unless-stopped

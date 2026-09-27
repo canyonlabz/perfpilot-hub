@@ -1,0 +1,32 @@
+# =============================================================================
+# perfpilot-ui — standalone spin-up
+#
+# Next.js dev-mode container. Listen port is 8080 (Next.js honors the
+# PORT env var). Backend URLs default to host.docker.internal for a
+# host-mounted A2A + AG-UI; full-stack wiring lands in Phase 1e.
+#
+# Usage (from this folder):
+#   cp .env.example .env    # optional
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-ui:
+    build:
+      context: ../..
+      dockerfile: docker/agent-frontend/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-ui:latest
+    container_name: perfpilot-ui
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=8080
+      - FRONTEND_PORT=8080
+      - AGUI_BACKEND_URL=${AGUI_BACKEND_URL:-http://host.docker.internal:8102}
+      - A2A_BACKEND_URL=${A2A_BACKEND_URL:-http://host.docker.internal:8101}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

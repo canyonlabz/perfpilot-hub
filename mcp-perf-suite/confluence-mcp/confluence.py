@@ -1,4 +1,5 @@
 # Confluence API client
+import os
 import re
 from fastmcp import FastMCP, Context
 from services.confluence_api_v1 import (
@@ -797,8 +798,26 @@ async def search_pages(query: str, mode: str, ctx: Context, space_ref: str = Non
 # Confluence MCP entry point
 # -----------------------------
 if __name__ == "__main__":
+    from utils.logging_config import configure_logging
+    from utils.mcp_utils import register_health_route
+
+    configure_logging()
     try:
-        mcp.run(transport="stdio")
+        if os.environ.get("MCP_TRANSPORT", "stdio") == "http":
+            prefix = os.environ.get("MCP_HTTP_PREFIX", "/perfpilot-mcp-confluence")
+            port = int(os.environ.get("HTTP_PORT", "8115"))
+
+            # Register the prefixed /health route (HTTP transport only).
+            register_health_route(mcp, prefix, "perfpilot-mcp-confluence")
+
+            mcp.run(
+                transport="http",
+                host="0.0.0.0",
+                port=port,
+                path=prefix + "/mcp",
+            )
+        else:
+            mcp.run(transport="stdio")
     except KeyboardInterrupt:
         print("Shutting down Confluence MCP...")
 

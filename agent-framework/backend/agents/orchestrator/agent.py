@@ -26,7 +26,7 @@ and wrap the result.
   import and exercise them directly (`from agents.orchestrator.agent
   import list_available_specialists`) without spinning up an LLM.
 - `delegate_to_specialist` and `check_task_status` call back into the
-  *local* A2A surface via httpx (default `http://127.0.0.1:8001`,
+  *local* A2A surface via httpx (default `http://127.0.0.1:8101`,
   overridable via `PERFPILOT_A2A_BASE_URL`). They return structured
   dicts (success or error) rather than raising, so the LLM can narrate
   failures to the user instead of the agent loop crashing.
@@ -73,16 +73,16 @@ INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
 AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"
 
 # A2A base URL for the orchestrator's delegate / check tools. Defaults to
-# the local A2A server on port 8001; operators can override via env var if
+# the local A2A server on port 8101; operators can override via env var if
 # they ever decouple the deployment topology.
-DEFAULT_A2A_BASE_URL = "http://127.0.0.1:8001"
+DEFAULT_A2A_BASE_URL = "http://127.0.0.1:8101"
 A2A_BASE_URL_ENV = "PERFPILOT_A2A_BASE_URL"
 
 # AG-UI base URL for Web UI delegation. Resolution order:
 #   1. PERFPILOT_AGUI_BASE_URL  (full URL override)
 #   2. http://127.0.0.1:{AGUI_PORT}  (reads same env var agui_server.py uses)
-#   3. http://127.0.0.1:8002  (hardcoded fallback)
-DEFAULT_AGUI_PORT = "8002"
+#   3. http://127.0.0.1:8102  (hardcoded fallback)
+DEFAULT_AGUI_PORT = "8102"
 AGUI_BASE_URL_ENV = "PERFPILOT_AGUI_BASE_URL"
 AGUI_PORT_ENV = "AGUI_PORT"
 
@@ -1069,9 +1069,9 @@ def _agui_base_url() -> str:
       1. ``PERFPILOT_AGUI_BASE_URL`` env var (full URL override).
       2. ``http://127.0.0.1:{AGUI_PORT}`` — reads the same ``AGUI_PORT``
          env var that ``agui_server.py`` uses so the orchestrator
-         automatically targets the correct port even when 8002 is
+         automatically targets the correct port even when 8102 is
          unavailable (e.g. occupied by another service on a work laptop).
-      3. ``http://127.0.0.1:8002`` — hardcoded fallback.
+      3. ``http://127.0.0.1:8102`` — hardcoded fallback.
     """
     explicit = os.environ.get(AGUI_BASE_URL_ENV)
     if explicit:

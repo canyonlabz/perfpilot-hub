@@ -11,8 +11,8 @@ reporting-agent (F3.10) drives multi-round revise loops by:
      `get_latest_for_task()` and either ships the artifact or revises.
 
 The same row schema is used regardless of whether the decision arrives
-from CopilotKit (port 8002) or from an A2A client posting a HITL reply
-(port 8001). One audit log, two front doors.
+from CopilotKit (port 8102) or from an A2A client posting a HITL reply
+(port 8101). One audit log, two front doors.
 
 Lazy heavy imports stay consistent with `session_store.py` and
 `task_store.py`.

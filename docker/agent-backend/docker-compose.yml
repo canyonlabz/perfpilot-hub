@@ -1,0 +1,56 @@
+# =============================================================================
+# perfpilot-a2a + perfpilot-agui — standalone spin-up
+#
+# Single Dockerfile, two image tags, two CMDs. Both services share the
+# same build cache; only the entry-point script and listen port differ.
+#
+# Usage (from this folder):
+#   cp .env.example .env    # then fill in LLM + DB values
+#   docker compose up --build -d
+#
+# Standalone note: this file does NOT start the gateway, playwright, or
+# perfmemory database. The default URLs point at `host.docker.internal`
+# so you can bring those up in their own compose files on the host
+# first. Full-stack wiring lands in Phase 1e.
+# =============================================================================
+
+services:
+  perfpilot-a2a:
+    build:
+      context: ../..
+      dockerfile: docker/agent-backend/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-a2a:latest
+    container_name: perfpilot-a2a
+    command: ["python", "a2a_server.py"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - A2A_PORT=8101
+      - HEALTHCHECK_PORT=8101
+    ports:
+      - "8101:8101"
+    restart: unless-stopped
+
+  perfpilot-agui:
+    build:
+      context: ../..
+      dockerfile: docker/agent-backend/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-agui:latest
+    container_name: perfpilot-agui
+    command: ["python", "agui_server.py"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - AGUI_PORT=8102
+      - HEALTHCHECK_PORT=8102
+    ports:
+      - "8102:8102"
+    depends_on:
+      - perfpilot-a2a
+    restart: unless-stopped

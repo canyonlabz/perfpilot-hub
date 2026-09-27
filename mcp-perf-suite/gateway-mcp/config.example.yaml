@@ -1,24 +1,29 @@
 server:
-  name: "perfpilot-hub"
+  name: "perfpilot-mcp-gateway"
   transport: "stdio"
   host: "0.0.0.0"
-  port: 8000
+  port: 8125
   # Optional: Path to a custom CA certificate file for SSL verification.
   # Set this if your environment uses a proxy/antivirus that intercepts HTTPS
   # (e.g., Norton 360, Zscaler, corporate proxies).
   # Leave commented out if not needed.
   # ssl_cert_file: "C:\\Users\\yourname\\.ssl\\ca-bundle.pem"
 
-servers:
-  # Core servers (always enabled)
-  jmeter: true
-  blazemeter: true
-  datadog: true
-  perfanalysis: true
-  perfreport: true
-  confluence: true
-  perfmemory: true
-  github: true
-  # Local-only servers
-  msteams: true
-  sharepoint: true
+# Remote MCP endpoints (streamable-http). Each entry is the URL where a
+# remote MCP is reachable. Environment variables named MCP_URL_<NAME>
+# (uppercase) override the value here — that is the recommended way to
+# supply these outside local development.
+#
+# Empty string or missing value = skip mounting that MCP.
+#
+# Local-only servers (msteams, sharepoint) are intentionally omitted.
+# They remain as stdio processes registered directly in the client.
+mcp_urls:
+  jmeter: ""
+  blazemeter: ""
+  datadog: ""
+  perfanalysis: ""
+  perfreport: ""
+  confluence: ""
+  perfmemory: ""
+  github: ""

@@ -1,0 +1,31 @@
+# =============================================================================
+# perfpilot-mcp-jmeter — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # optional — JKS / cookie / plugin overrides
+#   docker compose up --build -d
+#
+# Note: HAR / trace files produced by the Playwright container are read
+# from ./.playwright-mcp; the bind mount below picks up whatever the
+# repo-level `.playwright-mcp` folder currently contains (empty is fine).
+# =============================================================================
+
+services:
+  perfpilot-mcp-jmeter:
+    build:
+      context: ../..
+      dockerfile: docker/jmeter-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+        JMETER_PLUGINS: ${JMETER_PLUGINS:-jpgc-casutg,bzm-parallel,bzm-http2,jpgc-functions,jpgc-json,jpgc-tst,websocket-samplers}
+    image: perfpilot-mcp-jmeter:latest
+    container_name: perfpilot-mcp-jmeter
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8112:8112"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+      - ../../.playwright-mcp:/app/.playwright-mcp
+    restart: unless-stopped

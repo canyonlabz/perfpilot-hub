@@ -6,8 +6,8 @@ Implements V2 doc Section 4.3:
     session_id           (required)  one UI tab / Cursor connection / A2A peer
     task_id              (required)  one A2A `tasks/send` call
 
-For every inbound request to the A2A server (port 8001) and the AG-UI bridge
-(port 8002), this middleware:
+For every inbound request to the A2A server (port 8101) and the AG-UI bridge
+(port 8102), this middleware:
 
   1. Resolves `user_id` via the four-step chain in `utils.user_identity`
      (EntraID placeholder -> X-PerfPilot-Token header -> perfpilot_token
@@ -83,7 +83,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
         default_source: Source tag stored on `agent_sessions.source` when the
             client does not send `X-Session-Source`. Servers pick the value
             that best identifies their inbound surface (`a2a_external` for
-            port 8001, `web_ui` for port 8002).
+            port 8101, `web_ui` for port 8102).
         echo_session_id_header: If True, the resolved `session_id` is echoed
             back in the response under `HEADER_SESSION_ID`. This is what
             lets a fresh client (no header) learn its own session ID after

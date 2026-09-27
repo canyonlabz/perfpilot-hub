@@ -1,0 +1,52 @@
+# =============================================================================
+# perfpilot-mcp-gateway — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # then set MCP_URL_* to reachable endpoints
+#   docker compose up --build -d
+#
+# Standalone note: this file does NOT bring up the 8 upstream MCPs. In
+# the full-stack compose the gateway resolves them via docker network
+# DNS (baked-in config.yaml). Running standalone requires overriding
+# each `MCP_URL_*` with a URL the gateway container can reach — either
+# the host (via host.docker.internal) or a shared external network.
+# =============================================================================
+
+services:
+  perfpilot-mcp-gateway:
+    build:
+      context: ../..
+      dockerfile: docker/gateway-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-gateway:latest
+    container_name: perfpilot-mcp-gateway
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Baseline gateway env — Dockerfile defaults, kept explicit for
+      # standalone spin-up clarity.
+      - HTTP_PORT=8125
+      - MCP_TRANSPORT=http
+      - MCP_HTTP_PREFIX=/perfpilot-mcp-gateway
+      - FASTMCP_CHECK_FOR_UPDATES=off
+      # Upstream MCP URLs (defaults reach the host's Docker Desktop network).
+      # Override any of these via .env or shell exports before `docker compose up`.
+      # gateway.py exits at startup if all MCP_URL_* are empty; the defaults
+      # below guarantee the gateway can boot standalone even when no .env
+      # is provided (upstream MCPs must be up separately to answer tool calls).
+      - MCP_URL_BLAZEMETER=${MCP_URL_BLAZEMETER:-http://host.docker.internal:8110/perfpilot-mcp-blazemeter/mcp}
+      - MCP_URL_DATADOG=${MCP_URL_DATADOG:-http://host.docker.internal:8111/perfpilot-mcp-datadog/mcp}
+      - MCP_URL_JMETER=${MCP_URL_JMETER:-http://host.docker.internal:8112/perfpilot-mcp-jmeter/mcp}
+      - MCP_URL_PERFANALYSIS=${MCP_URL_PERFANALYSIS:-http://host.docker.internal:8113/perfpilot-mcp-perfanalysis/mcp}
+      - MCP_URL_PERFREPORT=${MCP_URL_PERFREPORT:-http://host.docker.internal:8114/perfpilot-mcp-perfreport/mcp}
+      - MCP_URL_CONFLUENCE=${MCP_URL_CONFLUENCE:-http://host.docker.internal:8115/perfpilot-mcp-confluence/mcp}
+      - MCP_URL_PERFMEMORY=${MCP_URL_PERFMEMORY:-http://host.docker.internal:8116/perfpilot-mcp-perfmemory/mcp}
+      - MCP_URL_GITHUB=${MCP_URL_GITHUB:-http://host.docker.internal:8118/perfpilot-mcp-github/mcp}
+      # Playwright is served by the @playwright/mcp npm package, which mounts
+      # at the bare /mcp path (no per-service prefix, unlike the FastMCP siblings above).
+      - MCP_URL_PLAYWRIGHT=${MCP_URL_PLAYWRIGHT:-http://host.docker.internal:8117/mcp}
+    ports:
+      - "8125:8125"
+    restart: unless-stopped

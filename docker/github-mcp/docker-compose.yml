@@ -1,0 +1,25 @@
+# =============================================================================
+# perfpilot-mcp-github — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # then set GITHUB_PERSONAL_ACCESS_TOKEN
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-mcp-github:
+    build:
+      context: ../..
+      dockerfile: docker/github-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-github:latest
+    container_name: perfpilot-mcp-github
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8118:8118"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+    restart: unless-stopped

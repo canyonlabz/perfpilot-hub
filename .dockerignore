@@ -38,9 +38,19 @@ scripts/
 mcp-perf-suite/msteams-mcp/
 mcp-perf-suite/sharepoint-mcp/
 
-# Node modules (if any exist from Streamlit or other tooling)
+# Node modules (recursive — critical for agent-framework/frontend/ui/
+# where a local `npm ci` for dev leaves an 800+ MB node_modules tree
+# that would otherwise be shipped into the image on top of the fresh
+# npm ci performed inside the Dockerfile, doubling image size).
 node_modules/
 .node_modules/
+**/node_modules/
+
+# Next.js build cache (recursive — same rationale as node_modules; a
+# local `npm run dev` produces a 600+ MB .next/ tree at
+# agent-framework/frontend/ui/.next/).
+**/.next/
+**/.next-*/
 
 # Python build artifacts
 **/__pycache__/
@@ -57,7 +67,6 @@ node_modules/
 
 # Docker data volumes and local compose state
 docker/data/
-docker/certs/jmeter/
 docker/.env.gateway
 
 # OS-specific files
@@ -69,4 +78,5 @@ Thumbs.db
 # Miscellaneous local-only files
 *.log
 **/.env
+**/.env.*
 .envrc

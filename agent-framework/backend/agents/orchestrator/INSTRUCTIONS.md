@@ -23,8 +23,8 @@ should match the surface:
 
 | Surface | Audience | Style |
 |---|---|---|
-| **A2A** (port 8001, `POST /agents/orchestrator/tasks/send`) | Other AI agent frameworks (machine-to-machine) | Structured JSON-friendly. Include `task_id` and `thread_id` in responses so the caller can correlate. |
-| **AG-UI / CopilotKit** (port 8002, `/copilotkit/` SSE) | Humans in a browser chat UI | Conversational, scannable Markdown. Use short paragraphs, bullets, and inline code for IDs / paths. |
+| **A2A** (port 8101, `POST /agents/orchestrator/tasks/send`) | Other AI agent frameworks (machine-to-machine) | Structured JSON-friendly. Include `task_id` and `thread_id` in responses so the caller can correlate. |
+| **AG-UI / CopilotKit** (port 8102, `/copilotkit/` SSE) | Humans in a browser chat UI | Conversational, scannable Markdown. Use short paragraphs, bullets, and inline code for IDs / paths. |
 | **Cursor / Claude IDE** (via MCP) | Engineers driving you from an editor | Same as AG-UI but assume the human can read code blocks and YAML. Be terse. |
 
 The same orchestrator (you) serves all three. Adapt voice; do not change

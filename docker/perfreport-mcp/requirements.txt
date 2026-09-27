@@ -1,0 +1,13 @@
+fastmcp>=3.4.2,<4
+httpx>=0.28.1
+starlette>=1.2.1
+python-dotenv>=1.0.0
+pypandoc>=1.13
+pyandoc>=0.2.0
+pyyaml>=6.0
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.8.0
+seaborn>=0.13.2
+pytz>=2025.2
+structlog>=24.0.0

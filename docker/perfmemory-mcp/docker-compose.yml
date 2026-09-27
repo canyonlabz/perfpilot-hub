@@ -1,0 +1,58 @@
+# =============================================================================
+# perfpilot-mcp-perfmemory — standalone spin-up
+#
+# ⚠️ THIS FILE ONLY STARTS THE MCP. IT DOES NOT START THE DATABASE.
+#
+# PerfMemory requires a PostgreSQL 18 + pgvector + Apache AGE instance to be
+# reachable before it can serve any tool call. In standalone mode you must
+# EITHER:
+#
+#   1. Bring up docker/postgresql/ separately BEFORE this MCP:
+#        cd ../postgresql && docker compose up --build -d && cd -
+#
+#   2. Point POSTGRES_HOST in .env at an external Postgres instance that
+#      already has the pgvector + AGE extensions installed.
+#
+# ⚠️ NETWORKING GOTCHA (standalone only)
+#
+# Two separate `docker compose up` invocations (one for docker/postgresql
+# and one for docker/perfmemory-mcp) create TWO DIFFERENT Docker networks.
+# The MCP cannot resolve the DB container by its name across networks.
+# The correct standalone value is:
+#
+#   POSTGRES_HOST=host.docker.internal
+#
+# See .env.example for the full multi-scenario explanation.
+#
+# For a single-command, single-network deployment that "just works",
+# use the full-stack compose instead:
+#
+#   docker compose -f ../docker-compose-full-windows.yaml up -d \
+#     perfpilot-mcp-perfmemory
+#
+# which brings up the DB first (via depends_on: service_healthy), then
+# starts the MCP — all on the same shared network, using container names
+# directly.
+#
+# Usage (from this folder, standalone path):
+#   cp .env.example .env    # then fill in embedding + Postgres creds
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-mcp-perfmemory:
+    build:
+      context: ../..
+      dockerfile: docker/perfmemory-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-perfmemory:latest
+    container_name: perfpilot-mcp-perfmemory
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8116:8116"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+    restart: unless-stopped

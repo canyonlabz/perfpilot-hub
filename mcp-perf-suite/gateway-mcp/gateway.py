@@ -1,149 +1,113 @@
 """
 PerfPilot Hub — MCP Gateway for Performance Testing
 
-The central MCP gateway for the MCP Perf Suite. Gives AI agents a single
-endpoint into the performance testing lifecycle, routing them to specialized
-MCP servers via FastMCP v3's create_proxy() with subprocess isolation.
+Aggregates the 8 gateway-mounted MCP servers behind a single FastMCP
+endpoint. Each remote MCP is mounted over streamable-HTTP transport
+using ``fastmcp.server.create_proxy(url)``; the parent gateway then
+serves the aggregated tool catalog to any MCP client.
 
-Each server runs in its own process with its own venv — no shared
-dependencies, no import collisions.
+Endpoints are configured via ``MCP_URL_<NAME>`` environment variables
+(uppercase, one per MCP) or via ``mcp_urls`` entries in ``config.yaml``.
+Environment variables take precedence. Empty or unset URLs skip that
+MCP without failing the gateway startup.
 
-Supports stdio (local Cursor) and http (Docker/A2A) transports.
+Local-only servers (``msteams``, ``sharepoint``) are intentionally not
+mounted here — they continue to run as stdio processes registered
+directly in the MCP client.
+
+Transports:
+    * ``MCP_TRANSPORT=http`` (default in Docker): serve at
+      ``MCP_HTTP_PREFIX + "/mcp"`` on ``HTTP_PORT``.
+    * ``MCP_TRANSPORT=stdio`` (default locally): serve on stdio so
+      the gateway can be registered directly in a local MCP client.
 """
+import logging
 import os
-from pathlib import Path
 
 from fastmcp import FastMCP
 from fastmcp.server import create_proxy
 
 from utils.config import load_config
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-IS_DOCKER = os.environ.get("PERFPILOT_DOCKER", "").lower() == "true"
+log = logging.getLogger(__name__)
+
+# The 8 gateway-mounted MCPs, in canonical order. Namespace is the tool
+# prefix exposed by the aggregator; env_var is the override; default_key
+# looks up the fallback URL in ``config["mcp_urls"]``.
+_MCP_MOUNTS = (
+    ("jmeter",       "MCP_URL_JMETER"),
+    ("blazemeter",   "MCP_URL_BLAZEMETER"),
+    ("datadog",      "MCP_URL_DATADOG"),
+    ("perfanalysis", "MCP_URL_PERFANALYSIS"),
+    ("perfreport",   "MCP_URL_PERFREPORT"),
+    ("confluence",   "MCP_URL_CONFLUENCE"),
+    ("perfmemory",   "MCP_URL_PERFMEMORY"),
+    ("github",       "MCP_URL_GITHUB"),
+)
 
 config = load_config()
 server_cfg = config.get("server", {})
-servers_cfg = config.get("servers", {})
+mcp_urls_cfg = config.get("mcp_urls", {}) or {}
 
-gateway = FastMCP(server_cfg.get("name", "perfpilot-hub"))
+gateway = FastMCP(server_cfg.get("name", "perfpilot-mcp-gateway"))
 
 
-def _server_config(server_dir: str, script: str) -> dict:
-    """Build an MCP server config dict for create_proxy().
+def _resolve_url(namespace: str, env_var: str) -> str:
+    """Return the URL to mount for ``namespace``.
 
-    In Docker mode (PERFPILOT_DOCKER=true): uses system Python and /app/ paths.
-    In local mode: uses each server's own venv Python and repo-relative paths.
+    Precedence: environment variable > config file > empty string.
     """
-    if IS_DOCKER:
-        server_path = Path("/app") / server_dir
-        python_cmd = "/usr/local/bin/python"
-    else:
-        server_path = REPO_ROOT / server_dir
-        venv_python = server_path / ".venv" / "Scripts" / "python.exe"
-        if not venv_python.exists():
-            venv_python = server_path / ".venv" / "bin" / "python"
-        python_cmd = str(venv_python)
-
-    server_entry = {
-        "command": python_cmd,
-        "args": [script],
-        "cwd": str(server_path),
-    }
-
-    # In Docker mode, explicitly forward all environment variables to subprocesses.
-    # FastMCP's create_proxy() does not automatically inherit the parent environment.
-    if IS_DOCKER:
-        server_entry["env"] = dict(os.environ)
-
-    # Pass SSL cert file to subprocesses if configured (optional)
-    ssl_cert_file = server_cfg.get("ssl_cert_file")
-    if ssl_cert_file:
-        server_entry.setdefault("env", {})["SSL_CERT_FILE"] = ssl_cert_file
-
-    return {"mcpServers": {"default": server_entry}}
+    url = os.environ.get(env_var, "").strip()
+    if url:
+        return url
+    return str(mcp_urls_cfg.get(namespace, "")).strip()
 
 
-# --- Core servers ---
-if servers_cfg.get("jmeter", True):
-    gateway.mount(
-        create_proxy(_server_config("jmeter-mcp", "jmeter.py")),
-        namespace="jmeter",
-    )
-
-if servers_cfg.get("blazemeter", True):
-    gateway.mount(
-        create_proxy(_server_config("blazemeter-mcp", "blazemeter.py")),
-        namespace="blazemeter",
-    )
-
-if servers_cfg.get("datadog", True):
-    gateway.mount(
-        create_proxy(_server_config("datadog-mcp", "datadog.py")),
-        namespace="datadog",
-    )
-
-if servers_cfg.get("perfanalysis", True):
-    gateway.mount(
-        create_proxy(_server_config("perfanalysis-mcp", "perfanalysis.py")),
-        namespace="perfanalysis",
-    )
-
-if servers_cfg.get("perfreport", True):
-    gateway.mount(
-        create_proxy(_server_config("perfreport-mcp", "perfreport.py")),
-        namespace="perfreport",
-    )
-
-if servers_cfg.get("confluence", True):
-    gateway.mount(
-        create_proxy(_server_config("confluence-mcp", "confluence.py")),
-        namespace="confluence",
-    )
-
-if servers_cfg.get("perfmemory", True):
-    gateway.mount(
-        create_proxy(_server_config("perfmemory-mcp", "perfmemory.py")),
-        namespace="perfmemory",
-    )
-
-if servers_cfg.get("github", True):
-    gateway.mount(
-        create_proxy(_server_config("github-mcp", "github.py")),
-        namespace="github",
-    )
-
-# --- Local-only servers ---
-if servers_cfg.get("msteams", True):
-    gateway.mount(
-        create_proxy(_server_config("msteams-mcp", "msteams.py")),
-        namespace="msteams",
-    )
-
-if servers_cfg.get("sharepoint", True):
-    gateway.mount(
-        create_proxy(_server_config("sharepoint-mcp", "sharepoint.py")),
-        namespace="sharepoint",
-    )
+def _mount_remotes() -> None:
+    """Mount every configured remote MCP on the parent gateway."""
+    mounted = 0
+    for namespace, env_var in _MCP_MOUNTS:
+        url = _resolve_url(namespace, env_var)
+        if not url:
+            log.info("gateway: skipping %s (no URL configured)", namespace)
+            continue
+        try:
+            gateway.mount(create_proxy(url), namespace=namespace)
+            log.info("gateway: mounted %s -> %s", namespace, url)
+            mounted += 1
+        except Exception as exc:  # pragma: no cover - defensive
+            log.error(
+                "gateway: failed to mount %s (%s): %s",
+                namespace,
+                url,
+                exc,
+            )
+    log.info("gateway: %d/%d remote MCPs mounted", mounted, len(_MCP_MOUNTS))
 
 
-# --- Health check endpoint (HTTP transport only) ---
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-
-
-@gateway.custom_route("/health", methods=["GET"])
-async def health_check(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "healthy", "server": "perfpilot-hub"})
+_mount_remotes()
 
 
 if __name__ == "__main__":
-    transport = os.environ.get(
-        "GATEWAY_TRANSPORT", server_cfg.get("transport", "stdio")
-    )
+    from utils.logging_config import configure_logging
+    from utils.mcp_utils import register_health_route
 
-    if transport == "http":
-        host = os.environ.get("GATEWAY_HOST", server_cfg.get("host", "0.0.0.0"))
-        port = int(os.environ.get("GATEWAY_PORT", server_cfg.get("port", 8000)))
-        gateway.run(transport="http", host=host, port=port)
-    else:
-        gateway.run(transport="stdio")
+    configure_logging()
+    try:
+        if os.environ.get("MCP_TRANSPORT", server_cfg.get("transport", "stdio")) == "http":
+            prefix = os.environ.get("MCP_HTTP_PREFIX", "/perfpilot-mcp-gateway")
+            port = int(os.environ.get("HTTP_PORT", server_cfg.get("port", 8125)))
+
+            # Register the prefixed /health route (HTTP transport only).
+            register_health_route(gateway, prefix, "perfpilot-mcp-gateway")
+
+            gateway.run(
+                transport="http",
+                host=os.environ.get("HTTP_HOST", server_cfg.get("host", "0.0.0.0")),
+                port=port,
+                path=prefix + "/mcp",
+            )
+        else:
+            gateway.run(transport="stdio")
+    except KeyboardInterrupt:
+        print("Shutting down PerfPilot Gateway MCP…")

@@ -14,7 +14,7 @@ ag2[ag-ui]>=0.13.3,<0.14
 # MCP client
 fastmcp>=3.4.2,<4
 
-# Web servers (A2A on port 8001, AG-UI on port 8002)
+# Web servers (A2A on port 8101, AG-UI on port 8102)
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 starlette>=1.2.1
@@ -37,6 +37,9 @@ openai>=2.30.0
 # Config / utilities
 pyyaml>=6.0.2
 python-dotenv>=1.2.1
+
+# Structured logging (DEPLOYMENT_MODE local/cloud)
+structlog>=24.0.0
 
 # Token counting (context window tracking in multi-turn tool loop)
 tiktoken>=0.12.0

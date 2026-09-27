@@ -1,0 +1,25 @@
+# =============================================================================
+# perfpilot-mcp-perfreport — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # optional — no external secrets needed
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-mcp-perfreport:
+    build:
+      context: ../..
+      dockerfile: docker/perfreport-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-perfreport:latest
+    container_name: perfpilot-mcp-perfreport
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8114:8114"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+    restart: unless-stopped

@@ -1,0 +1,33 @@
+server:
+  name: "github-mcp"
+  version: "0.1.0"
+  description: "GitHub MCP Server for pushing JMX scripts and data files to a repo/branch/path chosen by the caller"
+  build:
+    date: "2026-08-23"
+
+general:
+  enable_debug: False
+  enable_logging: True
+
+artifacts:
+  # Dynamically resolved to {repo_root}/artifacts when left empty.
+  artifacts_path: ""
+
+github:
+  # Base URL for the GitHub REST API. Override for GitHub Enterprise
+  # (e.g. https://github.mycompany.com/api/v3).
+  api_base_url: "https://api.github.com"
+
+  # TLS verification mode for outbound HTTPS calls. Same knob used by
+  # blazemeter-mcp / confluence-mcp / datadog-mcp.
+  #   ca_bundle - use REQUESTS_CA_BUNDLE / SSL_CERT_FILE env vars if set,
+  #               else default trust store. Recommended for corporate
+  #               networks doing TLS inspection.
+  #   disabled  - skip TLS verification entirely. NOT recommended.
+  ssl_verification: "ca_bundle"
+
+  # Per-request HTTP timeout in seconds.
+  http_timeout_seconds: 30
+
+  # Default commit message used when the caller does not supply one.
+  default_commit_message: "chore(perf): publish JMX from perfpilot"

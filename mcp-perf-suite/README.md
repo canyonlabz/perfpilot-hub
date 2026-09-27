@@ -14,9 +14,9 @@ connect to one:
 > toolchain through one MCP endpoint."
 
 - 🔌 **One connection** — Various tools from multiple MCP servers through a single MCP endpoint
-- 🔒 **Full isolation** — each server runs as its own subprocess with its own venv
-- ⚙️ **Configurable** — enable/disable servers, set transport mode (stdio or http)
-- 🔀 **Backward compatible** — all servers still work standalone
+- 🐳 **Docker-native** — every MCP ships as its own container image over streamable-HTTP transport (see [`docker/README.md`](../docker/README.md))
+- 🔒 **Full isolation** — each MCP runs in its own container with its own dependencies, network namespace, and resource limits
+- 🔀 **Backward compatible** — all servers still work standalone (per-MCP `docker compose up`, or `pip install -e .` in the source folder)
 
 See [gateway-mcp/README.md](gateway-mcp/README.md) for setup instructions.
 
@@ -182,7 +182,7 @@ All MCP servers use **FastMCP 3.4.x** and **Python 3.12+**. Each server has its 
 5. Install dependencies: `pip install -e .` (or use `pyproject.toml`)
 6. Configure the MCP server in your IDE's `mcp.json`
 
-For Docker-based dependencies (e.g., PerfMemory's PostgreSQL with pgvector + Apache AGE), see `docker/docker-compose-windows.yaml` or `docker/docker-compose-mac.yaml`.
+For Docker-based deployment (recommended for anyone who wants the full stack running in a single command), see [`docker/README.md`](../docker/README.md). The top-level `docker/` folder ships per-MCP container images plus full-stack Compose files (`docker-compose-full-windows.yaml` and `docker-compose-full-mac.yaml`) that bring up the entire suite — PostgreSQL, all MCPs, the gateway, Playwright, the agent backends, and the UI — in one `docker compose up`.
 
 ---
 

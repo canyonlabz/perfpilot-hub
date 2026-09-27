@@ -2,6 +2,7 @@
 from fastmcp import FastMCP, Context    # ✅ FastMCP 3.x import
 from typing import Optional, List, Dict, Any
 import json
+import os
 
 from services.performance_analyzer import (
     analyze_blazemeter_results,
@@ -203,8 +204,27 @@ async def analyze_logs(test_run_id: str, ctx: Context) -> Dict[str, Any]:
 # -----------------------------
 mcp.disable(tags={"disabled"})
 
+
 if __name__ == "__main__":
+    from utils.logging_config import configure_logging
+    from utils.mcp_utils import register_health_route
+
+    configure_logging()
     try:
-        mcp.run(transport="stdio")
+        if os.environ.get("MCP_TRANSPORT", "stdio") == "http":
+            prefix = os.environ.get("MCP_HTTP_PREFIX", "/perfpilot-mcp-perfanalysis")
+            port = int(os.environ.get("HTTP_PORT", "8113"))
+
+            # Register the prefixed /health route (HTTP transport only).
+            register_health_route(mcp, prefix, "perfpilot-mcp-perfanalysis")
+
+            mcp.run(
+                transport="http",
+                host="0.0.0.0",
+                port=port,
+                path=prefix + "/mcp",
+            )
+        else:
+            mcp.run(transport="stdio")
     except KeyboardInterrupt:
         print("Shutting down Performance Analysis MCP…")

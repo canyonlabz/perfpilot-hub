@@ -15,7 +15,7 @@ supply is the correct **A2A metadata block** on their initial task.
 
 | Surface | Endpoint | Metadata delivery |
 |---------|----------|-------------------|
-| **A2A** (server-to-server) | `POST http://<host>:8001/agents/orchestrator/tasks/send` | JSON `metadata` field inside the task payload |
+| **A2A** (server-to-server) | `POST http://<host>:8101/agents/orchestrator/tasks/send` | JSON `metadata` field inside the task payload |
 | **Web UI** (CopilotKit) | Browser → `POST /api/copilotkit` | Populated automatically from the [`GitHubCredsCard`](../../agent-framework/frontend/ui/components/github/github-creds-card.tsx) session state via `useCopilotReadable` |
 | **Cursor / MCP** | Existing MCP tool calls | Not applicable — Cursor uses per-tool arguments, not framework metadata |
 
@@ -90,7 +90,7 @@ prepended to the LLM system message.
 ## 3. Example A2A request
 
 Minimum request that a `curl` or Python client can send to the A2A
-server (port 8001) to kick off a full new-JMX pipeline:
+server (port 8101) to kick off a full new-JMX pipeline:
 
 ```json
 {

@@ -1,0 +1,25 @@
+# =============================================================================
+# perfpilot-mcp-datadog — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # then fill in Datadog credentials
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-mcp-datadog:
+    build:
+      context: ../..
+      dockerfile: docker/datadog-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-datadog:latest
+    container_name: perfpilot-mcp-datadog
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8111:8111"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+    restart: unless-stopped

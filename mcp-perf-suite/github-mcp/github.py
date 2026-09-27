@@ -244,10 +244,22 @@ async def get_repo_default_branch(
 
 
 if __name__ == "__main__":
-    transport = os.environ.get("GITHUB_MCP_TRANSPORT", "stdio")
-    if transport == "http":
-        host = os.environ.get("GITHUB_MCP_HOST", "0.0.0.0")
-        port = int(os.environ.get("GITHUB_MCP_PORT", 8010))
-        mcp.run(transport="http", host=host, port=port)
+    from utils.logging_config import configure_logging
+    from utils.mcp_utils import register_health_route
+
+    configure_logging()
+    if os.environ.get("MCP_TRANSPORT", "stdio") == "http":
+        prefix = os.environ.get("MCP_HTTP_PREFIX", "/perfpilot-mcp-github")
+        port = int(os.environ.get("HTTP_PORT", "8118"))
+
+        # Register the prefixed /health route (HTTP transport only).
+        register_health_route(mcp, prefix, "perfpilot-mcp-github")
+
+        mcp.run(
+            transport="http",
+            host="0.0.0.0",
+            port=port,
+            path=prefix + "/mcp",
+        )
     else:
         mcp.run(transport="stdio")

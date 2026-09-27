@@ -1,9 +1,9 @@
-"""A2A FastAPI server for PerfPilot Agents (V2 doc Section 9, port 8001).
+"""A2A FastAPI server for PerfPilot Agents (V2 doc Section 9, port 8101).
 
 One ASGI app exposing all seven agents through path-based routing under
 `/agents/{name}/...`. Endpoints follow the A2A protocol exactly (no
 PerfPilot branding) so off-the-shelf A2A clients integrate without
-adapters. Branding lives only on port 8002 (the AG-UI bridge, F3.6).
+adapters. Branding lives only on port 8102 (the AG-UI bridge, F3.6).
 
 Legacy PerfPilot endpoints (V2 Section 9.2):
 
@@ -51,7 +51,7 @@ Run locally:
 
 Or via uvicorn from the agent-framework folder:
 
-    uvicorn a2a_server:app --host 0.0.0.0 --port 8001
+    uvicorn a2a_server:app --host 0.0.0.0 --port 8101
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ async def _lifespan(app: FastAPI):
     log.info("A2A server starting; warming asyncpg pool")
     try:
         await db.get_pool()
-        log.info("A2A server ready (port=%s)", os.environ.get("A2A_PORT", "8001"))
+        log.info("A2A server ready (port=%s)", os.environ.get("A2A_PORT", "8101"))
     except Exception:
         log.exception("Failed to warm asyncpg pool at startup; routes will retry per request")
     try:
@@ -538,20 +538,19 @@ app = create_app()
 
 
 def _resolve_port() -> int:
-    raw = os.environ.get("A2A_PORT", "8001")
+    raw = os.environ.get("A2A_PORT", "8101")
     try:
         return int(raw)
     except ValueError:
-        log.warning("A2A_PORT=%r is not an int; falling back to 8001", raw)
-        return 8001
+        log.warning("A2A_PORT=%r is not an int; falling back to 8101", raw)
+        return 8101
 
 
 def main() -> None:
     """`python a2a_server.py` entrypoint. Loads .env and runs uvicorn."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    from utils.logging_config import configure_logging
+
+    configure_logging()
     try:
         from dotenv import load_dotenv
         load_dotenv(FRAMEWORK_DIR / ".env", override=False)

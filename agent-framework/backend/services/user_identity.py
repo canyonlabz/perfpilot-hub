@@ -245,7 +245,7 @@ def set_user_id_cookie(
         response: The outgoing response to mutate.
         user_id: The user_id value to persist.
         secure: When True, the cookie is sent only over HTTPS. Defaults
-            False so local-dev `http://localhost:8002` works; production
+            False so local-dev `http://localhost:8102` works; production
             deployments behind TLS (ACA, Cloud Run, AWS Fargate + ALB,
             on-prem reverse-proxy with cert, etc.) should set True via
             `web_ui.session_cookie.secure: true` in `agents.yaml`.

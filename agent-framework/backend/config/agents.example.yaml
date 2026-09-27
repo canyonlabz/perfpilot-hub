@@ -10,7 +10,7 @@
 #      `agents/<name>/config.yaml` does not declare an `llm_provider` block.
 #   2. agents — per-agent enable/disable flags. Disabled agents are skipped
 #      by the orchestrator and return 404 on their A2A `agent_card.json`.
-#   3. web_ui — settings for the AG-UI bridge (port 8002): session-cookie
+#   3. web_ui — settings for the AG-UI bridge (port 8102): session-cookie
 #      tunables and optional UI display preferences.
 
 # =============================================================================
@@ -75,10 +75,10 @@ agents:
   notifications-agent: { enabled: true }
 
 # =============================================================================
-# Web UI — AG-UI bridge tunables (port 8002)
+# Web UI — AG-UI bridge tunables (port 8102)
 # =============================================================================
 # Settings consumed by `agui_server.py` and the `SessionMiddleware` on the
-# AG-UI bridge. None of these affect the A2A surface on port 8001 (A2A
+# AG-UI bridge. None of these affect the A2A surface on port 8101 (A2A
 # clients do not use cookies; they authenticate via header / proof-of-knowledge).
 web_ui:
 
@@ -100,7 +100,7 @@ web_ui:
     max_age_days: 365
 
     # Send the cookie only over HTTPS. Defaults to false so local dev on
-    # `http://localhost:8002` works. Flip to true for any production
+    # `http://localhost:8102` works. Flip to true for any production
     # deployment behind TLS (Azure Container Apps, AWS Fargate / ALB,
     # GCP Cloud Run, on-prem reverse proxy with cert, etc.). The
     # framework intentionally does NOT auto-detect this — operators

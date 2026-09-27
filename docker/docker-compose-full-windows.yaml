@@ -1,236 +1,371 @@
 # =============================================================================
-# PerfPilot Hub — Full Stack (Windows)
-#   Gateway + PerfMemory DB + Playwright MCP + Agent Backend + Frontend
-# =============================================================================
-# Usage:
-#   1. Copy .env.gateway.example to .env.gateway and fill in your values
-#   2. Copy config/*.example.yaml files to their non-example counterparts
-#   3. Run: docker compose -f docker-compose-full-windows.yaml up --build
+# PerfPilot Hub — Full stack (Windows / Docker Desktop with WSL2 backend)
 #
-# Services:
-#   perf-gateway    — MCP gateway aggregator (port 8888)
-#   perfmemory-db   — PostgreSQL with pgvector + AGE (port 5432)
-#   playwright-mcp  — Microsoft Playwright MCP for browser automation (port 8931)
-#   agent-a2a       — A2A protocol server (port 8001)
-#   agent-agui      — AG-UI protocol server (port 8002)
-#   frontend        — Next.js web UI (port 3000)
+# Prerequisites:
+#   1. Copy .env.example to .env and fill in your values.
+#   2. (Optional) Place corporate CA bundle in docker/certs/corporate/ and
+#      set ENABLE_CORP_CA=true in .env.
+#   3. Run: docker compose -f docker/docker-compose-full-windows.yaml up --build
+#
+# Services (14 containers, 13 Dockerfiles — agent-backend is built once and
+# tagged twice):
+#
+#   Database
+#     perfmem-pgvector-age            :5432   (PostgreSQL 18 + pgvector + AGE)
+#
+#   Gateway-mounted MCPs (perfpilot-mcp-*)
+#     perfpilot-mcp-blazemeter        :8110
+#     perfpilot-mcp-datadog           :8111
+#     perfpilot-mcp-jmeter            :8112
+#     perfpilot-mcp-perfanalysis      :8113
+#     perfpilot-mcp-perfreport        :8114
+#     perfpilot-mcp-confluence        :8115
+#     perfpilot-mcp-perfmemory        :8116
+#     perfpilot-mcp-github            :8118
+#
+#   Aggregator + standalone MCPs
+#     perfpilot-mcp-gateway           :8125   (aggregates the 8 above)
+#     perfpilot-mcp-playwright        :8117   (@playwright/mcp, /mcp)
+#
+#   Agent backend (single Dockerfile, two image tags)
+#     perfpilot-a2a                   :8101
+#     perfpilot-agui                  :8102
+#
+#   Frontend
+#     perfpilot-ui                    :8080   (Next.js dev mode)
+#
+# Configs are baked into each image — this file has zero config bind
+# mounts. Only `artifacts/` and `.playwright-mcp/` are mounted at runtime.
+#
+# Healthchecks are baked into each image (see the individual Dockerfile
+# HEALTHCHECK directives) — this file does NOT declare per-service
+# healthchecks except for postgres (which uses `pg_isready` and cannot
+# be inherited from image because the base pg image ships no
+# HEALTHCHECK).
 # =============================================================================
+
+# ── Reusable snippets ────────────────────────────────────────────────
+# Every FastMCP service inherits `<<: *mcp-env` so the compose file
+# stays focused on the per-service differences (image, port, deps).
+x-artifacts: &artifacts
+  - ../mcp-perf-suite/artifacts:/app/artifacts
+
+x-mcp-env: &mcp-env
+  env_file:
+    - .env
+  restart: unless-stopped
+  networks:
+    - perf-network
 
 services:
-  perf-gateway:
+
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  perfmem-pgvector-age:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.gateway
-      args:
-        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
-    image: perfpilot-hub-full:latest
-    container_name: perf-gateway
-    ports:
-      - "8888:8888"
-    env_file:
-      - .env.gateway
-    environment:
-      - PERFPILOT_DOCKER=true
-      - GATEWAY_TRANSPORT=http
-      - GATEWAY_PORT=8888
-      - FASTMCP_CHECK_FOR_UPDATES=off
-      # Override POSTGRES_HOST to use the internal Docker network service name
-      - POSTGRES_HOST=perfmemory-db
-      - POSTGRES_PORT=5432
-    volumes:
-      # Artifacts (persisted on host)
-      - ../mcp-perf-suite/artifacts:/app/artifacts
-      # Gateway config
-      - ./config/gateway/config.yaml:/app/gateway-mcp/config.yaml:ro
-      # BlazeMeter config
-      - ./config/blazemeter/config.yaml:/app/blazemeter-mcp/config.yaml:ro
-      # Datadog config
-      - ./config/datadog/config.yaml:/app/datadog-mcp/config.yaml:ro
-      - ./config/datadog/environments.json:/app/datadog-mcp/environments.json:ro
-      - ./config/datadog/custom_queries.json:/app/datadog-mcp/custom_queries.json:ro
-      # PerfAnalysis config
-      - ./config/perfanalysis/config.yaml:/app/perfanalysis-mcp/config.yaml:ro
-      - ./config/perfanalysis/slas.yaml:/app/perfanalysis-mcp/slas.yaml:ro
-      # PerfReport config
-      - ./config/perfreport/config.yaml:/app/perfreport-mcp/config.yaml:ro
-      - ./config/perfreport/report_config.yaml:/app/perfreport-mcp/report_config.yaml:ro
-      - ./config/perfreport/chart_schema.yaml:/app/perfreport-mcp/chart_schema.yaml:ro
-      - ./config/perfreport/chart_colors.yaml:/app/perfreport-mcp/chart_colors.yaml:ro
-      # Confluence config
-      - ./config/confluence/config.yaml:/app/confluence-mcp/config.yaml:ro
-      # JMeter config
-      - ./config/jmeter/config.yaml:/app/jmeter-mcp/config.yaml:ro
-      - ./config/jmeter/jmeter_config.yaml:/app/jmeter-mcp/jmeter_config.yaml:ro
-      - ./config/jmeter/correlation_config.yaml:/app/jmeter-mcp/correlation_config.yaml:ro
-      # JMeter test-specs (subfolder structure: web-flows/, azure-devops/, etc.)
-      - ./config/jmeter/test-specs:/app/jmeter-mcp/test-specs:ro
-      # JMeter properties overrides (optional — appended to jmeter.properties at startup)
-      - ./config/jmeter/jmeter-overrides.properties:/app/jmeter-config/jmeter-overrides.properties:ro
-      # JMeter client certs (optional — place .jks files here, configure via env vars)
-      - ./certs/jmeter/:/app/jmeter-certs/:ro
-      # PerfMemory config
-      - ./config/perfmemory/config.yaml:/app/perfmemory-mcp/config.yaml:ro
-      - ./config/perfmemory/taxonomy.yaml:/app/perfmemory-mcp/taxonomy.yaml:ro
-      # Playwright output (bind mount shared with playwright-mcp container)
-      - ../.playwright-mcp:/app/.playwright-mcp
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8888/health || exit 1"]
-      interval: 60s
-      timeout: 5s
-      start_period: 15s
-      retries: 5
-    depends_on:
-      perfmemory-db:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - perf-network
-
-  perfmemory-db:
-    build:
-      context: .
-      dockerfile: Dockerfile.pgvector-age
+      dockerfile: docker/postgresql/Dockerfile
     image: perfmem-pgvector-age:latest
     container_name: perfmem-pgvector-age
     env_file:
-      - .env.gateway
+      - .env
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-    volumes:
-      - ./data/pgvectordb:/var/lib/postgresql/18/docker
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Bind mount is required — named volumes fail on this image because
+      # PG 18's initdb cannot chown the docker-managed volume root.
+      - ./data/pgvectordb:/var/lib/postgresql/18/docker
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
     restart: unless-stopped
     networks:
       - perf-network
 
-  playwright-mcp:
+  # ---------------------------------------------------------------------------
+  # Gateway-mounted MCPs (Dockerfile-managed healthchecks probe their own
+  # /perfpilot-mcp-<name>/health endpoint on the container port)
+  # ---------------------------------------------------------------------------
+  perfpilot-mcp-blazemeter:
+    <<: *mcp-env
     build:
       context: ..
-      dockerfile: docker/Dockerfile.playwright-mcp
+      dockerfile: docker/blazemeter-mcp/Dockerfile
       args:
         ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
-    image: playwright-mcp:latest
-    container_name: playwright-mcp
-    user: "0:0"
+    image: perfpilot-mcp-blazemeter:latest
+    container_name: perfpilot-mcp-blazemeter
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
     ports:
-      - "8931:8931"
-    command: ["--port", "8931", "--host", "0.0.0.0", "--allowed-hosts", "*", "--caps", "devtools", "--ignore-https-errors", "--config", "/app/config.json"]
+      - "8110:8110"
+    volumes: *artifacts
+
+  perfpilot-mcp-datadog:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/datadog-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-datadog:latest
+    container_name: perfpilot-mcp-datadog
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+    ports:
+      - "8111:8111"
+    volumes: *artifacts
+
+  perfpilot-mcp-jmeter:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/jmeter-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-jmeter:latest
+    container_name: perfpilot-mcp-jmeter
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+    ports:
+      - "8112:8112"
+    volumes:
+      - ../mcp-perf-suite/artifacts:/app/artifacts
+      # Shared with perfpilot-mcp-playwright so JMeter can parse the trace files
+      - ../.playwright-mcp:/app/.playwright-mcp
+
+  perfpilot-mcp-perfanalysis:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/perfanalysis-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-perfanalysis:latest
+    container_name: perfpilot-mcp-perfanalysis
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+    ports:
+      - "8113:8113"
+    volumes: *artifacts
+
+  perfpilot-mcp-perfreport:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/perfreport-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-perfreport:latest
+    container_name: perfpilot-mcp-perfreport
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+    ports:
+      - "8114:8114"
+    volumes: *artifacts
+
+  perfpilot-mcp-confluence:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/confluence-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-confluence:latest
+    container_name: perfpilot-mcp-confluence
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+    ports:
+      - "8115:8115"
+    volumes: *artifacts
+
+  perfpilot-mcp-perfmemory:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/perfmemory-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-perfmemory:latest
+    container_name: perfpilot-mcp-perfmemory
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+      - POSTGRES_HOST=perfmem-pgvector-age
+      - POSTGRES_PORT=5432
+    ports:
+      - "8116:8116"
+    volumes: *artifacts
+    depends_on:
+      perfmem-pgvector-age:
+        condition: service_healthy
+
+  perfpilot-mcp-github:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/github-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-github:latest
+    container_name: perfpilot-mcp-github
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+    ports:
+      - "8118:8118"
+
+  # ---------------------------------------------------------------------------
+  # Gateway (aggregates the 8 MCPs above via HTTP-mount)
+  # ---------------------------------------------------------------------------
+  perfpilot-mcp-gateway:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/gateway-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-gateway:latest
+    container_name: perfpilot-mcp-gateway
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+      - FASTMCP_CHECK_FOR_UPDATES=off
+      # In-network URLs (Docker DNS resolves each container name).
+      - MCP_URL_BLAZEMETER=http://perfpilot-mcp-blazemeter:8110/perfpilot-mcp-blazemeter/mcp
+      - MCP_URL_DATADOG=http://perfpilot-mcp-datadog:8111/perfpilot-mcp-datadog/mcp
+      - MCP_URL_JMETER=http://perfpilot-mcp-jmeter:8112/perfpilot-mcp-jmeter/mcp
+      - MCP_URL_PERFANALYSIS=http://perfpilot-mcp-perfanalysis:8113/perfpilot-mcp-perfanalysis/mcp
+      - MCP_URL_PERFREPORT=http://perfpilot-mcp-perfreport:8114/perfpilot-mcp-perfreport/mcp
+      - MCP_URL_CONFLUENCE=http://perfpilot-mcp-confluence:8115/perfpilot-mcp-confluence/mcp
+      - MCP_URL_PERFMEMORY=http://perfpilot-mcp-perfmemory:8116/perfpilot-mcp-perfmemory/mcp
+      - MCP_URL_GITHUB=http://perfpilot-mcp-github:8118/perfpilot-mcp-github/mcp
+    ports:
+      - "8125:8125"
+    depends_on:
+      perfpilot-mcp-blazemeter:
+        condition: service_healthy
+      perfpilot-mcp-datadog:
+        condition: service_healthy
+      perfpilot-mcp-jmeter:
+        condition: service_healthy
+      perfpilot-mcp-perfanalysis:
+        condition: service_healthy
+      perfpilot-mcp-perfreport:
+        condition: service_healthy
+      perfpilot-mcp-confluence:
+        condition: service_healthy
+      perfpilot-mcp-perfmemory:
+        condition: service_healthy
+      perfpilot-mcp-github:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Playwright MCP (@playwright/mcp, endpoint /mcp only, no path prefix)
+  #
+  # Healthcheck is baked into the image (docker/playwright-mcp/Dockerfile
+  # HEALTHCHECK directive uses `wget --spider /mcp` + rc=0|8 pattern).
+  # `user: "0:0"` is intentional — the .playwright-mcp/ bind mount ownership
+  # varies across hosts and running as root sidesteps every permission
+  # mismatch (on Windows Docker Desktop the mount proxy makes UID moot).
+  # ---------------------------------------------------------------------------
+  perfpilot-mcp-playwright:
+    <<: *mcp-env
+    build:
+      context: ..
+      dockerfile: docker/playwright-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-playwright:latest
+    container_name: perfpilot-mcp-playwright
+    user: "0:0"
+    environment:
+      - HTTP_PORT=8117
+      - PERFPILOT_DOCKER=true
+    ports:
+      - "8117:8117"
     volumes:
       - ../.playwright-mcp:/home/node/output
-      - ./config/playwright/config.json:/app/config.json:ro
-    restart: unless-stopped
-    networks:
-      - perf-network
 
-  agent-a2a:
+  # ---------------------------------------------------------------------------
+  # Agent backend — single Dockerfile, two image tags, two CMDs
+  #
+  # `depends_on: perfpilot-mcp-playwright` uses `service_started` (not
+  # `service_healthy`) — Playwright's healthcheck requires a fully-
+  # initialized Chromium context which adds ~30s to full-stack startup
+  # and is not a prerequisite for agent-backend boot. Playwright is only
+  # invoked lazily via the agent's browser tool.
+  # ---------------------------------------------------------------------------
+  perfpilot-a2a:
+    <<: *mcp-env
     build:
       context: ..
-      dockerfile: docker/Dockerfile.agent-backend
+      dockerfile: docker/agent-backend/Dockerfile
       args:
         ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
-    image: perf-agent-backend:latest
-    container_name: agent-a2a
-    ports:
-      - "8001:8001"
-    env_file:
-      - .env.gateway
+    image: perfpilot-a2a:latest
+    container_name: perfpilot-a2a
+    command: ["python", "a2a_server.py"]
     environment:
-      - PERFPILOT_DOCKER=true
-      - GATEWAY_MCP_URL=http://perf-gateway:8888/mcp
-      - PLAYWRIGHT_MCP_URL=http://playwright-mcp:8931/mcp
-      - PERFAGENT_STATE_HOST=perfmemory-db
-      - PERFAGENT_STATE_PORT=5432
-      - PERFAGENT_STATE_DB=perfagent_state
-      - PERFAGENT_STATE_USER=${POSTGRES_USER}
-      - PERFAGENT_STATE_PASSWORD=${POSTGRES_PASSWORD}
-      - HEALTHCHECK_PORT=8001
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
-      interval: 60s
-      timeout: 5s
-      start_period: 15s
-      retries: 5
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+      - A2A_PORT=8101
+      - HEALTHCHECK_PORT=8101
+    ports:
+      - "8101:8101"
     depends_on:
-      perfmemory-db:
+      perfmem-pgvector-age:
         condition: service_healthy
-      perf-gateway:
+      perfpilot-mcp-gateway:
         condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - perf-network
+      perfpilot-mcp-playwright:
+        condition: service_started
 
-  agent-agui:
+  perfpilot-agui:
+    <<: *mcp-env
     build:
       context: ..
-      dockerfile: docker/Dockerfile.agent-backend
+      dockerfile: docker/agent-backend/Dockerfile
       args:
         ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
-    image: perf-agent-backend:latest
-    container_name: agent-agui
-    ports:
-      - "8002:8002"
-    env_file:
-      - .env.gateway
-    environment:
-      - PERFPILOT_DOCKER=true
-      - GATEWAY_MCP_URL=http://perf-gateway:8888/mcp
-      - PLAYWRIGHT_MCP_URL=http://playwright-mcp:8931/mcp
-      - PERFAGENT_STATE_HOST=perfmemory-db
-      - PERFAGENT_STATE_PORT=5432
-      - PERFAGENT_STATE_DB=perfagent_state
-      - PERFAGENT_STATE_USER=${POSTGRES_USER}
-      - PERFAGENT_STATE_PASSWORD=${POSTGRES_PASSWORD}
-      - HEALTHCHECK_PORT=8002
+    image: perfpilot-agui:latest
+    container_name: perfpilot-agui
     command: ["python", "agui_server.py"]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
-      interval: 60s
-      timeout: 5s
-      start_period: 15s
-      retries: 5
+    environment:
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+      - AGUI_PORT=8102
+      - HEALTHCHECK_PORT=8102
+    ports:
+      - "8102:8102"
     depends_on:
-      perfmemory-db:
+      perfpilot-a2a:
         condition: service_healthy
-      agent-a2a:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - perf-network
 
-  frontend:
+  # ---------------------------------------------------------------------------
+  # Frontend (Next.js dev-mode container)
+  # ---------------------------------------------------------------------------
+  perfpilot-ui:
+    <<: *mcp-env
     build:
       context: ..
-      dockerfile: docker/Dockerfile.agent-frontend
+      dockerfile: docker/agent-frontend/Dockerfile
       args:
         ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
-    image: perf-agent-frontend:latest
-    container_name: frontend
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+    image: perfpilot-ui:latest
+    container_name: perfpilot-ui
     environment:
-      - AGUI_BACKEND_URL=http://agent-agui:8002
-      - A2A_BACKEND_URL=http://agent-a2a:8001
-      - FRONTEND_PORT=3000
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
-      interval: 60s
-      timeout: 5s
-      start_period: 30s
-      retries: 5
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+      - PORT=8080
+      - FRONTEND_PORT=8080
+    ports:
+      - "8080:8080"
     depends_on:
-      agent-agui:
+      perfpilot-agui:
         condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - perf-network
 
 networks:
   perf-network:

@@ -1,0 +1,25 @@
+# =============================================================================
+# perfpilot-mcp-blazemeter — standalone spin-up
+#
+# Usage (from this folder):
+#   cp .env.example .env    # then fill in BlazeMeter credentials
+#   docker compose up --build -d
+# =============================================================================
+
+services:
+  perfpilot-mcp-blazemeter:
+    build:
+      context: ../..
+      dockerfile: docker/blazemeter-mcp/Dockerfile
+      args:
+        ENABLE_CORP_CA: ${ENABLE_CORP_CA:-false}
+    image: perfpilot-mcp-blazemeter:latest
+    container_name: perfpilot-mcp-blazemeter
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8110:8110"
+    volumes:
+      - ../../mcp-perf-suite/artifacts:/app/artifacts
+    restart: unless-stopped
