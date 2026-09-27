@@ -2,19 +2,28 @@
 # perfpilot-mcp-playwright — standalone spin-up
 #
 # Usage (from this folder):
-#   cp .env.example .env    # optional — only needed for client cert env vars
+#   cp .env.example .env    # optional — only needed for corp CA / mTLS
 #   docker compose up --build -d
 #
 # Notes:
-#   • Vendor image (Microsoft playwright-mcp). Endpoint is `/mcp`, not
-#     `/perfpilot-mcp-playwright/mcp` — the vendor image does not accept
-#     a path prefix, so MCP_TRANSPORT / MCP_HTTP_PREFIX are NOT set here.
-#   • Browser settings (browser, headless, output-dir) are
-#     passed via CLI flags rather than a mounted config.json so this
-#     compose file has no config bind mounts.
-#   • Traces / HAR files are written under `/home/node/output` inside
-#     the container, which is bind-mounted onto `../../.playwright-mcp`
-#     at the repo root so JMeter can consume them.
+#   • Built from the Microsoft Playwright base image + @playwright/mcp
+#     npm package. Endpoint is `/mcp` (no per-service prefix — the
+#     vendor MCP does not accept one), so MCP_TRANSPORT / MCP_HTTP_PREFIX
+#     are NOT set here.
+#   • `user: "0:0"` is intentional. The bind mount below maps the host
+#     `.playwright-mcp/` directory into the container so JMeter can
+#     consume traces / HAR files. Running as root sidesteps UID
+#     mismatches between the container's `node` user (uid 1000) and
+#     arbitrary host owners on macOS / Linux; on Windows Docker Desktop
+#     the mount proxy makes UID moot either way.
+#   • Runtime browser flags live in the image entrypoint (headless,
+#     chromium, --allowed-hosts, --caps devtools, --ignore-https-errors,
+#     --config /app/config.json). Nothing here duplicates them.
+#   • Optional mTLS: set PLAYWRIGHT_CERT_FILE +
+#     PLAYWRIGHT_CERT_PASSPHRASE (+ optional
+#     PLAYWRIGHT_CERT_AUTO_SELECT_CN / PATTERN) in .env after placing
+#     the cert file in docker/certs/playwright/ so it gets baked into
+#     the image at /certs.
 # =============================================================================
 
 services:
@@ -30,23 +39,11 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      - HTTP_PORT=8117
+      - PERFPILOT_DOCKER=true
     ports:
       - "8117:8117"
-    command:
-      - "--port"
-      - "8117"
-      - "--host"
-      - "0.0.0.0"
-      - "--allowed-hosts"
-      - "*"
-      - "--caps"
-      - "devtools"
-      - "--ignore-https-errors"
-      - "--headless"
-      - "--browser"
-      - "chromium"
-      - "--output-dir"
-      - "/home/node/output"
     volumes:
       - ../../.playwright-mcp:/home/node/output
     restart: unless-stopped
