@@ -237,6 +237,7 @@ macOS validation is planned for the next work cycle.
 | `docker/playwright-mcp/entrypoint.sh` | Playwright MCP startup script (cert import, config, CLI launch) |
 | `docker/playwright-mcp/config/config.json` | Baked-in Playwright MCP transport + browser config |
 | `docker/agent-backend/entrypoint.sh` | Agent backend startup script (A2A or AG-UI dispatch via `$@` or `AGENT_SERVER`) |
+| `docker/agent-backend/requirements.txt` | Docker-scoped pip requirements mirror (matches the per-image convention used by the FastMCP MCPs); kept in sync with `agent-framework/backend/requirements.txt` |
 | `docker/agent-backend/.dockerignore` | Per-image ignore rules (`.env`, `.venv`, `__pycache__`, logs) |
 | `docker/agent-frontend/.dockerignore` | Per-image ignore rules |
 | `docs/changelogs/CHANGELOG-2026-07.md` | Rotated July 2026 changelog |
@@ -261,7 +262,7 @@ macOS validation is planned for the next work cycle.
 | `docker/playwright-mcp/Dockerfile` | Rebuilt on `mcr.microsoft.com/playwright:v1.63.0-noble` + `@playwright/mcp@0.0.80`; NSS DB cert import; entrypoint-driven startup; baked `HEALTHCHECK` |
 | `docker/playwright-mcp/docker-compose.yml` | Simplified: entrypoint owns runtime flags; cross-OS `user: "0:0"` retained |
 | `docker/playwright-mcp/.env.example` | Rewritten around single `PLAYWRIGHT_CERT_FILE` variable |
-| `docker/agent-backend/Dockerfile` | Added `bash` + `tini`; non-root `app:app`; inline `HEALTHCHECK` reading `HEALTHCHECK_PORT`; new entrypoint |
+| `docker/agent-backend/Dockerfile` | Added `bash` + `tini`; non-root `app:app`; inline `HEALTHCHECK` reading `HEALTHCHECK_PORT`; new entrypoint; pip install now sources `docker/agent-backend/requirements.txt` (Docker-scoped mirror) instead of reaching into the source tree |
 | `docker/agent-frontend/Dockerfile` | `USER app` before `npm ci`; `COPY --chown=app:app`; port 8080 hardcoded; baked `HEALTHCHECK` |
 | `docker/docker-compose-full-windows.yaml` | YAML anchors (`x-mcp-env`, `x-artifacts`); simplified from 400 → 354 lines |
 | `docker/docker-compose-full-mac.yaml` | YAML anchors; simplified from 400 → 365 lines; macOS-specific user + PGDATA retained |

@@ -29,7 +29,7 @@ database).
 logical databases:
 
 - 🧠 **`perfmemory`** — vector embeddings + graph edges for the PerfMemory MCP
-- 🤖 **`perfagent_state`** — LangGraph checkpoint state + short-term conversation
+- 🤖 **`perfagent_state`** — Agent session/task state + conversation history
   memory for the agent backend (`perfpilot-a2a` + `perfpilot-agui`)
 
 Both databases live in the same PostgreSQL cluster and share the same user

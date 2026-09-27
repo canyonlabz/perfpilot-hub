@@ -66,7 +66,10 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 # ── Python dependencies ──────────────────────────────────────────────
-COPY agent-framework/backend/requirements.txt ./requirements.txt
+# Docker-scoped mirror lives under docker/agent-backend/ to match the
+# per-image convention used by the FastMCP MCPs (docker/<mcp>/requirements.txt).
+# Kept in sync with agent-framework/backend/requirements.txt.
+COPY docker/agent-backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt truststore
 
 # ── Application source ───────────────────────────────────────────────

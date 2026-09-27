@@ -40,9 +40,20 @@ namespace matching the upstream MCP's name:
 - `perfmemory.*` — tools from `perfpilot-mcp-perfmemory`
 - `github.*` — tools from `perfpilot-mcp-github`
 
-Playwright is **not** mounted through the gateway — the vendor image does not
-support HTTP path prefixes. Agents call `perfpilot-mcp-playwright:8117/mcp`
-directly.
+Playwright is **not** mounted through the gateway — the vendor image serves
+at the bare `/mcp` path and does not support the per-service URL prefix that
+FastMCP's `create_proxy()` requires. Agents call
+`perfpilot-mcp-playwright:8117/mcp` directly instead.
+
+For discoverability, the gateway container still carries an
+`MCP_URL_PLAYWRIGHT` environment variable in `docker-compose.yml` (default
+`http://host.docker.internal:8117/mcp` for standalone, `http://perfpilot-mcp-playwright:8117/mcp`
+in the full-stack compose). This variable is **not consumed by the gateway
+process itself** — it is present so that the gateway container documents
+every MCP endpoint an operator would need to reach, and so that split-mode
+consumers (such as the agent backend) can read a single consistent env
+surface. `gateway.py`'s `_MCP_MOUNTS` tuple still governs which MCPs are
+actually proxied through the gateway.
 
 For the complete mount configuration, see the
 [`gateway-mcp` source folder](../../mcp-perf-suite/gateway-mcp/).
@@ -122,6 +133,7 @@ mode).
 | `MCP_URL_CONFLUENCE` | *(from baked config)* | URL of the Confluence MCP. Empty = skip mounting. |
 | `MCP_URL_PERFMEMORY` | *(from baked config)* | URL of the PerfMemory MCP. Empty = skip mounting. |
 | `MCP_URL_GITHUB` | *(from baked config)* | URL of the GitHub MCP. Empty = skip mounting. |
+| `MCP_URL_PLAYWRIGHT` | *(from compose)* | Playwright MCP URL. Set on the gateway container for discoverability, but **not consumed by the gateway proxy** — Playwright is called directly by agents (see §🎯 Capabilities). |
 
 In the full-stack compose, `config.yaml` provides defaults that resolve to
 Docker service DNS names (e.g., `http://perfpilot-mcp-blazemeter:8110/perfpilot-mcp-blazemeter/mcp`).

@@ -1,6 +1,6 @@
 # 🤖 perfpilot-a2a + perfpilot-agui
 
-Agent backend services — the LangGraph-based Python backend that powers
+Agent backend services — the AG2-based Python backend that powers
 PerfPilot Hub's AI-driven performance-testing workflows. A single Dockerfile
 produces two container images:
 
@@ -36,14 +36,14 @@ the second image is essentially free after the first is built.
 ## 🎯 Capabilities
 
 The agent backend orchestrates AI-driven performance-testing workflows by
-combining LangGraph reasoning with the PerfPilot MCP suite. Core capabilities
-include:
+combining AG2 multi-agent reasoning with the PerfPilot MCP suite. Core
+capabilities include:
 
-- 🧠 **LangGraph orchestration** — multi-step reasoning graphs with state persistence
+- 🧠 **AG2 multi-agent orchestration** — Orchestrator (Pilot) + specialist Copilots (Script, Execution, Monitoring, Analysis, Reporting, Notifications) coordinated through the AG2 framework
 - 💬 **Multi-model support** — OpenAI, Azure OpenAI, or Ollama as the chat model
 - 🔧 **MCP tool binding** — connects to the gateway MCP for all performance-testing tools
 - 🎭 **Playwright integration** — dedicated connection to `perfpilot-mcp-playwright` for browser automation
-- 💾 **Persistent state** — LangGraph checkpoints stored in the `perfagent_state` PostgreSQL database
+- 💾 **Persistent state** — Agent checkpoints, sessions, tasks, and conversation history stored in the `perfagent_state` PostgreSQL database
 - 🔄 **Streaming responses** — SSE (Server-Sent Events) for A2A, CopilotKit-compatible endpoints for AG-UI
 - 🔌 **Split-mode support** — bypass the gateway and connect to individual MCPs directly (useful for debugging or Aspire deployments)
 
@@ -268,5 +268,5 @@ Report bugs, request features, or contribute at the
 - 📂 [`docker/gateway-mcp/README.md`](../gateway-mcp/README.md) — gateway aggregator used by the agent
 - 📂 [`docker/playwright-mcp/README.md`](../playwright-mcp/README.md) — browser automation used by the agent
 - 📂 [`docker/postgresql/README.md`](../postgresql/README.md) — required database backend
-- 🌐 [LangGraph documentation](https://langchain-ai.github.io/langgraph/) — agent orchestration framework
+- 🌐 [AG2 documentation](https://docs.ag2.ai/) — multi-agent orchestration framework
 - 🌐 [CopilotKit documentation](https://docs.copilotkit.ai/) — AG-UI bridge protocol
