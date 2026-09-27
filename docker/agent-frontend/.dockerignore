@@ -1,0 +1,22 @@
+# =============================================================================
+# .dockerignore — perfpilot-ui (Agent Frontend) image
+#
+# Placed next to the Dockerfile so this image's context exclusions are
+# co-located with the build spec. The repo-root .dockerignore covers
+# the same patterns (and more), so this file is a targeted safety net /
+# documentation of what MUST NEVER be shipped for this specific image.
+#
+# CRITICAL: node_modules and .next MUST be excluded — a local `npm run
+# dev` on this repo leaves ~1.5 GB of build artifacts in
+# agent-framework/frontend/ui/ that would otherwise be COPY'd into the
+# image on top of the fresh `npm ci` performed inside the Dockerfile.
+# =============================================================================
+
+.env
+.env.*
+.DS_Store
+.git
+.gitignore
+*.log
+node_modules
+.next

@@ -1,0 +1,18 @@
+# =============================================================================
+# .dockerignore — perfpilot-a2a / perfpilot-agui (Agent Backend) image
+#
+# Placed next to the Dockerfile so this image's context exclusions are
+# co-located with the build spec. The repo-root .dockerignore covers
+# the same patterns (and more), so this file is a targeted safety net /
+# documentation of what MUST NEVER be shipped for this specific image.
+# =============================================================================
+
+.env
+.env.*
+.DS_Store
+.git
+.gitignore
+*.log
+.venv
+__pycache__
+*.pyc
