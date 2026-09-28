@@ -5,7 +5,7 @@ precedence resolution for incoming A2A requests.  It converts enriched
 upstream payloads into a single coherent prompt string that the orchestrator
 LLM can reason over, while preserving structured context for downstream use.
 
-Supported media types are defined in ``a2a_media_types.py`` (the MIME type
+Supported media types are defined in ``a2a.shared.media_types`` (the MIME type
 registry).  This module imports from that registry and uses it for media type
 resolution and validation.
 

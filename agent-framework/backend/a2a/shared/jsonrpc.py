@@ -8,7 +8,7 @@ helpers for request validation and response formatting. Method dispatch
 itself lives in the route handler to stay consistent with the Phase 2
 HTTP+JSON/REST binding pattern.
 
-This module is standalone — it depends only on ``a2a_models`` for error
+This module is standalone — it depends only on ``a2a.shared.models`` for error
 code constants. No FastAPI, database, or AG2 imports.
 
 Spec reference: https://a2a-protocol.org/v1.0.0/specification/#9-json-rpc-20-protocol-binding

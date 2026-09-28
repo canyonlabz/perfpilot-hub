@@ -29,12 +29,12 @@ A2A v1.0.0 JSON-RPC 2.0 binding (Spec Section 9):
 
 Route registration for A2A v1 is delegated to sub-modules:
 
-    utils.a2a_v1_helpers  — constants, response headers, body normalizer,
-                            task converters (protocol-agnostic)
-    utils.a2a_v1_routes   — register_a2a_v1_routes(),
-                            register_a2a_v1_jsonrpc_route()
-    utils.a2a_errors      — google.rpc.Status error builders (HTTP binding)
-    utils.a2a_jsonrpc     — JSON-RPC 2.0 envelope, error helpers
+    a2a.server.v1_helpers  — constants, response headers, body normalizer,
+                             task converters (protocol-agnostic)
+    a2a.server.v1_routes   — register_a2a_v1_routes(),
+                             register_a2a_v1_jsonrpc_route()
+    a2a.shared.errors      — google.rpc.Status error builders (HTTP binding)
+    a2a.shared.jsonrpc     — JSON-RPC 2.0 envelope, error helpers
 
 Long-running task model (V2 Section 14):
 

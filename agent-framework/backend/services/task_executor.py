@@ -1130,7 +1130,7 @@ def _extract_user_message_from_payload(payload: Any) -> Optional[str]:
         return top_level_message
 
     # ── Step 4 fallback: first text Part (no composed prompt) ──
-    fallback = a2a_parts_parser.resolve_user_message(payload)
+    fallback = parts_parser.resolve_user_message(payload)
     if fallback:
         return fallback
 
