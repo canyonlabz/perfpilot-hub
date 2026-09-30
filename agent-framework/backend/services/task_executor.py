@@ -2169,7 +2169,13 @@ async def _run_mcp_specialist_agent(
         agent_config.get("mcp_tools", {}).get("allowed_namespaces", [])
     )
     playwright_cfg = agent_config.get("playwright_mcp", {})
-    if isinstance(playwright_cfg, dict) and playwright_cfg.get("enabled", True):
+    # Only opt in to the stateful Playwright browser namespace when the
+    # agent's config explicitly sets `playwright_mcp.enabled: true`. A
+    # missing / empty / null `playwright_mcp:` section MUST NOT flag the
+    # agent as stateful — doing so causes the executor to pass a
+    # `stateful_client_holder=` kwarg to the factory, which only
+    # script-agent's factory accepts.
+    if isinstance(playwright_cfg, dict) and playwright_cfg.get("enabled", False):
         all_namespaces.append("browser")
 
     has_stateful = any(ns in STATEFUL_NAMESPACES for ns in all_namespaces)
