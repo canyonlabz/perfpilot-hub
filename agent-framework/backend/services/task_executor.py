@@ -57,6 +57,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from services import hitl_gates
 from stores import task_store
 from stores import trace_store
 
@@ -171,106 +172,6 @@ async def _broadcast(task_id: UUID, event: TaskEvent) -> None:
 
 
 # =============================================================================
-# Public API
-# =============================================================================
-
-def _find_matching_hitl_rule(
-    agent_name: str,
-    tool: Optional[str],
-) -> Optional[HitlGateRule]:
-    """Return the first HITL gate rule that matches (agent, tool) AND is
-    enabled in config, or ``None`` if no gate applies.
-    """
-    hitl_cfg = _get_hitl_config()
-    for rule in _HITL_GATE_RULES:
-        if rule.matches(agent_name, tool) and hitl_cfg.get(rule.config_key, False):
-            return rule
-    return None
-
-
-async def _enforce_hitl_gate(
-    task: task_store.AgentTask,
-    common: dict,
-) -> Optional[str]:
-    """Check config-driven HITL gates and wait for human decision if required.
-
-    Iterates ``_HITL_GATE_RULES`` looking for a rule that matches the
-    task's ``(agent_name, payload.tool)`` AND whose config key is enabled.
-    If a match is found, creates a HITL prompt and polls until the human
-    decides (approve / reject) or the configured timeout expires.
-
-    Returns ``None`` when no gate applies or when the human approved.
-    Returns a rejection reason string when the human rejected or the gate
-    timed out — the caller should cancel the task.
-
-    Polling interval and timeout are read from the orchestrator's
-    ``config.yaml`` under ``pipeline.poll_interval_seconds`` and
-    ``pipeline.poll_timeout_seconds`` respectively.
-    """
-    payload = task.payload if isinstance(task.payload, dict) else {}
-    tool = payload.get("tool") if isinstance(payload.get("tool"), str) else None
-
-    rule = _find_matching_hitl_rule(task.agent_name, tool)
-    if rule is None:
-        return None
-
-    from stores import hitl_store
-
-    prompt = rule.build_prompt(task.agent_name, payload)
-
-    try:
-        approval = await hitl_store.create_prompt(task.task_id, prompt)
-    except Exception as exc:
-        log.exception("_enforce_hitl_gate: failed to create HITL prompt")
-        return f"Failed to create HITL prompt: {exc}"
-
-    log.info(
-        "HITL gate active for task %s (approval_id=%d, rule=%s)",
-        task.task_id, approval.id, rule.config_key,
-    )
-
-    await _broadcast(
-        task.task_id,
-        TaskEvent(status="running", progress="Waiting for human approval...", **common),
-    )
-
-    hitl_cfg = _get_hitl_config()
-    poll_interval = float(hitl_cfg.get("poll_interval_seconds", 2.0))
-    timeout = float(hitl_cfg.get("timeout_seconds", 300.0))
-    deadline = asyncio.get_event_loop().time() + max(0.0, timeout)
-
-    while asyncio.get_event_loop().time() < deadline:
-        try:
-            current = await hitl_store.get_approval(approval.id)
-        except Exception:
-            log.exception("_enforce_hitl_gate: poll error (will retry)")
-            await asyncio.sleep(poll_interval)
-            continue
-
-        if current and current.decision != "pending":
-            if current.decision == "approved":
-                log.info("HITL gate approved for task %s", task.task_id)
-                await _broadcast(
-                    task.task_id,
-                    TaskEvent(
-                        status="running",
-                        progress="Human approval granted — proceeding with execution",
-                        **common,
-                    ),
-                )
-                return None
-            else:
-                reason = current.feedback or "Rejected by user"
-                log.info("HITL gate rejected for task %s: %s", task.task_id, reason)
-                return reason
-
-        await asyncio.sleep(poll_interval)
-
-    log.warning("HITL gate timed out for task %s after %.0fs", task.task_id, timeout)
-    return f"HITL approval timed out after {int(timeout)}s"
-
-
-# =============================================================================
 # Push notification: inject completion message into conversation thread
 # =============================================================================
 
@@ -364,7 +265,19 @@ async def execute_task(task_id: UUID) -> None:
         # Config-driven HITL gate: pause before executing if approval is
         # required. The frontend polls /api/hitl/tasks/{task_id} and renders
         # an inline approval card. The gate blocks here until decided.
-        hitl_rejection = await _enforce_hitl_gate(task, common)
+        #
+        # Callback-injection design: hitl_gates.py stays free of TaskEvent /
+        # _broadcast imports so it can be tested in isolation and avoids a
+        # circular dependency with this module.
+        async def _hitl_progress(message: str) -> None:
+            await _broadcast(
+                task.task_id,
+                TaskEvent(status="running", progress=message, **common),
+            )
+
+        hitl_rejection = await hitl_gates.enforce_at_task_start(
+            task, on_progress=_hitl_progress,
+        )
         if hitl_rejection is not None:
             await task_store.mark_cancelled(task.task_id, reason=hitl_rejection)
             await _broadcast(
@@ -424,108 +337,20 @@ SCRIPT_AGENT_NAME = "script-agent"
 SCRIPT_AGENT_MCP_PREFIXES: tuple[str, ...] = ("jmeter_",)
 
 # =============================================================================
-# HITL gate infrastructure (config-driven, extensible)
+# HITL gate infrastructure — MOVED
 # =============================================================================
-# Each HitlGateRule declares a mapping from (agent, tool) to a config key
-# under `hitl.*` in the orchestrator's config.yaml.  Adding a new HITL gate
-# is two steps:
-#   1. Add a `require_approval_before_<name>: true` key in config.yaml
-#   2. Add a HitlGateRule to _HITL_GATE_RULES below
-# The framework handles prompt creation, polling, and approval/rejection.
+# The `HitlGateRule` dataclass, rule list, matcher, enforcers, and
+# publish-tool resolver now live in `services/hitl_gates.py`. That
+# module is the single source of truth for HITL policy across the
+# framework (Web UI, orchestrator delegation, A2A, SDK). Adding a new
+# HITL gate is documented at `docs/agent-framework/hitl-configuration.md`.
 
-
-@dataclass
-class HitlGateRule:
-    """Declares when a HITL gate should fire and what prompt to show."""
-
-    config_key: str
-    agent_names: tuple[str, ...]
-    tools: Optional[frozenset[str]]
-    title: str
-    summary_template: str
-
-    def matches(self, agent_name: str, tool: Optional[str]) -> bool:
-        if agent_name not in self.agent_names:
-            return False
-        if self.tools is not None and (tool is None or tool not in self.tools):
-            return False
-        return True
-
-    def build_prompt(self, agent_name: str, payload: dict) -> dict:
-        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
-        tool = payload.get("tool", "unknown")
-
-        template_vars = {
-            "agent_name": agent_name,
-            "tool": tool,
-            **{k: str(v) for k, v in args.items()},
-        }
-        summary = self.summary_template.format_map(
-            _SafeFormatMap(template_vars)
-        )
-
-        artifact: dict[str, Any] = {"tool": tool, "agent": agent_name}
-        artifact.update({k: str(v) for k, v in args.items()})
-        if payload.get("action"):
-            artifact["action"] = payload["action"]
-
-        return {"title": self.title, "summary": summary, "artifact": artifact}
-
-
-class _SafeFormatMap(dict):
-    """Dict subclass that returns '{key}' for missing keys in str.format_map."""
-
-    def __missing__(self, key: str) -> str:
-        return f"{{{key}}}"
-
-
-_HITL_GATE_RULES: list[HitlGateRule] = [
-    HitlGateRule(
-        config_key="require_approval_before_test_provision",
-        agent_names=(EXECUTION_AGENT_NAME,),
-        tools=frozenset({"provision_performance_test"}),
-        title="Approve BlazeMeter Test Provisioning",
-        summary_template=(
-            "The {agent_name} wants to create a NEW BlazeMeter test "
-            "'{test_name}' for environment {environment} and upload the "
-            "JMX from {jmx_path}. Approve to provision, or reject to keep "
-            "the JMX in Git only."
-        ),
-    ),
-    HitlGateRule(
-        config_key="require_approval_before_test_start",
-        agent_names=(EXECUTION_AGENT_NAME,),
-        tools=frozenset({"start_performance_test"}),
-        title="Approve Performance Test Start",
-        summary_template=(
-            "The {agent_name} wants to start BlazeMeter test {test_id}. "
-            "Approve to proceed or reject to cancel."
-        ),
-    ),
-    HitlGateRule(
-        config_key="require_approval_before_publish",
-        agent_names=("reporting-agent",),
-        tools=None,
-        title="Approve Report Publication",
-        summary_template=(
-            "The {agent_name} wants to publish content. "
-            "Approve to proceed or reject to cancel."
-        ),
-    ),
-]
 
 def _load_orchestrator_config() -> dict:
     """Load the full orchestrator config.yaml (cached by config_loader)."""
     from utils import config_loader
 
     return config_loader.load_agent_config("orchestrator")
-
-
-def _get_hitl_config() -> dict:
-    """Return the ``hitl:`` section of the orchestrator config."""
-    cfg = _load_orchestrator_config()
-    hitl = cfg.get("hitl")
-    return hitl if isinstance(hitl, dict) else {}
 
 
 def _get_pipeline_config() -> dict:
@@ -1797,6 +1622,7 @@ async def _run_multi_turn_tool_loop(
     common: dict,
     agent_name: str,
     after_tool_round: Optional[Any] = None,
+    task: Optional[task_store.AgentTask] = None,
 ) -> tuple[str, Any, list[dict], str, dict | None]:
     """Async multi-turn tool-execution loop for agents.
 
@@ -1933,6 +1759,49 @@ async def _run_multi_turn_tool_loop(
                         "%s task %s: %s", agent_name, task_id, warning,
                     )
                     return warning, reply, tool_rounds, "consecutive_repeat_limit", final_context_metrics
+
+                # ---- Per-tool HITL gate (write actions) -------------------
+                # Runs only when the caller passed ``task`` (mid-loop
+                # task-aware mode). When ``task`` is None (legacy callers
+                # such as the orchestrator's own tool loop), skip and
+                # preserve prior behavior — the task-start gate remains
+                # the only enforcement point.
+                if task is not None:
+                    async def _tool_progress(message: str) -> None:
+                        await _broadcast(
+                            task_id,
+                            TaskEvent(status="running", progress=message, **common),
+                        )
+
+                    rejection = await hitl_gates.enforce_at_tool_call(
+                        task, fn_name, fn_args, on_progress=_tool_progress,
+                    )
+                    if rejection is not None:
+                        # Surface the rejection as a synthetic tool
+                        # "result" so the LLM sees it in the next round
+                        # and can react (typically: apologize + stop).
+                        # Do NOT execute the tool. Continue the loop so
+                        # the LLM has a chance to produce a final text
+                        # reply.
+                        rejection_payload = json.dumps({
+                            "ok": False,
+                            "error": {
+                                "type": "HITLRejected",
+                                "message": rejection,
+                                "tool": fn_name,
+                            },
+                        })
+                        round_audit["results"].append({
+                            "tool": fn_name,
+                            "ok": False,
+                            "snippet": rejection_payload[:200],
+                        })
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": rejection_payload,
+                        })
+                        continue
 
                 # ---- Execute the tool -------------------------------------
                 t0 = time.perf_counter_ns()
@@ -2246,6 +2115,7 @@ async def _run_mcp_specialist_agent(
                 task_id=task.task_id,
                 common=common,
                 agent_name=agent_name,
+                task=task,
             )
         )
     except Exception as exc:
