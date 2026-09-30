@@ -1,10 +1,11 @@
 """Central YAML configuration loader for the agent framework.
 
-Consolidates 13+ duplicated YAML loading sites across 9 files into three
+Consolidates 13+ duplicated YAML loading sites across 9 files into four
 public functions:
 
     load_agent_config(agent_name, ...)   -> per-agent config dict
     load_global_config(...)              -> config/agents.yaml dict
+    load_hitl_config(...)                -> config/hitl.yaml dict
     get_agent_config_section(...)        -> convenience section accessor
 
 All loads use ``utf-8-sig`` encoding for Windows BOM tolerance, cache
@@ -36,6 +37,8 @@ _cache_lock = threading.Lock()
 _agent_config_cache: dict[str, dict] = {}
 _global_config_cache: Optional[dict] = None
 _global_config_framework_dir: Optional[Path] = None
+_hitl_config_cache: Optional[dict] = None
+_hitl_config_framework_dir: Optional[Path] = None
 
 
 def _default_framework_dir() -> Path:
@@ -211,6 +214,83 @@ def load_global_config(
     return result
 
 
+def load_hitl_config(
+    *,
+    framework_dir: Optional[Path] = None,
+) -> dict:
+    """Load ``config/hitl.yaml`` (or ``hitl.example.yaml`` fallback).
+
+    Framework-wide Human-in-the-Loop policy config. Always uses
+    ``utf-8-sig`` encoding for Windows BOM tolerance. Returns ``{}`` on
+    missing or invalid file. Cached after first load.
+
+    Args:
+        framework_dir: Override for the framework root directory. When
+            ``None``, auto-detected from this file's location.
+
+    Returns:
+        Parsed YAML dict, or ``{}`` if neither file exists.
+    """
+    global _hitl_config_cache, _hitl_config_framework_dir
+
+    if framework_dir is None:
+        framework_dir = _default_framework_dir()
+
+    with _cache_lock:
+        if (
+            _hitl_config_cache is not None
+            and _hitl_config_framework_dir == framework_dir
+        ):
+            return _hitl_config_cache
+
+    import yaml
+
+    candidates = (
+        framework_dir / "config" / "hitl.yaml",
+        framework_dir / "config" / "hitl.example.yaml",
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            try:
+                with open(candidate, "r", encoding="utf-8-sig") as f:
+                    parsed = yaml.safe_load(f) or {}
+            except Exception:
+                log.warning(
+                    "load_hitl_config: failed to parse %s",
+                    candidate,
+                    exc_info=True,
+                )
+                parsed = {}
+
+            if not isinstance(parsed, dict):
+                log.warning(
+                    "load_hitl_config: %s is not a YAML mapping "
+                    "(got %s); returning empty dict",
+                    candidate,
+                    type(parsed).__name__,
+                )
+                parsed = {}
+            else:
+                log.info("load_hitl_config: loaded from %s", candidate)
+
+            with _cache_lock:
+                _hitl_config_cache = parsed
+                _hitl_config_framework_dir = framework_dir
+            return parsed
+
+    log.warning(
+        "load_hitl_config: neither hitl.yaml nor hitl.example.yaml "
+        "found under %s/config/",
+        framework_dir,
+    )
+    result: dict = {}
+    with _cache_lock:
+        _hitl_config_cache = result
+        _hitl_config_framework_dir = framework_dir
+    return result
+
+
 def get_agent_config_section(
     agent_name: str,
     section: str,
@@ -258,3 +338,11 @@ def clear_global_cache() -> None:
     with _cache_lock:
         _global_config_cache = None
         _global_config_framework_dir = None
+
+
+def clear_hitl_cache() -> None:
+    """Clear the cached HITL config so the next call re-reads from disk."""
+    global _hitl_config_cache, _hitl_config_framework_dir
+    with _cache_lock:
+        _hitl_config_cache = None
+        _hitl_config_framework_dir = None
