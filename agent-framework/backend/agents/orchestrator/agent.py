@@ -86,11 +86,10 @@ DEFAULT_AGUI_PORT = "8102"
 AGUI_BASE_URL_ENV = "PERFPILOT_AGUI_BASE_URL"
 AGUI_PORT_ENV = "AGUI_PORT"
 
-# HITL polling defaults (overridable per-call). 5 minutes is generous for
-# Epic 3 smokes; production deployments should raise this for real review
-# workflows.
-DEFAULT_HITL_TIMEOUT_SECONDS = 300.0
-DEFAULT_HITL_POLL_INTERVAL_SECONDS = 2.0
+# HITL polling defaults live in `agent-framework/backend/config/hitl.yaml`
+# and are resolved at call time via `services.hitl_gates.get_default_*()`.
+# `request_human_approval` accepts optional per-call overrides — when the
+# caller omits them, the framework-wide values from hitl.yaml apply.
 
 # ── ContextVars (A2A task-executor path only) ──
 # AG2 runs tool functions in an isolated thread, so ContextVars set in
@@ -899,20 +898,27 @@ async def request_human_approval(
         "UUID of the agent_tasks row this approval is associated with.",
     ],
     poll_interval_seconds: Annotated[
-        float,
-        "Seconds between hitl_approvals polls. Default 2.0.",
-    ] = DEFAULT_HITL_POLL_INTERVAL_SECONDS,
+        Optional[float],
+        "Seconds between hitl_approvals polls. Defaults to framework hitl.yaml.",
+    ] = None,
     timeout_seconds: Annotated[
-        float,
-        "Maximum seconds to wait for a decision. Default 300.0 (5 min).",
-    ] = DEFAULT_HITL_TIMEOUT_SECONDS,
+        Optional[float],
+        "Maximum seconds to wait for a decision. Defaults to framework hitl.yaml.",
+    ] = None,
 ) -> str:
     """Open a HITL approval prompt and block until the human decides.
 
-    Inserts a row in `hitl_approvals` via `utils.hitl_store.create_prompt`,
-    then polls every `poll_interval_seconds` (default 2s) for a terminal
-    decision. The UI is notified via the existing AG-UI SSE plumbing -- no
-    push needed from here.
+    Inserts a row in `hitl_approvals` via `stores.hitl_store.create_prompt`,
+    then delegates the poll loop to `services.hitl_gates.wait_for_decision`
+    so this tool uses the same HITL infrastructure as the framework's
+    specialist enforcers. The UI is notified via the existing AG-UI SSE
+    plumbing -- no push needed from here.
+
+    When `poll_interval_seconds` or `timeout_seconds` are omitted (or
+    passed as None), the framework-wide values from
+    `agent-framework/backend/config/hitl.yaml` apply
+    (resolved via `hitl_gates.get_default_poll_interval()` /
+    `hitl_gates.get_default_timeout()`).
 
     Returns:
         {
@@ -924,9 +930,11 @@ async def request_human_approval(
             "timed_out": <bool>,
         }
 
-    On error (invalid task_id, DB failure):
+    On error (invalid task_id, DB failure, hitl_approvals row disappeared
+    during poll):
         {"ok": False, "error": {"type": "<...>", "message": "<...>"}}.
     """
+    from services import hitl_gates
     from stores import hitl_store
 
     try:
@@ -946,55 +954,80 @@ async def request_human_approval(
         log.exception("request_human_approval: create_prompt failed")
         return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
 
-    deadline = asyncio.get_event_loop().time() + max(0.0, timeout_seconds)
-    poll_interval = max(0.1, float(poll_interval_seconds))
+    # Resolve effective poll interval / timeout at call time. None
+    # sentinels fall through to the framework-wide defaults sourced
+    # from hitl.yaml — one source of truth for HITL polling config
+    # across this tool, the specialist enforcers, and any future HITL
+    # consumer.
+    effective_poll_interval = (
+        poll_interval_seconds
+        if poll_interval_seconds is not None
+        else hitl_gates.get_default_poll_interval()
+    )
+    effective_timeout = (
+        timeout_seconds
+        if timeout_seconds is not None
+        else hitl_gates.get_default_timeout()
+    )
 
     log.info(
         "request_human_approval: blocking on approval_id=%d (task_id=%s, timeout=%.1fs)",
-        approval.id, task_id, timeout_seconds,
+        approval.id, task_id, effective_timeout,
     )
 
-    while True:
-        try:
-            current = await hitl_store.get_approval(approval.id)
-        except Exception as exc:
-            log.exception("request_human_approval: get_approval failed")
-            return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+    decision = await hitl_gates.wait_for_decision(
+        approval.id,
+        poll_interval=effective_poll_interval,
+        timeout=effective_timeout,
+    )
 
-        if current is None:
-            return json.dumps({
-                "ok": False,
-                "error": {
-                    "type": "RowMissing",
-                    "message": f"hitl_approvals row {approval.id} disappeared during poll.",
-                },
-            })
+    # `wait_for_decision` treats a missing hitl_approvals row as a
+    # synthetic rejection with a specific feedback sentinel string.
+    # Detect that case here so this tool's LLM-facing envelope keeps
+    # its original distinction between "human rejected" (a business
+    # decision the LLM should honor) and "persistence-layer failure"
+    # (a technical problem the LLM should narrate as retry-able).
+    #
+    # NOTE: the sentinel string is tightly coupled to the
+    # `wait_for_decision` implementation in `services/hitl_gates.py`.
+    # If either side changes, keep both in sync.
+    _ROW_MISSING_FEEDBACK = "hitl_approvals row disappeared during poll"
+    if decision.rejected and decision.feedback == _ROW_MISSING_FEEDBACK:
+        return json.dumps({
+            "ok": False,
+            "error": {
+                "type": "RowMissing",
+                "message": (
+                    f"hitl_approvals row {decision.approval_id} disappeared "
+                    f"during poll."
+                ),
+            },
+        })
 
-        if current.decision in ("approved", "rejected"):
-            return json.dumps({
-                "ok": True,
-                "approval_id": current.id,
-                "decision": current.decision,
-                "feedback": current.feedback,
-                "decided_by": current.decided_by,
-                "timed_out": False,
-            })
+    if decision.timed_out:
+        log.warning(
+            "request_human_approval: timed out waiting on approval_id=%d after %.1fs",
+            decision.approval_id, effective_timeout,
+        )
+        return json.dumps({
+            "ok": True,
+            "approval_id": decision.approval_id,
+            "decision": "timeout",
+            "feedback": None,
+            "decided_by": None,
+            "timed_out": True,
+        })
 
-        if asyncio.get_event_loop().time() >= deadline:
-            log.warning(
-                "request_human_approval: timed out waiting on approval_id=%d after %.1fs",
-                approval.id, timeout_seconds,
-            )
-            return json.dumps({
-                "ok": True,
-                "approval_id": current.id,
-                "decision": "timeout",
-                "feedback": None,
-                "decided_by": None,
-                "timed_out": True,
-            })
-
-        await asyncio.sleep(poll_interval)
+    # Terminal decision: approved OR rejected (by the human, not by
+    # the row-missing sentinel path handled above).
+    return json.dumps({
+        "ok": True,
+        "approval_id": decision.approval_id,
+        "decision": "approved" if decision.approved else "rejected",
+        "feedback": decision.feedback,
+        "decided_by": decision.decided_by,
+        "timed_out": False,
+    })
 
 
 # =============================================================================
