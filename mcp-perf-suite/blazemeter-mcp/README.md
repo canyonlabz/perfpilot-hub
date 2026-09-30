@@ -209,8 +209,10 @@ After provisioning, the caller may immediately chain into the standard
 `process_session_artifacts` flow. When the Execution Agent detects
 `smoke_status="FAIL"` from the Script Agent's local smoke run it still
 provisions the test but flags it with a `smoke_failed` warning so the
-HITL gate (`hitl.require_approval_before_test_provision`) can pause the
-pipeline for human review.
+HITL gate (`hitl.gates.require_approval_before_test_provision` in
+`agent-framework/backend/config/hitl.yaml` — see
+[hitl-configuration.md](../../docs/agent-framework/hitl-configuration.md)
+for the full schema) can pause the pipeline for human review.
 
 Companion MCPs:
 

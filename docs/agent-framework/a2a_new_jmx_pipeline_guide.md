@@ -154,12 +154,14 @@ Best-practice guidance for upstream frameworks:
 ## 5. HITL gates
 
 Two gates are relevant to this pipeline and are toggled in
-`agent-framework/backend/agents/orchestrator/config.yaml`:
+`agent-framework/backend/config/hitl.yaml` (framework-wide policy — see
+[hitl-configuration.md](./hitl-configuration.md) for the full schema,
+defaults, and how to add or remove gated tools):
 
 | Config key | When it fires |
 |------------|---------------|
-| `hitl.require_approval_before_test_provision` | Before `provision_performance_test` creates a new BlazeMeter test. This is the recommended gate for reviewing a `smoke_status="FAIL"` warning. |
-| `hitl.require_approval_before_test_start` | Before an actual load run against the provisioned test. |
+| `hitl.gates.require_approval_before_test_provision` | Before `provision_performance_test` creates a new BlazeMeter test. This is the recommended gate for reviewing a `smoke_status="FAIL"` warning. |
+| `hitl.gates.require_approval_before_test_start` | Before an actual load run against the provisioned test. |
 
 Both gates apply uniformly to A2A callers and human Web UI users. The
 orchestrator does not skip HITL just because the trigger came from
