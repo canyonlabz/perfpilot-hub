@@ -21,7 +21,7 @@ this canonical shape::
     }
 
 The JSON-RPC binding has its own error format handled by
-``a2a_jsonrpc.py``. This module covers the HTTP binding only.
+``a2a.shared.jsonrpc``. This module covers the HTTP binding only.
 
 Legacy PerfPilot routes (``/agents/{name}/...``) are unaffected — they
 continue using FastAPI's ``HTTPException`` -> ``{"detail": "..."}``

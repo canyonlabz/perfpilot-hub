@@ -347,12 +347,15 @@ docker/github-mcp/config/config.yaml
 # `.env` rule above; the explicit entry here makes the agent-framework section
 # self-documenting. The committed templates live at:
 #   - `agent-framework/backend/config/agents.example.yaml`              (global)
+#   - `agent-framework/backend/config/hitl.example.yaml`                (framework-wide HITL)
 #   - `agent-framework/backend/agents/<agent-name>/config.example.yaml` (per-agent)
-# Each operator-side `config.yaml` is a local override; the loader (see
-# `utils/base_agent.py::CANDIDATE_CONFIG_FILES`) walks both candidates in
+# Each operator-side `config.yaml` / `hitl.yaml` is a local override; the loader
+# (see `utils/base_agent.py::CANDIDATE_CONFIG_FILES` and
+# `utils/config_loader.py::load_hitl_config`) walks both candidates in
 # priority order and uses whichever exists.
 agent-framework/backend/.env
 agent-framework/backend/config/agents.yaml
+agent-framework/backend/config/hitl.yaml
 agent-framework/backend/agents/*/config.yaml
 
 # Re-include the Next.js frontend lib/ directory (excluded by the bare `lib/`

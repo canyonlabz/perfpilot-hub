@@ -100,7 +100,7 @@ def normalize_parts_to_spec(parts: list[dict]) -> Optional[str]:
 def _resolve_media_type(part: dict) -> str:
     """Determine the effective mediaType for a Part.
 
-    Mirrors the resolution logic in ``a2a_parts_parser._resolve_media_type``
+    Mirrors the resolution logic in ``a2a.shared.parts_parser._resolve_media_type``
     but is kept local to avoid coupling.
     """
     explicit = part.get("mediaType")

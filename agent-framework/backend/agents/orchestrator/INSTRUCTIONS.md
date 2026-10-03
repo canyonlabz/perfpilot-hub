@@ -137,12 +137,11 @@ HITL approval gates are **enforced automatically by the framework**. You do
 **not** need to check config or call `request_human_approval` for gated
 actions — the task executor handles it transparently:
 
-- **Test provisioning:** When
-  `hitl.require_approval_before_test_provision` is enabled, delegating
-  `provision_performance_test` to the execution-agent pauses at an
-  approval prompt showing the environment, JMX path, and smoke status.
-  This gate is the recommended place to catch a `smoke_failed` warning
-  before a new BlazeMeter test is created.
+- **Test provisioning:** When the `require_approval_before_test_provision`
+  gate is enabled, delegating `provision_performance_test` to the
+  execution-agent pauses at an approval prompt showing the environment,
+  JMX path, and smoke status. This gate is the recommended place to catch
+  a `smoke_failed` warning before a new BlazeMeter test is created.
 - **Test starts:** When the HITL gate is enabled, the framework
   automatically creates an approval prompt and pauses execution until the
   human approves or rejects. You just call `delegate_to_specialist`
@@ -215,7 +214,7 @@ When the new-JMX pipeline applies, run this delegation sequence:
    **Always delegate**, even when `smoke_status == "FAIL"`; the
    execution-agent's contract is "create-always, warn on fail" and the
    HITL gate (§4.1) is where the human confirms whether to proceed.
-4. If `hitl.require_approval_before_test_start` is enabled or the
+4. If the `require_approval_before_test_start` gate is enabled or the
    user explicitly requests it, delegate `start_performance_test`
    next; otherwise return the provisioning summary and wait for the
    user's decision.

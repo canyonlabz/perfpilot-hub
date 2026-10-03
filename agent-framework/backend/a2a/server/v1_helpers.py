@@ -8,7 +8,7 @@ the main server file focused on app creation, lifespan, and legacy
 routes.
 
 These helpers are protocol-agnostic — they produce dicts and headers
-consumed by the route handlers in ``a2a_v1_routes.py``.
+consumed by the route handlers in ``a2a.server.v1_routes``.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def _a2a_v1_response_headers(
 def _normalize_a2a_v1_body(body: dict) -> dict:
     """Translate an A2A v1 ``SendMessageRequest`` envelope into the internal
     payload format that ``task_executor._extract_user_message_from_payload()``
-    and ``a2a_parts_parser`` already understand.
+    and ``a2a.shared.parts_parser`` already understand.
 
     If the body is already a legacy PerfPilot payload (top-level ``message``
     string, ``text``, ``prompt``, or ``parts[]``), it is returned unchanged.
@@ -86,7 +86,7 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
 
         {
           "message": "Hello",           # first text Part -> top-level message
-          "parts": [{"text": "Hello"}], # pass through for a2a_parts_parser
+          "parts": [{"text": "Hello"}], # pass through for a2a.shared.parts_parser
           "metadata": {...},            # merged from envelope + message metadata
           "_a2a_v1_envelope": {...},    # stash original envelope for audit
           "_a2a_v1_context_id": "ctx-001"

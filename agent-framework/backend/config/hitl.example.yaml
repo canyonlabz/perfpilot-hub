@@ -1,0 +1,73 @@
+# Agent Framework — Human-in-the-Loop (HITL) Configuration
+# ---------------------------------------------------------
+# Framework-wide HITL policy. Enforced by
+# `services/hitl_gates.py` against every specialist task the framework
+# runs, regardless of caller (Web UI, orchestrator delegation, A2A client,
+# SDK). This file is the single source of truth for HITL policy.
+#
+# Copy this file to `hitl.yaml` and tune for your deployment.
+# `hitl.yaml` is gitignored. If `hitl.yaml` is absent, the framework
+# falls back to this `.example` file (mirrors the pattern used by
+# `agents.example.yaml`).
+
+# =============================================================================
+# 1. Gate toggles
+# =============================================================================
+# When a gate is disabled (false), the framework runs the specialist
+# immediately. When enabled (true), the specialist task pauses until a
+# human approves or rejects via the Web UI or A2A HITL reply.
+#
+# Requests from upstream A2A agent frameworks are treated the same as
+# human requests — HITL gates apply uniformly regardless of caller.
+#
+# If a gate key is missing from YAML, the framework defaults it to
+# `false` (gate open, no HITL) and logs a WARNING once per process so
+# operators notice their config is degraded. Explicit values here are
+# strongly preferred.
+gates:
+  require_approval_before_test_start: false      # Set true to require HITL before launching load tests
+  require_approval_before_test_provision: false  # Set true to require HITL before provisioning a NEW BlazeMeter test from a fresh JMX
+  require_approval_before_publish: true          # Gate write-to-Confluence tools (create/update page). Read-only queries and image attaches after approval are exempt.
+
+# =============================================================================
+# 2. Publish-tool scope
+# =============================================================================
+# Defines WHICH tools are treated as "publish tools" and therefore trigger
+# HITL when `gates.require_approval_before_publish` above is enabled.
+# Listing a tool here makes it MORE restricted (a HITL card will appear
+# before it runs), not less. Entries are fully-qualified MCP tool names
+# (`{namespace}_{tool}`).
+#
+# This is the sole source of truth for the publish-tool set. If this
+# key is missing or malformed, the framework defaults to an empty list
+# (publish gate becomes a no-op — nothing is gated) and logs a WARNING
+# once per process so operators notice their config is degraded.
+#
+# Special values:
+#   - Set to an empty list []            → the publish gate has no tools
+#                                          to gate, so it becomes a no-op
+#                                          even when the toggle above is
+#                                          `true` (useful for local dev /
+#                                          smoke tests where you want the
+#                                          toggle documented but not
+#                                          enforced).
+#   - Add `confluence_attach_images`     → stricter policy: require a
+#                                          second HITL card before
+#                                          uploading images (default
+#                                          behavior omits this because
+#                                          the human already approved
+#                                          the publish that this attach
+#                                          follows).
+publish_tools:
+  - confluence_create_page
+  - confluence_update_page
+
+# =============================================================================
+# 3. Polling & timeouts
+# =============================================================================
+# If either key is missing or malformed, the framework uses a safe
+# in-code fallback (2 seconds / 300 seconds) and logs a WARNING once
+# per process so operators notice. Explicit values here are preferred
+# for reproducible behavior across environments.
+poll_interval_seconds: 2       # How often to check for human approve/reject decision
+timeout_seconds: 300           # Max wait for human decision before timeout (5 min)

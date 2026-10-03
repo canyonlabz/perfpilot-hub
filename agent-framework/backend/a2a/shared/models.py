@@ -15,7 +15,7 @@ Timestamps follow ISO 8601 UTC with ``Z`` suffix and millisecond precision
 (Section 5.5).
 
 This module is **standalone** — it imports only ``pydantic`` and the
-media-type constants from ``a2a_media_types``. No database, FastAPI,
+media-type constants from ``a2a.shared.media_types``. No database, FastAPI,
 AG2, or MCP dependencies.
 
 Spec reference: https://a2a-protocol.org/v1.0.0/specification/
@@ -34,7 +34,7 @@ from pydantic.alias_generators import to_camel
 from . import media_types
 
 # =============================================================================
-# Media type constants (re-exported from a2a_media_types registry)
+# Media type constants (re-exported from a2a.shared.media_types)
 # =============================================================================
 
 MEDIA_TEXT_PLAIN = media_types.MEDIA_TEXT_PLAIN

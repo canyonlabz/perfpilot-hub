@@ -6,7 +6,7 @@ convention (``application/vnd.{vendor}.{type}+json``) for Azure DevOps
 content types.
 
 This module is a **leaf dependency** — it imports only stdlib modules.
-Both ``a2a_models`` and ``a2a_parts_parser`` import from here, avoiding
+Both ``a2a.shared.models`` and ``a2a.shared.parts_parser`` import from here, avoiding
 circular dependencies.
 
 Usage::

@@ -1,0 +1,15 @@
+# PerfPilot Tests — Python test dependencies
+#
+# Install into a dedicated venv (recommended) or via `uv run
+# --with-requirements tests/requirements.txt pytest tests/`. See
+# tests/README.md for step-by-step instructions.
+
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-mock>=3.14.0
+
+# YAML parsing — needed by tests that write temp hitl.yaml fixtures.
+# Also a transitive dependency of the framework itself, but pinned
+# here so `pip install -r tests/requirements.txt` works standalone
+# without also installing the full framework requirements.
+PyYAML>=6.0
