@@ -151,10 +151,20 @@ dotnet user-secrets set "Parameters:github-personal-access-token" "<github-perso
 ```powershell
 # List all secrets (values redacted)
 dotnet user-secrets list --id perfpilot-aspire-apphost
-
-# Show the on-disk location (never commit this file)
-# Windows: %APPDATA%\Microsoft\UserSecrets\perfpilot-aspire-apphost\secrets.json
 ```
+
+The user-secrets store lives **outside the repo** and is per-user, per-OS.
+Never commit the file, but it's useful to know where it is when debugging:
+
+| OS | Location of `secrets.json` |
+|---|---|
+| **Windows** | `C:\Users\<username>\AppData\Roaming\Microsoft\UserSecrets\perfpilot-aspire-apphost\secrets.json` |
+| **macOS / Linux** | `~/.microsoft/usersecrets/perfpilot-aspire-apphost/secrets.json` |
+
+The folder is created on the first `dotnet user-secrets set ...` call —
+you do not need to pre-create it. The `UserSecretsId` segment of the path
+(`perfpilot-aspire-apphost`) comes from the `#:property UserSecretsId=...`
+directive at the top of `aspire/apphost.cs`.
 
 > **Alternative — Aspire CLI wrapper:** `aspire secret set Parameters:<name> <value>`
 > auto-discovers the AppHost and writes to the same store. Either tool works.
@@ -253,6 +263,78 @@ For pgvector/AGE install reference material, see:
 
 * `docs/database/pgvector_installation_guide.md`
 * `docs/database/apache_age_installation_guide.md`
+
+### PostgreSQL data layout check (PG18+ bind-mount convention)
+
+The AppHost (and all three compose files) mount `docker/data/pgvectordb/`
+into the container and point `PGDATA` at the `pgdata/` subdirectory inside
+that mount:
+
+```text
+host:     docker/data/pgvectordb/pgdata/<cluster files>
+container: /var/lib/postgresql/18/docker/pgdata/<cluster files>
+                                        ↑
+                            PGDATA points here
+```
+
+This is the PG18+ version-specific layout and is required so `initdb` has
+an empty target without touching anything at the mount root.
+
+**On a healthy install**, these two checks must both hold:
+
+```powershell
+Test-Path .\docker\data\pgvectordb\pgdata\PG_VERSION   # must return True
+Test-Path .\docker\data\pgvectordb\PG_VERSION          # must return False
+```
+
+> **Why this matters.** PG 17 and earlier used a flat layout — cluster
+> files sat directly at the Postgres data directory with no `pgdata/`
+> subdirectory. If `PG_VERSION` ever appears at the **mount root** instead
+> of inside `pgdata/`, it means Postgres was previously run with its
+> `PGDATA` pointed at the mount root (either explicitly, or by inheriting
+> a pre-PG18 image default). Starting a PG18+ container against that
+> layout with `PGDATA=/var/lib/postgresql/18/docker/pgdata` will cause
+> `initdb` to run against the empty `pgdata/` subdirectory, leaving the
+> existing cluster **orphaned** (not deleted — the files are still at the
+> mount root, just one level up from where the new container is looking).
+>
+> If you catch this before writing new data: stop the container, back up
+> or `pg_dump` the orphan files from `docker/data/pgvectordb/`, then move
+> them (or dump+restore) into `docker/data/pgvectordb/pgdata/` so the new
+> layout picks them up.
+
+### Web UI shows empty conversation history after a rebuild
+
+The current Web UI identifies users by an **anonymous browser cookie**
+(authentication is not implemented yet). Agent-framework tables such as
+`agent_threads`, `agent_sessions`, and `conversation_messages` are scoped
+by that identity, so history that belongs to a previous browser profile
+or an earlier browser session will not appear in a new one — even though
+the data is still in the database.
+
+**How to confirm this is an identity mismatch, not data loss:**
+
+1. In Edge / Chrome DevTools → Application → Cookies for the UI origin,
+   note the value of `perfpilot_token`. This maps 1-to-1 to `user_id` in
+   `agent_sessions` and `agent_threads`.
+2. Connect to the `perfagent_state` database (`psql -h localhost -U <user>
+   -d perfagent_state`) and run:
+
+   ```sql
+   SELECT user_id, COUNT(*) AS threads
+   FROM agent_threads
+   WHERE status = 'active'
+   GROUP BY user_id
+   ORDER BY threads DESC;
+   ```
+
+3. If an older `user_id` has your historical threads and the UI is
+   currently showing a different `user_id`, your data is intact — the UI
+   is just filtering by the newer identity.
+
+To view the historical threads, copy the older `perfpilot_token` value
+back into the browser cookie for the UI origin. This is a developer-only
+workaround and will become unnecessary once real authentication lands.
 
 ### Port already in use
 
