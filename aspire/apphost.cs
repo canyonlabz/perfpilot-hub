@@ -15,10 +15,18 @@ var postgresDb = builder.AddParameter("postgres-db");
 
 var openAiApiKey = builder.AddParameter("openai-api-key", secret: true);
 
-var playwrightCertPassphrase = builder.AddParameter("playwright-cert-passphrase", secret: true);
-var playwrightCertAutoSelectCn = builder.AddParameter("playwright-cert-auto-select-cn");
-
-var jmeterJksPwd = builder.AddParameter("jmeter-jks-pwd", secret: true);
+// Cert-protected test-environment secrets — NOT used in this local setup.
+// Uncomment these (and their matching `.WithEnvironment(...)` lines on the
+// `perfpilot-mcp-jmeter` / `perfpilot-mcp-playwright` resources further
+// below) when running against an upstream that requires a password-
+// protected JKS keystore for JMeter mTLS, or a client certificate for
+// Playwright. For each one marked `secret: true`, also run:
+//     dotnet user-secrets set <param-name> <value> --id perfpilot-aspire-apphost
+// so Aspire can inject the value at run time; otherwise Aspire will block
+// startup and prompt interactively for a value.
+// var playwrightCertPassphrase = builder.AddParameter("playwright-cert-passphrase", secret: true);
+// var playwrightCertAutoSelectCn = builder.AddParameter("playwright-cert-auto-select-cn");
+// var jmeterJksPwd = builder.AddParameter("jmeter-jks-pwd", secret: true);
 
 var blazemeterApiKey = builder.AddParameter("blazemeter-api-key", secret: true);
 var blazemeterApiSecret = builder.AddParameter("blazemeter-api-secret", secret: true);
@@ -89,8 +97,10 @@ var datadog = AddMcp("perfpilot-mcp-datadog", "docker/datadog-mcp/Dockerfile", 8
 // JMeter MCP also mounts the shared .playwright-mcp/ output folder so it can
 // parse Playwright trace files produced by perfpilot-mcp-playwright.
 var jmeter = AddMcp("perfpilot-mcp-jmeter", "docker/jmeter-mcp/Dockerfile", 8112)
-    .WithBindMount("../.playwright-mcp", "/app/.playwright-mcp")
-    .WithEnvironment("JMETER_JKS_PWD", jmeterJksPwd);
+    .WithBindMount("../.playwright-mcp", "/app/.playwright-mcp");
+    // Cert-protected mTLS test environments — enable alongside the matching
+    // AddParameter line near the top of this file:
+    // .WithEnvironment("JMETER_JKS_PWD", jmeterJksPwd);
 
 var perfanalysis = AddMcp("perfpilot-mcp-perfanalysis", "docker/perfanalysis-mcp/Dockerfile", 8113);
 
@@ -128,9 +138,11 @@ var playwright = builder.AddDockerfile("perfpilot-mcp-playwright", repoRoot, "do
     .WithBindMount("../.playwright-mcp", "/home/node/output")
     .WithEnvironment("DEPLOYMENT_MODE", deploymentMode)
     .WithEnvironment("PERFPILOT_DOCKER", "true")
-    .WithEnvironment("HTTP_PORT", "8117")
-    .WithEnvironment("PLAYWRIGHT_CERT_PASSPHRASE", playwrightCertPassphrase)
-    .WithEnvironment("PLAYWRIGHT_CERT_AUTO_SELECT_CN", playwrightCertAutoSelectCn);
+    .WithEnvironment("HTTP_PORT", "8117");
+    // Client-cert auth to test environments — enable alongside the matching
+    // AddParameter lines near the top of this file:
+    // .WithEnvironment("PLAYWRIGHT_CERT_PASSPHRASE", playwrightCertPassphrase)
+    // .WithEnvironment("PLAYWRIGHT_CERT_AUTO_SELECT_CN", playwrightCertAutoSelectCn);
 
 // =============================================================================
 // Gateway — HTTP mounts of MCP_URL_* (Cursor / agents use this only)
