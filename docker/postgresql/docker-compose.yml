@@ -32,15 +32,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-perfadmin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-perfmemory}
-      # -------------------------------------------------------------------
-      # macOS ONLY — uncomment the line below when running on Docker
-      # Desktop for Mac. initdb cannot chown the bind-mount root under
-      # VirtioFS; pointing PGDATA at a sub-directory lets it create and
-      # own its own folder instead. Windows / WSL2 does not need this.
-      # The full-stack docker-compose-full-mac.yaml sets both this and
-      # `user: "999:999"` above unconditionally.
-      # -------------------------------------------------------------------
-      # PGDATA: /var/lib/postgresql/18/docker/pgdata
+      # Required for PostgreSQL 18+ bind-mount setups: PGDATA points at a
+      # sub-directory inside the bind mount so initdb has an empty target
+      # and the storage layout matches the official PG Docker image's
+      # version-specific convention. Host-OS agnostic — set unconditionally
+      # so standalone and full-stack layouts stay in sync across macOS,
+      # Windows, and Linux hosts.
+      PGDATA: /var/lib/postgresql/18/docker/pgdata
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

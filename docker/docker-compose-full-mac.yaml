@@ -8,11 +8,13 @@
 #   3. Run: docker compose -f docker/docker-compose-full-mac.yaml up --build
 #
 # macOS note:
-#   The perfmem-pgvector-age service sets `user: "999:999"` and
-#   `PGDATA=/var/lib/postgresql/18/docker/pgdata` to work around a
-#   Docker-Desktop-for-Mac VirtioFS ownership issue where PG 18's
-#   initdb cannot chown the bind-mount root. This file is otherwise
-#   identical to docker-compose-full-windows.yaml.
+#   The perfmem-pgvector-age service sets `user: "999:999"` to work
+#   around a Docker-Desktop-for-Mac VirtioFS ownership issue where the
+#   postgres UID inside the image doesn't match the bind-mount owner.
+#   `PGDATA` is also set to the PG18+ version-specific layout — that
+#   setting is host-OS agnostic and the Windows compose file applies
+#   the same value. This file is otherwise identical to
+#   docker-compose-full-windows.yaml.
 #
 # Services (14 containers, 13 Dockerfiles — agent-backend is built once and
 # tagged twice):
@@ -67,7 +69,8 @@ x-mcp-env: &mcp-env
 services:
 
   # ---------------------------------------------------------------------------
-  # Database  (macOS: user + PGDATA workarounds for VirtioFS)
+  # Database  (macOS: `user: "999:999"` VirtioFS workaround applied; `PGDATA`
+  # is the standard PG18+ layout and is set on every host)
   # ---------------------------------------------------------------------------
   perfmem-pgvector-age:
     build:
@@ -83,7 +86,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      # macOS: initdb cannot chown the bind-mount root; use a sub-directory.
+      # Required for PostgreSQL 18+ bind-mount setups: PGDATA points at a
+      # sub-directory inside the bind mount so initdb has an empty target
+      # and the storage layout matches the official PG Docker image's
+      # version-specific convention. Host-OS agnostic; on macOS this also
+      # sidesteps the VirtioFS bind-mount chown issue.
       PGDATA: /var/lib/postgresql/18/docker/pgdata
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
