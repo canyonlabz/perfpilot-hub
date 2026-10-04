@@ -74,6 +74,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # Required for PostgreSQL 18+ bind-mount setups: PGDATA points at a
+      # sub-directory inside the bind mount so initdb has an empty target
+      # and the storage layout matches the official PG Docker image's
+      # version-specific convention. Host-OS agnostic.
+      PGDATA: /var/lib/postgresql/18/docker/pgdata
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

@@ -139,26 +139,23 @@ docker compose up --build -d    # initdb will recreate the cluster from scratch
 ## 🍎 macOS-specific setup
 
 Docker Desktop for Mac uses **VirtioFS** for bind mounts, which introduces
-two ownership quirks that don't exist on Windows / WSL2. Both are handled by
-uncommenting two lines in `docker/postgresql/docker-compose.yml`:
+one ownership quirk that doesn't exist on Windows / WSL2. It's handled by
+uncommenting a single line in `docker/postgresql/docker-compose.yml`:
 
-### 1. `user: "999:999"`
+### `user: "999:999"` (macOS only)
 
 VirtioFS ships the mounted volume with an ownership that doesn't match the
 `postgres` UID inside the image. Forcing the container process to run as
-UID 999 (the image's `postgres` user) is the working combination.
+UID 999 (the image's `postgres` user) is the working combination. This
+setting is commented in the standalone compose file — uncomment it if
+you're running on macOS. The full-stack `docker-compose-full-mac.yaml`
+sets it unconditionally. Windows / WSL2 does **not** need this.
 
-### 2. `PGDATA: /var/lib/postgresql/18/docker/pgdata`
-
-`initdb` cannot chown the bind-mount root under VirtioFS. Pointing `PGDATA`
-at a sub-directory (`.../docker/pgdata`) lets `initdb` create and own its
-own folder instead of the mount root.
-
-Both settings are commented in the standalone compose file — uncomment them
-if you're running on macOS. The full-stack `docker-compose-full-mac.yaml`
-sets both unconditionally.
-
-Windows / WSL2 does **not** need either setting.
+> **Note:** `PGDATA: /var/lib/postgresql/18/docker/pgdata` is **not**
+> macOS-specific — it's the PostgreSQL 18+ version-specific data-cluster
+> layout and is required for any bind-mount setup. It is set unconditionally
+> in both the standalone and full-stack compose files on every host OS.
+> See [§⚙️ Environment variables](#️-environment-variables) below.
 
 ---
 
@@ -171,13 +168,13 @@ Windows / WSL2 does **not** need either setting.
 | `POSTGRES_PASSWORD` | `changeme` | Superuser password |
 | `POSTGRES_DB` | `perfmemory` | Initial database name |
 | `POSTGRES_PORT` | `5432` | Host-side port mapping |
+| `PGDATA` | `/var/lib/postgresql/18/docker/pgdata` | PG18+ version-specific data-cluster layout; sub-directory inside the bind mount so `initdb` has an empty target. Set unconditionally on every host OS. |
 
 **macOS-only** (uncomment in `docker-compose.yml`):
 
 | Setting | Value | Purpose |
 |---|---|---|
-| `user` | `"999:999"` | Match `postgres` UID inside the image |
-| `PGDATA` | `/var/lib/postgresql/18/docker/pgdata` | Sub-directory inside the bind mount |
+| `user` | `"999:999"` | Match `postgres` UID inside the image to work around Docker Desktop for Mac's VirtioFS bind-mount ownership mismatch |
 
 ---
 
@@ -206,7 +203,7 @@ docker exec perfmem-pgvector-age pg_isready -U perfadmin -d perfmemory
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Container exits immediately on macOS with `initdb: could not create directory` | Missing `user` and/or `PGDATA` settings on Mac | Uncomment both in `docker-compose.yml` — see [§🍎 macOS-specific setup](#-macos-specific-setup) |
+| Container exits immediately on macOS with `initdb: could not create directory` | Missing `user: "999:999"` setting on Mac | Uncomment it in `docker-compose.yml` — see [§🍎 macOS-specific setup](#-macos-specific-setup) |
 | Container exits immediately on Windows with `permission denied` on the data folder | WSL2 filesystem permissions issue | Verify Docker Desktop has Windows Subsystem for Linux 2 enabled and the repo path is accessible from WSL2 |
 | Container repeatedly restarts, logs show `role "perfadmin" does not exist` | `POSTGRES_USER` changed after first initialization | Data is initialized once on empty `PGDATA`. To change the superuser name, delete `docker/data/pgvectordb/` and let `initdb` recreate the cluster |
 | `pg_isready` returns "accepting connections" but pgvector or AGE queries fail | Extensions not created in the target database | Run `CREATE EXTENSION IF NOT EXISTS vector;` and `CREATE EXTENSION IF NOT EXISTS age;` — the extensions are installed but not auto-loaded into every database |

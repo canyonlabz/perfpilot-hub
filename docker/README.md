@@ -90,7 +90,7 @@ experience:
 | OS | Status | Notes |
 |---|---|---|
 | 🪟 Windows 10/11 | ✅ Confirmed | Use `docker-compose-full-windows.yaml`. Docker Desktop with the WSL2 backend is the standard setup. |
-| 🍎 macOS 13+ (Intel or Apple Silicon) | ✅ Confirmed | Use `docker-compose-full-mac.yaml`. The Mac file sets `user: "999:999"` and `PGDATA` on the database to work around a Docker Desktop VirtioFS quirk (§9.2). |
+| 🍎 macOS 13+ (Intel or Apple Silicon) | ✅ Confirmed | Use `docker-compose-full-mac.yaml`. The Mac file sets `user: "999:999"` on the database to work around a Docker Desktop VirtioFS quirk (§9.2). `PGDATA` is set in both compose files (PG18+ convention, host-OS agnostic). |
 | 🐧 Linux | ⚠️ Untested | Should work with the Windows compose file, but has not been validated against this repo. |
 
 ### 2.4 Git
@@ -179,7 +179,7 @@ mounted MCP under its own namespace (`jmeter.*`, `blazemeter.*`, etc.).
 ```
 docker/
 ├── README.md                              (this file)
-├── docker-compose-full-mac.yaml           (macOS full-stack: user + PGDATA workarounds)
+├── docker-compose-full-mac.yaml           (macOS full-stack: adds `user:` VirtioFS workaround)
 ├── docker-compose-full-windows.yaml       (Windows/WSL2 full-stack)
 ├── .env.example                           (union of all secrets; copy to .env)
 │
@@ -333,17 +333,17 @@ cp .env.example .env
 docker compose -f docker-compose-full-mac.yaml up --build
 ```
 
-The Mac file adds two settings to `perfmem-pgvector-age` that the Windows file
+The Mac file adds one setting to `perfmem-pgvector-age` that the Windows file
 does not need:
 
 - `user: "999:999"` — forces the container process to run as UID 999 (the image's
-  postgres user), so it can chown the bind-mounted data folder.
-- `PGDATA: /var/lib/postgresql/18/docker/pgdata` — points `initdb` at a
-  sub-directory inside the bind mount, so it can create + chown its own folder
-  instead of the mount root (which Docker Desktop for Mac's VirtioFS won't
-  allow).
+  postgres user), so it can chown the bind-mounted data folder (Docker Desktop
+  for Mac's VirtioFS requires this; WSL2 doesn't).
 
-Without these two settings, PostgreSQL will fail to initialize on macOS.
+Both compose files set `PGDATA: /var/lib/postgresql/18/docker/pgdata` — that is
+the PostgreSQL 18+ version-specific data-cluster layout and is host-OS agnostic.
+
+Without the `user:` setting, PostgreSQL will fail to initialize on macOS.
 
 ### 9.3 Startup and healthchecks
 
