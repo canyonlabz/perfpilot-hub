@@ -76,6 +76,12 @@ class TaskEvent:
     Mirrors the shape we will send over SSE in the A2A
     `tasks/sendSubscribe` endpoint. Includes both IDs from V2 Section 4.3
     so SSE consumers can correlate to the broader session.
+
+    When ``status == "input_required"``, the three ``input_required_*``
+    fields carry the question text and machine-readable reason code
+    that the SSE emitter composes into the A2A ``TaskStatus.message``
+    (A2A §4.1.3 TASK_STATE_INPUT_REQUIRED). On any other status these
+    fields are ``None`` and the SSE emitter ignores them.
     """
 
     task_id: str
@@ -87,6 +93,10 @@ class TaskEvent:
     result: Optional[dict] = None
     error: Optional[dict] = None
     timestamp: str = ""
+    # Populated only when ``status == "input_required"``.
+    input_required_text: Optional[str] = None
+    input_required_reason_code: Optional[str] = None
+    input_required_data: Optional[dict] = None
 
     def __post_init__(self) -> None:
         if not self.timestamp:
@@ -242,6 +252,11 @@ async def _inject_completion_message(task: task_store.AgentTask) -> None:
 
 async def execute_task(task_id: UUID) -> None:
     """Run the task end-to-end. Schedule with `asyncio.create_task(...)`."""
+    # Local import matches the module's convention for core.* symbols
+    # (keeps the file free of cycles if a future core submodule imports
+    # back into services.*).
+    from core.task_signals import TaskInputRequiredSignal
+
     task = await task_store.get_task(task_id)
     if task is None:
         log.error("execute_task: task %s not found", task_id)
@@ -300,6 +315,35 @@ async def execute_task(task_id: UUID) -> None:
             TaskEvent(status="cancelled", error={"reason": "execution cancelled"}, **common),
         )
         raise
+    except TaskInputRequiredSignal as sig:
+        # A2A §4.1.3 TASK_STATE_INPUT_REQUIRED (non-terminal). The agent
+        # cannot proceed without additional client input. Persist the
+        # structured prompt + reasonCode so the SSE stream can emit a
+        # spec-compliant TaskStatusUpdateEvent with TaskStatus.message,
+        # and so the HTTP poll endpoint sees the same info on reload.
+        # The client resumes by sending a follow-up message carrying the
+        # same taskId + contextId (A2A §6.3 multi-turn interaction).
+        log.info(
+            "execute_task: task %s needs input (%s)",
+            task_id,
+            sig.reason_code,
+        )
+        await task_store.mark_input_required(
+            task.task_id,
+            question_text=sig.question_text,
+            reason_code=sig.reason_code,
+            reason_data=sig.reason_data,
+        )
+        await _broadcast(
+            task.task_id,
+            TaskEvent(
+                status="input_required",
+                input_required_text=sig.question_text,
+                input_required_reason_code=sig.reason_code,
+                input_required_data=sig.reason_data,
+                **common,
+            ),
+        )
     except Exception as exc:
         log.exception("execute_task: task %s failed", task_id)
         error = {"type": type(exc).__name__, "message": str(exc)}
@@ -481,18 +525,19 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     agent_request_source_var.set("a2a")
     agent_task_id_var.set(str(task.task_id))
 
-    # Shared A2A + Web UI ingress: reuse metadata/payload/text ID when
-    # present; mint only for pre-script-creation (parts[] test specs or
-    # script-creation prose). Do NOT mint for unrelated chat turns.
-    from core.test_run_id import ensure_test_run_id_for_inbound
+    # Shared A2A + Web UI ingress: three-outcome resolver with
+    # INPUT_REQUIRED signalling. REUSE returns the existing ID, MINT
+    # mints + persists a fresh UTC timestamp (script-creation flows),
+    # SKIP_MINT returns None for comparison reports (PerfReport MCP
+    # mints its own comparison_id), and REJECT raises
+    # TaskInputRequiredSignal which execute_task catches to transition
+    # the task row to input_required (A2A §4.1.3) rather than failing.
+    from services.helpers.test_run_id_resolver import (
+        resolve_test_run_id_or_signal_input_required,
+    )
 
-    inbound_payload = task.payload if isinstance(task.payload, dict) else None
-    if inbound_payload is not None and getattr(task, "test_run_id", None):
-        inbound_payload.setdefault("test_run_id", task.test_run_id)
-    ensured_test_run_id = ensure_test_run_id_for_inbound(
-        payload=inbound_payload,
-        user_text=user_message,
-        parts=(inbound_payload.get("parts") if inbound_payload else None),
+    ensured_test_run_id = await resolve_test_run_id_or_signal_input_required(
+        task, user_message, thread_id,
     )
     if ensured_test_run_id:
         agent_test_run_id_var.set(ensured_test_run_id)
