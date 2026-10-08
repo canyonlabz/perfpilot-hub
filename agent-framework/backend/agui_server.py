@@ -46,7 +46,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 if __package__ is None:
@@ -341,7 +341,6 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             # transcript; the browser remains authoritative for the newest turn
             # only (a sanity check; we just persisted it ourselves).
             combined_messages = prior_history_ag_ui + list(incoming.messages or [])
-            modified = incoming.model_copy(update={"messages": combined_messages})
 
             session_id_val = getattr(request.state, "session_id", None)
 
@@ -349,28 +348,70 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             # user supplies one; mint only for pre-script-creation requests.
             # Stash on _caller_identity so delegate_to_specialist prefers the
             # framework ID over any LLM-invented tool argument.
-            from core.test_run_id import ensure_test_run_id_for_inbound
+            #
+            # On the Web-UI path we additionally prefetch distinct
+            # test_run_ids from the thread's prior tasks so:
+            #   - a single-candidate thread auto-applies implicit REUSE
+            #     (user asked a follow-up; keep the ID without re-prompting);
+            #   - a multi-candidate thread injects a one-line system hint
+            #     so the orchestrator LLM asks the user which one applies;
+            #   - delegate_to_specialist can forward the candidate list to
+            #     specialists on comparison intents.
+            from services.helpers.webui_resolve import resolve_test_run_id_for_webui
             from agents.orchestrator.agent import (
                 set_caller_identity,
+                set_known_test_run_ids,
                 clear_caller_identity,
             )
 
-            ensured_test_run_id = ensure_test_run_id_for_inbound(
+            webui_resolve = await resolve_test_run_id_for_webui(
                 user_text=new_user_text,
+                thread_id=thread_id,
             )
             set_caller_identity(
                 user_id=requesting_user,
                 thread_id=thread_id,
                 session_id=str(session_id_val) if session_id_val else None,
-                test_run_id=ensured_test_run_id,
+                test_run_id=webui_resolve.test_run_id,
             )
+            set_known_test_run_ids(webui_resolve.known_test_run_ids)
+
+            # Inject the ask-user hint (when the thread has multiple known
+            # IDs and no explicit signal) as a SystemMessage prepended to
+            # the combined transcript. AG2's own system prompt from
+            # INSTRUCTIONS.md is loaded separately; this acts as a runtime
+            # briefing applied for just this turn.
+            if webui_resolve.system_hint:
+                try:
+                    from ag_ui.core import SystemMessage
+
+                    combined_messages = [
+                        SystemMessage(
+                            id="webui-known-test-run-ids-hint",
+                            role="system",
+                            content=webui_resolve.system_hint,
+                        ),
+                        *combined_messages,
+                    ]
+                except Exception:
+                    log.exception(
+                        "/copilotkit: failed to inject webui_resolve system hint; "
+                        "continuing without it"
+                    )
 
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
                     "/copilotkit caller identity: user_id=%s session_id=%s "
-                    "thread_id=%s test_run_id=%s",
-                    requesting_user, session_id_val, thread_id, ensured_test_run_id,
+                    "thread_id=%s test_run_id=%s known_count=%d hint=%s",
+                    requesting_user,
+                    session_id_val,
+                    thread_id,
+                    webui_resolve.test_run_id,
+                    len(webui_resolve.known_test_run_ids),
+                    bool(webui_resolve.system_hint),
                 )
+
+            modified = incoming.model_copy(update={"messages": combined_messages})
 
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []

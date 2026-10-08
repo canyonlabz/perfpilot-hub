@@ -144,12 +144,18 @@ agent_test_run_id_var: ContextVar[Optional[str]] = ContextVar(
 # ``test_run_id`` is set at AG-UI / A2A ingress via
 # ``ensure_test_run_id_for_inbound`` so delegate_to_specialist prefers the
 # framework-resolved ID over any LLM-invented tool argument.
-_caller_identity: dict[str, Optional[str]] = {
+_caller_identity: dict[str, Any] = {
     "user_id": None,
     "thread_id": None,
     "session_id": None,
     "task_id": None,
     "test_run_id": None,
+    # Distinct test_run_ids previously minted or persisted on the current
+    # conversation thread (newest-first). Set at Web-UI ingress by
+    # ``set_known_test_run_ids`` and consumed by ``delegate_to_specialist``
+    # for comparison-report intents so specialists see the full candidate
+    # list. Empty list = no prior candidates / not populated.
+    "known_test_run_ids": [],
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -184,12 +190,37 @@ def set_caller_identity(
     _caller_identity["test_run_id"] = test_run_id
 
 
+def set_known_test_run_ids(ids: Optional[list[str]]) -> None:
+    """Populate the thread's known ``test_run_id`` candidates.
+
+    Called at Web-UI ingress after
+    ``services.helpers.webui_resolve.resolve_test_run_id_for_webui``
+    has prefetched the candidate list from ``task_store``. Kept as a
+    dedicated setter (rather than extending ``set_caller_identity``)
+    so A2A callers that don't prefetch retain their existing wiring.
+    Passing ``None`` or an empty list clears the slot.
+
+    Args:
+        ids: Distinct ``test_run_id`` values from the thread's prior
+            tasks (newest-first). Non-string entries are filtered.
+    """
+    if not ids:
+        _caller_identity["known_test_run_ids"] = []
+        return
+    cleaned = [
+        t.strip() for t in ids
+        if isinstance(t, str) and t.strip()
+    ]
+    _caller_identity["known_test_run_ids"] = cleaned
+
+
 def clear_caller_identity() -> None:
     _caller_identity["user_id"] = None
     _caller_identity["thread_id"] = None
     _caller_identity["session_id"] = None
     _caller_identity["task_id"] = None
     _caller_identity["test_run_id"] = None
+    _caller_identity["known_test_run_ids"] = []
 
 
 # =============================================================================

@@ -99,8 +99,8 @@ async def resolve_test_run_id_or_signal_input_required(
                     thread_candidates.append(tr)
         except Exception:
             log.exception(
-                "resolve_test_run_id_or_signal: list_tasks_for_thread "
-                "failed; continuing without candidates"
+                "test_run_id_resolver.list_tasks_for_thread.failed",
+                extra={"thread_id": thread_id},
             )
 
     outcome = resolve_test_run_id_outcome(
@@ -130,8 +130,11 @@ async def resolve_test_run_id_or_signal_input_required(
             await task_store.set_test_run_id(task.task_id, outcome.id)
         except Exception:
             log.exception(
-                "resolve_test_run_id_or_signal: set_test_run_id failed; "
-                "continuing with ContextVar propagation only"
+                "test_run_id_resolver.set_test_run_id.failed",
+                extra={
+                    "task_id": str(task.task_id),
+                    "test_run_id": outcome.id,
+                },
             )
 
     return outcome.id
