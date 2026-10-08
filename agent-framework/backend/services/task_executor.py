@@ -476,13 +476,42 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     thread_id = _extract_thread_id_from_payload(task.payload)
     user_message = _extract_user_message_from_payload(task.payload)
 
+    # A2A §6.3 resume messages — follow-up user turns appended to
+    # payload["resume_messages"] by task_store.append_resume_message
+    # when a client answers an input_required prompt. Extract their
+    # text once so both the LLM context and the resolver see the new
+    # content.
+    resume_messages = _extract_resume_messages_from_payload(task.payload)
+    resume_texts: list[str] = []
+    for rm in resume_messages:
+        rm_text = _resume_message_to_text(rm)
+        if rm_text:
+            resume_texts.append(rm_text)
+
+    # Build the "effective" user text passed to the test_run_id
+    # resolver so a resumed task that previously raised
+    # TaskInputRequiredSignal(missing_test_run_id) can satisfy the
+    # resolver on its next pass (the resume text typically carries the
+    # test_run_id the user supplied).
+    if resume_texts:
+        if user_message:
+            effective_user_text = user_message + "\n\n" + "\n\n".join(resume_texts)
+        else:
+            effective_user_text = "\n\n".join(resume_texts)
+    else:
+        effective_user_text = user_message
+
     # Phase markers so SSE consumers see liveness signals during a
     # potentially long LLM call.
     await _broadcast(task.task_id, TaskEvent(status="running", progress="loading_history", **common))
 
     history = await _load_thread_history_as_ag2_messages(thread_id) if thread_id else []
 
-    if user_message and thread_id:
+    if user_message and thread_id and not resume_texts:
+        # Only persist the original user message on the first execution.
+        # On resume, the original turn is already in conversation_store
+        # from the previous pass, so we only persist the new resume
+        # turns below.
         try:
             from stores import conversation_store
 
@@ -495,9 +524,30 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         except Exception:
             log.exception("_run_orchestrator: failed to persist user message; continuing")
 
+    # Persist each resume turn to the conversation thread so later
+    # history loads include the follow-up content and so the Web UI
+    # renders a coherent transcript across turns.
+    if resume_texts and thread_id:
+        try:
+            from stores import conversation_store
+
+            for rm_text in resume_texts:
+                await conversation_store.append_message(
+                    thread_id,
+                    agent_name="user",
+                    role="user",
+                    content={"text": rm_text, "payload": task.payload},
+                )
+        except Exception:
+            log.exception("_run_orchestrator: failed to persist resume messages; continuing")
+
     messages_for_llm = list(history)
-    if user_message:
+    if user_message and not resume_texts:
+        # On the first pass, append the original user turn (history
+        # does not yet contain it since persistence happens just above).
         messages_for_llm.append({"role": "user", "content": user_message})
+    for rm_text in resume_texts:
+        messages_for_llm.append({"role": "user", "content": rm_text})
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
@@ -537,7 +587,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     )
 
     ensured_test_run_id = await resolve_test_run_id_or_signal_input_required(
-        task, user_message, thread_id,
+        task, effective_user_text, thread_id,
     )
     if ensured_test_run_id:
         agent_test_run_id_var.set(ensured_test_run_id)
@@ -944,6 +994,64 @@ def _extract_thread_id_from_payload(payload: Any) -> Optional[str]:
         tid = block.get("thread_id")
         if isinstance(tid, str) and tid:
             return tid
+    return None
+
+
+def _extract_resume_messages_from_payload(payload: Any) -> list[dict]:
+    """Pull A2A §6.3 resume messages (if any) out of the task payload.
+
+    When a client responds to a ``TASK_STATE_INPUT_REQUIRED`` by
+    re-sending a message with the same ``taskId`` + ``contextId``, the
+    ingress handler calls ``task_store.append_resume_message`` which
+    appends the follow-up to ``payload["resume_messages"]`` as a JSONB
+    array. On the resumed execution, this helper returns that list so
+    the orchestrator can incorporate the new turns.
+
+    Args:
+        payload: The task payload JSON dict.
+
+    Returns:
+        A list of resume-message dicts (newest-last). Returns an empty
+        list when the payload is not a dict, when the field is missing,
+        or when the field is malformed. Each dict is expected to carry
+        at least one of ``message_text`` / ``parts`` plus ``role`` and
+        ``received_at`` — but this helper does not validate shape; it
+        only guards against type errors so downstream code can iterate
+        safely.
+    """
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get("resume_messages")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _resume_message_to_text(resume_message: dict) -> Optional[str]:
+    """Resolve a resume message dict to a plain-text user turn.
+
+    Resolution order:
+      1. ``resume_message["message_text"]`` (populated when the
+         inbound body carried a top-level ``message`` string or when
+         ``_normalize_a2a_v1_body`` promoted the first text Part).
+      2. First ``text`` Part in ``resume_message["parts"]`` (fallback
+         for resume envelopes that only carry structured Parts).
+
+    Returns ``None`` when no text can be extracted — the caller
+    should skip empty resume messages rather than appending blank
+    user turns to the LLM context.
+    """
+    text = resume_message.get("message_text")
+    if isinstance(text, str) and text.strip():
+        return text
+    parts = resume_message.get("parts")
+    if isinstance(parts, list):
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            part_text = part.get("text")
+            if isinstance(part_text, str) and part_text.strip():
+                return part_text
     return None
 
 

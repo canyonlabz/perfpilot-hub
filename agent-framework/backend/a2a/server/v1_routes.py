@@ -144,10 +144,53 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         http_task_not_found,
         httpexception_to_a2a,
     )
+    from .v1_resume import (
+        RESUME_ERROR_INVALID_PARAMS,
+        RESUME_ERROR_TASK_NOT_FOUND,
+        RESUME_ERROR_UNSUPPORTED_OPERATION,
+        RESUME_KIND_ERROR,
+        RESUME_KIND_PASS_THROUGH,
+        RESUME_KIND_RESUMED,
+        ResumeResult,
+        try_handle_resume,
+    )
 
     def _v1_headers(thread=None):
         th = _thread_response_headers(thread) if thread is not None else None
         return _a2a_v1_response_headers(th)
+
+    def _resume_error_to_rest_response(
+        result: ResumeResult, thread=None,
+    ) -> JSONResponse:
+        """Translate a resume ``error`` outcome into a REST A2A error.
+
+        Maps the resume helper's string error codes to the REST
+        ``google.rpc.Status`` builders:
+
+          * ``TASK_NOT_FOUND`` → ``http_task_not_found`` (404)
+          * ``UNSUPPORTED_OPERATION`` → ``http_bad_request``
+            (400 with ``FAILED_PRECONDITION``-style reason)
+          * ``INVALID_PARAMS`` → ``http_bad_request`` (400)
+        """
+        metadata = {
+            k: str(v) for k, v in (result.error_metadata or {}).items()
+            if v is not None
+        }
+        if result.error_code == RESUME_ERROR_TASK_NOT_FOUND:
+            task_id = metadata.get("taskId", "")
+            return http_task_not_found(task_id)
+        if result.error_code == RESUME_ERROR_UNSUPPORTED_OPERATION:
+            return http_bad_request(
+                result.error_message or "Unsupported operation",
+                reason="UNSUPPORTED_OPERATION",
+                metadata=metadata,
+            )
+        # Default: INVALID_PARAMS → 400
+        return http_bad_request(
+            result.error_message or "Invalid parameters",
+            reason="INVALID_ARGUMENT",
+            metadata=metadata,
+        )
 
     # -- Discovery (A2A v1) --------------------------------------------------
     @app.get("/.well-known/agent-card.json", tags=["a2a-v1", "discovery"])
@@ -193,6 +236,21 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         }
         body.setdefault("metadata", {})["request_mode"] = "send"
 
+        # A2A §6.3 resume check — if the inbound envelope carried
+        # message.taskId, treat it as a follow-up to an existing
+        # input_required task rather than minting a new one.
+        resume = await try_handle_resume(body)
+        if resume.kind == RESUME_KIND_ERROR:
+            return _resume_error_to_rest_response(resume, thread=thread)
+        if resume.kind == RESUME_KIND_RESUMED:
+            resumed_task = resume.task
+            asyncio.create_task(task_executor.execute_task(resumed_task.task_id))
+            return JSONResponse(
+                content=_task_to_a2a_v1(resumed_task),
+                status_code=202,
+                headers=_v1_headers(thread),
+            )
+
         task = await task_store.create_task(
             session_id=session_id,
             external_session_id=getattr(request.state, "external_session_id", None),
@@ -233,15 +291,24 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         }
         body.setdefault("metadata", {})["request_mode"] = "streaming"
 
-        task = await task_store.create_task(
-            session_id=session_id,
-            external_session_id=getattr(request.state, "external_session_id", None),
-            agent_name=agent_name,
-            payload=body,
-            test_run_id=body.get("test_run_id"),
-            thread_id=thread.thread_id,
-            subscriber_endpoints=_extract_subscriber_endpoints(body),
-        )
+        # A2A §6.3 resume check — same classifier as send; the SSE
+        # subscription + re-enqueue happens after the resume validates.
+        resume = await try_handle_resume(body)
+        if resume.kind == RESUME_KIND_ERROR:
+            return _resume_error_to_rest_response(resume, thread=thread)
+
+        if resume.kind == RESUME_KIND_RESUMED:
+            task = resume.task
+        else:
+            task = await task_store.create_task(
+                session_id=session_id,
+                external_session_id=getattr(request.state, "external_session_id", None),
+                agent_name=agent_name,
+                payload=body,
+                test_run_id=body.get("test_run_id"),
+                thread_id=thread.thread_id,
+                subscriber_endpoints=_extract_subscriber_endpoints(body),
+            )
         queue = await task_executor.subscribe(task.task_id)
         asyncio.create_task(task_executor.execute_task(task.task_id))
 
@@ -367,10 +434,53 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         JSONRPC_INVALID_PARAMS,
         JSONRPC_PARSE_ERROR,
     )
+    from .v1_resume import (
+        RESUME_ERROR_INVALID_PARAMS,
+        RESUME_ERROR_TASK_NOT_FOUND,
+        RESUME_ERROR_UNSUPPORTED_OPERATION,
+        RESUME_KIND_ERROR,
+        RESUME_KIND_PASS_THROUGH,
+        RESUME_KIND_RESUMED,
+        ResumeResult,
+        try_handle_resume,
+    )
 
     def _v1_headers(thread=None):
         th = _thread_response_headers(thread) if thread is not None else None
         return _a2a_v1_response_headers(th)
+
+    def _resume_error_to_jsonrpc_response(
+        result: ResumeResult, rpc_id,
+    ) -> dict:
+        """Translate a resume ``error`` outcome into a JSON-RPC error dict.
+
+        Maps the resume helper's string error codes to the JSON-RPC
+        error builders:
+
+          * ``TASK_NOT_FOUND`` → ``task_not_found_error``
+          * ``UNSUPPORTED_OPERATION`` → ``unsupported_operation_error``
+          * ``INVALID_PARAMS`` → ``jsonrpc_error`` with
+            ``JSONRPC_INVALID_PARAMS``
+        """
+        metadata = {
+            k: str(v) for k, v in (result.error_metadata or {}).items()
+            if v is not None
+        }
+        if result.error_code == RESUME_ERROR_TASK_NOT_FOUND:
+            task_id = metadata.get("taskId", "")
+            return task_not_found_error(rpc_id, task_id)
+        if result.error_code == RESUME_ERROR_UNSUPPORTED_OPERATION:
+            detail = metadata.get("detail", result.error_message or "")
+            return unsupported_operation_error(
+                rpc_id, "message/send", detail=detail,
+            )
+        # Default: INVALID_PARAMS
+        return jsonrpc_error(
+            rpc_id,
+            JSONRPC_INVALID_PARAMS,
+            "Invalid parameters",
+            a2a_error_data("INVALID_PARAMS", metadata=metadata),
+        )
 
     async def _handle_send_message(
         rpc: JsonRpcRequest, request: Request,
@@ -389,6 +499,19 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             "external_thread_id": thread.external_thread_id,
         }
         body.setdefault("metadata", {})["request_mode"] = "send"
+
+        # A2A §6.3 resume check — if the inbound envelope carried
+        # message.taskId, treat it as a follow-up to an existing
+        # input_required task rather than minting a new one.
+        resume = await try_handle_resume(body)
+        if resume.kind == RESUME_KIND_ERROR:
+            return _resume_error_to_jsonrpc_response(resume, rpc.id)
+        if resume.kind == RESUME_KIND_RESUMED:
+            resumed_task = resume.task
+            asyncio.create_task(task_executor.execute_task(resumed_task.task_id))
+            return jsonrpc_success(
+                rpc.id, {"task": _task_to_a2a_v1(resumed_task)},
+            )
 
         task = await task_store.create_task(
             session_id=session_id,
@@ -482,15 +605,27 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         }
         body.setdefault("metadata", {})["request_mode"] = "streaming"
 
-        task = await task_store.create_task(
-            session_id=session_id,
-            external_session_id=getattr(request.state, "external_session_id", None),
-            agent_name=agent_name,
-            payload=body,
-            test_run_id=body.get("test_run_id"),
-            thread_id=thread.thread_id,
-            subscriber_endpoints=_extract_subscriber_endpoints(body),
-        )
+        # A2A §6.3 resume check — same classifier as send; the SSE
+        # subscription + re-enqueue happens after the resume validates.
+        resume = await try_handle_resume(body)
+        if resume.kind == RESUME_KIND_ERROR:
+            return JSONResponse(
+                content=_resume_error_to_jsonrpc_response(resume, rpc.id),
+                headers=_v1_headers(thread),
+            )
+
+        if resume.kind == RESUME_KIND_RESUMED:
+            task = resume.task
+        else:
+            task = await task_store.create_task(
+                session_id=session_id,
+                external_session_id=getattr(request.state, "external_session_id", None),
+                agent_name=agent_name,
+                payload=body,
+                test_run_id=body.get("test_run_id"),
+                thread_id=thread.thread_id,
+                subscriber_endpoints=_extract_subscriber_endpoints(body),
+            )
         queue = await task_executor.subscribe(task.task_id)
         asyncio.create_task(task_executor.execute_task(task.task_id))
 
