@@ -50,16 +50,22 @@ class ParsedRequest:
     """Result of parsing an upstream A2A request body.
 
     Attributes:
-        prompt:         Composed prompt string for the orchestrator LLM.
-                        Includes all Parts content formatted for readability.
-        parts_summary:  List of dicts summarising each parsed Part
-                        (mediaType, has_text, has_data, has_url).
-        metadata:       Extracted top-level ``metadata`` block from the
-                        request body (upstream_framework, environment, etc.).
-        test_run_id:    Resolved test_run_id — top-level value takes
-                        precedence, then falls back to test-config Part.
-        has_parts:      True when the request contained a non-empty
-                        ``parts[]`` array.
+        prompt:            Composed prompt string for the orchestrator LLM.
+                           Includes all Parts content formatted for readability.
+        parts_summary:     List of dicts summarising each parsed Part
+                           (mediaType, has_text, has_data, has_url).
+        metadata:          Extracted top-level ``metadata`` block from the
+                           request body (upstream_framework, environment, etc.).
+        test_run_id:       Resolved test_run_id — top-level value takes
+                           precedence, then falls back to test-config Part.
+        has_parts:         True when the request contained a non-empty
+                           ``parts[]`` array.
+        task_classifier:   Short task-type tag extracted from
+                           ``parts[0].metadata.task``. ``None`` when
+                           the field is missing, empty, or not a string.
+                           Clients that do not set this metadata key see
+                           no behavior change — the field simply stays
+                           ``None`` and the composed prompt is unaffected.
     """
 
     prompt: str = ""
@@ -67,6 +73,7 @@ class ParsedRequest:
     metadata: dict = field(default_factory=dict)
     test_run_id: Optional[str] = None
     has_parts: bool = False
+    task_classifier: Optional[str] = None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -109,6 +116,18 @@ def parse_request_body(body: dict) -> ParsedRequest:
 
     result.has_parts = True
     prompt_sections: list[str] = []
+
+    # Extract parts[0].metadata.task when the client sets it. The field is
+    # a short task-type tag used by the resolver / orchestrator for
+    # classification. Prompt composition is unaffected regardless of
+    # whether this field is present.
+    first_part = raw_parts[0] if raw_parts else None
+    if isinstance(first_part, dict):
+        meta0 = first_part.get("metadata")
+        if isinstance(meta0, dict):
+            task_val = meta0.get("task")
+            if isinstance(task_val, str) and task_val.strip():
+                result.task_classifier = task_val.strip()
 
     for idx, part in enumerate(raw_parts):
         if not isinstance(part, dict):
