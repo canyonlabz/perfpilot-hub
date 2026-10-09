@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -891,31 +892,51 @@ def _coerce_message_text(content: Any) -> str:
 
 
 def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
-    """Normalize and persist test spec content from A2A parts to disk.
+    """Normalize and persist a Playwright test spec from A2A parts to disk.
 
-    When an incoming A2A request contains test case content in
-    ``parts[]`` (Markdown or structured JSON), normalize it to the
-    step-based Markdown format and save it under
-    ``artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md``.
+    Scope (strict Playwright gate):
 
-    If no ``test_run_id`` is provided in the request (typical for
-    script creation workflows where no BlazeMeter test has been
-    executed yet), one is minted using the ``YYYY-MM-DD-HH-MM-SS``
-    UTC timestamp format and set on the task payload so it flows
-    downstream to specialist agents. When the caller supplies an
-    existing ID via the task column, payload, or ``metadata.test_run_id``,
-    that value is reused.
+      This helper runs only when the inbound task payload declares
+      ``parts[1].metadata.source_type == "playwright"`` (see
+      ``core.test_run_id.extract_source_type``). HAR captures, OpenAPI
+      specs, and payloads with no ``source_type`` are no-ops — the
+      corresponding specialist tools fetch their own source files, so
+      the test-specs/ folder is only populated for the browser
+      automation path.
+
+    When the gate opens, the parts are normalized to the step-based
+    Markdown format expected by ``jmeter_get_browser_steps`` and saved
+    under ``artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md``.
+    The ``test_run_id`` is reused from the task row or payload only —
+    minting is NOT allowed here. The orchestrator-level resolver
+    (``services.helpers.test_run_id_resolver``) is responsible for
+    minting on first contact, so by the time this helper runs the ID
+    must already be present. If it's missing, we log a warning and
+    return defensively.
 
     The saved file path is set on ``agent_spec_file_var`` so
     ``delegate_to_specialist()`` can auto-inject it into child task
     payloads. This ensures the Script Agent can use the file directly
     for browser automation without calling ``jmeter_get_test_specs``.
 
-    Skips silently when:
+    Error signalling (A2A §4.1.3):
+
+      When Playwright is declared but the normalizer finds no
+      recognizable step-based content in the parts, this helper raises
+      ``TaskInputRequiredSignal`` with
+      ``reason_code="malformed_playwright_test_spec"``. The outer
+      ``execute_task`` wrapper catches the signal, transitions the
+      task to ``input_required``, and surfaces the question through
+      SSE so the client can resend corrected parts.
+
+    Skips silently (no raise) when:
+      - Payload is not a dict
       - No ``parts[]`` array in the payload
-      - Normalizer finds no test spec content in the parts
+      - ``source_type`` is not ``"playwright"`` (HAR / OpenAPI / none)
+      - ``test_run_id`` is not populated on either the task row or payload
     """
-    from core.test_run_id import resolve_or_mint_test_run_id
+    from core.task_signals import TaskInputRequiredSignal
+    from core.test_run_id import extract_source_type, resolve_test_run_id
 
     if not isinstance(task.payload, dict):
         return
@@ -924,30 +945,85 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     if not isinstance(parts, list) or not parts:
         return
 
-    # Script-creation with parts[] needs a test_run_id for the artifact
-    # folder. Reuse a caller-supplied ID; mint only when absent.
-    test_run_id = resolve_or_mint_test_run_id(
-        getattr(task, "test_run_id", None),
-        payload=task.payload,
-        mint_if_missing=True,
-    )
-    if not test_run_id:
+    # ── Strict Playwright gate ────────────────────────────────────
+    # HAR / OpenAPI inbound flows do not route through this helper —
+    # their specialist tools fetch their own source files. Only
+    # Playwright test specs are materialized to disk here.
+    source_type = extract_source_type(task.payload)
+    if source_type != "playwright":
+        log.debug(
+            "_persist_test_spec_from_parts.source_type_skip",
+            extra={
+                "source_type": source_type,
+                "task_id": str(task.task_id),
+                "parts_count": len(parts),
+            },
+        )
         return
 
+    # ── Reuse-only test_run_id resolution ────────────────────────
+    # The orchestrator-level resolver mints at ingress; by the time
+    # this helper runs the ID must already be present. If it's not,
+    # the resolver was bypassed somehow — log a warning and skip.
+    test_run_id = resolve_test_run_id(
+        getattr(task, "test_run_id", None),
+        payload=task.payload,
+    )
+    if not test_run_id:
+        log.warning(
+            "_persist_test_spec_from_parts.missing_test_run_id",
+            extra={
+                "source_type": source_type,
+                "task_id": str(task.task_id),
+                "note": (
+                    "orchestrator-level resolver should have populated "
+                    "test_run_id before this call; skipping spec write"
+                ),
+            },
+        )
+        return
+
+    # ── Propagate test_run_id via ContextVar for the LLM ─────────
     from agents.orchestrator.agent import agent_test_run_id_var
     agent_test_run_id_var.set(test_run_id)
 
+    # ── Normalize + validate ─────────────────────────────────────
     from a2a.server import spec_normalizer
 
     spec_content = spec_normalizer.normalize_parts_to_spec(parts)
     if not spec_content:
-        log.debug(
-            "_persist_test_spec_from_parts: no test spec content found "
-            "in parts[] for test_run_id=%s",
-            test_run_id,
+        # Playwright was declared but no step-based content was found.
+        # Raise INPUT_REQUIRED so the client can resend corrected
+        # parts rather than silently proceeding to a specialist that
+        # will fail opaquely.
+        log.info(
+            "_persist_test_spec_from_parts.malformed_playwright_test_spec",
+            extra={
+                "source_type": source_type,
+                "task_id": str(task.task_id),
+                "test_run_id": test_run_id,
+                "parts_count": len(parts),
+            },
         )
-        return
+        raise TaskInputRequiredSignal(
+            reason_code="malformed_playwright_test_spec",
+            question_text=(
+                "I received a Playwright test-spec request but the "
+                "parts payload did not contain any recognizable test "
+                "steps. Please resend the test case with step-based "
+                "content (for example lines starting with `Step 1:`, "
+                "`TC01:`, or an ADO test case JSON carrying "
+                "`test_cases[].steps[].action`), or correct the "
+                "`source_type` metadata if this is not a Playwright "
+                "request."
+            ),
+            reason_data={
+                "source_type": source_type,
+                "parts_count": len(parts),
+            },
+        )
 
+    # ── Write spec file + stash path on ContextVar ───────────────
     from utils.paths import get_artifacts_base
 
     spec_dir = get_artifacts_base() / test_run_id / "test-specs"
@@ -959,10 +1035,12 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
         spec_path = str(spec_file)
 
         log.info(
-            "_persist_test_spec_from_parts: saved normalized test spec "
-            "to %s (%d bytes)",
-            spec_path,
-            len(spec_content),
+            "_persist_test_spec_from_parts.saved",
+            extra={
+                "test_run_id": test_run_id,
+                "spec_path": spec_path,
+                "size_bytes": len(spec_content),
+            },
         )
 
         # Propagate the file path via ContextVar so delegate_to_specialist
@@ -972,9 +1050,11 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
 
     except OSError:
         log.exception(
-            "_persist_test_spec_from_parts: failed to save test spec "
-            "for test_run_id=%s",
-            test_run_id,
+            "_persist_test_spec_from_parts.write_failed",
+            extra={
+                "test_run_id": test_run_id,
+                "spec_dir": str(spec_dir),
+            },
         )
 
 
@@ -2093,18 +2173,43 @@ async def _run_mcp_specialist_agent(
         agent_name: The specialist's name (e.g. ``"monitoring-agent"``).
     """
     payload = task.payload if isinstance(task.payload, dict) else {}
-    # Reuse a caller-supplied ID; mint only when the specialist still
-    # has none so MCP tool calls share one artifact folder. Write the
-    # value into a mutable payload copy BEFORE prompt composition so
-    # the LLM sees the authoritative ID.
-    from core.test_run_id import resolve_or_mint_test_run_id
+    # Reuse-only resolver: the orchestrator-level resolver (A2A ingress
+    # and Web-UI ingress) is responsible for minting on first contact.
+    # By the time a specialist envelope runs, the authoritative ID must
+    # already be present on either the task row or the payload.
+    #
+    # Last-resort fallback: script-agent is the sole exception — if the
+    # upstream resolver failed to populate the ID (e.g. a legacy caller
+    # that bypassed the ingress plumbing), mint locally so artifact
+    # folders don't fail opaquely. All other specialists proceed with
+    # test_run_id=None (not every tool call requires one).
+    from core.test_run_id import mint_test_run_id, resolve_test_run_id
 
     payload = dict(payload) if isinstance(payload, dict) else {}
-    test_run_id = resolve_or_mint_test_run_id(
+    test_run_id = resolve_test_run_id(
         getattr(task, "test_run_id", None),
         payload=payload,
-        mint_if_missing=True,
     )
+    if test_run_id:
+        # resolve_test_run_id does not write back to the payload (that's
+        # the orchestrator-level resolver's job). Mirror the previous
+        # behaviour here so prompt composition sees the ID.
+        payload["test_run_id"] = test_run_id
+    elif agent_name == SCRIPT_AGENT_NAME:
+        test_run_id = mint_test_run_id()
+        payload["test_run_id"] = test_run_id
+        log.warning(
+            "specialist_envelope.last_resort_mint",
+            extra={
+                "agent_name": agent_name,
+                "task_id": str(task.task_id),
+                "test_run_id": test_run_id,
+                "note": (
+                    "upstream resolver should have populated test_run_id "
+                    "before this envelope ran; minting defensively"
+                ),
+            },
+        )
 
     user_message = None
     for key in ("user_message", "message", "text", "prompt"):
@@ -2305,7 +2410,102 @@ async def _run_mcp_specialist_agent(
         envelope["context_tokens"] = ctx_metrics["context_tokens"]
         envelope["context_utilization_pct"] = ctx_metrics["context_utilization_pct"]
         envelope["context_limit"] = ctx_metrics["context_limit"]
+
+    # ── comparison_id capture (reporting-agent only) ─────────────
+    # The PerfReport MCP mints its own ``comparison_id`` on the way
+    # back from ``comparison_generate_report`` and sibling tools. The
+    # Phase 2 resolver returns SKIP_MINT for comparison intents (A2A
+    # payloads carrying ``task_type == "generate_comparison_report"``
+    # or Web-UI payloads carrying ``comparison.test_run_ids``), so no
+    # framework-side ID is persisted on the task row at that point.
+    # Capture the authoritative ``comparison_id`` from the tool result
+    # here and persist it to ``agent_tasks.test_run_id`` so the task
+    # row's foreign key links back to the correct artifact bundle.
+    #
+    # Why a regex scan: ``round_audit["results"][*]["snippet"]`` is
+    # truncated to 200 chars during audit capture, but PerfReport MCP
+    # tool JSON reliably places ``comparison_id`` near the start of
+    # the payload (first-level field, before any large nested arrays).
+    # A tolerant string scan is good enough until Phase 7 adds a
+    # structured envelope field.
+    if agent_name == REPORTING_AGENT_NAME:
+        comparison_id = _extract_comparison_id_from_tool_rounds(tool_rounds)
+        if comparison_id:
+            envelope["comparison_id"] = comparison_id
+            try:
+                await task_store.set_test_run_id(task.task_id, comparison_id)
+                log.info(
+                    "specialist_envelope.comparison_id_captured",
+                    extra={
+                        "agent_name": agent_name,
+                        "task_id": str(task.task_id),
+                        "comparison_id": comparison_id,
+                    },
+                )
+            except Exception:
+                log.exception(
+                    "specialist_envelope.comparison_id_persist_failed",
+                    extra={
+                        "agent_name": agent_name,
+                        "task_id": str(task.task_id),
+                        "comparison_id": comparison_id,
+                    },
+                )
+
     return envelope
+
+
+# A tolerant regex that scans tool-result snippets for a JSON
+# ``"comparison_id": "..."`` field. Matches cover:
+#   - top-level: {"comparison_id": "cmp-xxx", ...}
+#   - nested one level: {"data": {"comparison_id": "cmp-xxx", ...}}
+# Snippet truncation at 200 chars still leaves this field visible for
+# typical PerfReport responses. Returns the first match (loop-order).
+_COMPARISON_ID_RE = re.compile(
+    r'"comparison_id"\s*:\s*"([^"]+)"'
+)
+
+
+def _extract_comparison_id_from_tool_rounds(
+    tool_rounds: list[dict],
+) -> Optional[str]:
+    """Scan tool-result snippets for the first ``comparison_id`` value.
+
+    Walks every round's ``results`` entries newest-first (round order
+    reflects LLM call order) and returns the first non-empty
+    ``comparison_id`` found. Returns ``None`` when no snippet contains
+    the field — the caller treats this as "no comparison report was
+    generated during this specialist run" and makes no persistence
+    change.
+
+    Args:
+        tool_rounds: The per-round audit list produced by
+            ``_run_multi_turn_tool_loop``. Each round carries
+            ``results: [{"tool", "ok", "snippet"}, ...]``.
+
+    Returns:
+        The first captured ``comparison_id`` string, or ``None`` when
+        the scan finds no match.
+    """
+    for round_entry in tool_rounds:
+        results = round_entry.get("results") if isinstance(round_entry, dict) else None
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            if result.get("ok") is False:
+                # Failed tool calls do not carry a usable comparison_id.
+                continue
+            snippet = result.get("snippet")
+            if not isinstance(snippet, str) or not snippet:
+                continue
+            match = _COMPARISON_ID_RE.search(snippet)
+            if match:
+                captured = match.group(1).strip()
+                if captured:
+                    return captured
+    return None
 
 
 async def _call_mcp_tool_passthrough_for_specialist(

@@ -69,4 +69,20 @@ def compose_input_required_question(
                 )
         return base
 
+    if reason_code == "malformed_playwright_test_spec":
+        base = (
+            "I received a Playwright test-spec request but the parts "
+            "payload did not contain any recognizable test steps. "
+            "Please resend the test case with step-based content (for "
+            "example lines starting with `Step 1:`, `TC01:`, or an ADO "
+            "test case JSON carrying `test_cases[].steps[].action`), "
+            "or correct the `source_type` metadata if this is not a "
+            "Playwright request."
+        )
+        if isinstance(reason_data, dict):
+            parts_count = reason_data.get("parts_count")
+            if isinstance(parts_count, int):
+                base += f"\n\nParts received: {parts_count}."
+        return base
+
     return f"Additional input required ({reason_code})."
