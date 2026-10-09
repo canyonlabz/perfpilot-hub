@@ -562,6 +562,15 @@ async def delegate_to_specialist(
         Optional[str],
         "Optional test_run_id for correlation across the PTLC pipeline.",
     ] = None,
+    source_type: Annotated[
+        Optional[str],
+        (
+            "For script-agent delegations only: one of 'playwright', 'har', "
+            "or 'openapi'. Signals the script-source classifier so the "
+            "framework can mint a test_run_id for the new script-creation "
+            "run. Silently ignored for any other agent_name."
+        ),
+    ] = None,
 ) -> str:
     """Create and dispatch work on a specialist agent.
 
@@ -647,11 +656,58 @@ async def delegate_to_specialist(
     if spec_file and "test_spec_file" not in body:
         body["test_spec_file"] = spec_file
 
+    # Normalize + thread the optional source_type arg. Only honored
+    # for script-agent delegations; other specialists ignore it
+    # (silent debug log so operators can audit when the LLM passes
+    # it to the wrong agent).
+    source_type_normalized: Optional[str] = None
+    if isinstance(source_type, str) and source_type.strip():
+        source_type_normalized = source_type.strip().lower()
+        if agent_name == "script-agent":
+            body["source_type"] = source_type_normalized
+        else:
+            log.debug(
+                "delegate_to_specialist.source_type_ignored",
+                extra={
+                    "agent_name": agent_name,
+                    "source_type": source_type_normalized,
+                    "note": (
+                        "source_type is only honored for script-agent "
+                        "delegations; silently dropped for other agents"
+                    ),
+                },
+            )
+
+    # Comparison-report intent observability: when the LLM delegates
+    # to reporting-agent with ``comparison.test_run_ids`` on the
+    # payload, surface it in the log stream so operators can trace
+    # the end-to-end comparison flow (orchestrator → reporting-agent
+    # envelope → PerfReport MCP). The payload itself passes through
+    # unchanged via the ``body = dict(payload or {})`` shallow copy.
+    if agent_name == "reporting-agent":
+        comparison = body.get("comparison")
+        if isinstance(comparison, dict):
+            cmp_ids = comparison.get("test_run_ids")
+            if isinstance(cmp_ids, list) and cmp_ids:
+                log.info(
+                    "delegate_to_specialist.comparison_intent",
+                    extra={
+                        "agent_name": agent_name,
+                        "test_run_ids_count": len(cmp_ids),
+                    },
+                )
+
     # Framework-authoritative test_run_id resolution (A2A + Web UI):
-    #   1. ContextVar / _caller_identity (minted or reused at ingress)
-    #   2. For script-agent: mint if still missing — do NOT honor an
-    #      LLM-invented tool-arg timestamp (e.g. 2023-10-07-12-00-00)
-    #   3. For other specialists: allow tool arg / body (BlazeMeter IDs)
+    #   1. ContextVar / _caller_identity (minted or reused at ingress).
+    #   2. For script-agent WITH source_type set: mint a fresh ID when
+    #      none is on the ContextVars — this is the explicit
+    #      script-creation signal the orchestrator LLM must send.
+    #   3. For script-agent WITHOUT source_type: fall through to the
+    #      LLM-tool-arg/body-dict branch; if that also returns None,
+    #      ``_run_mcp_specialist_agent`` emits its last-resort mint
+    #      warning so operators notice the missing contract field.
+    #   4. For other specialists: allow tool arg / body (e.g. BlazeMeter
+    #      IDs that are not UTC timestamps).
     from core.test_run_id import mint_test_run_id, resolve_test_run_id
 
     framework_id = resolve_test_run_id(
@@ -660,12 +716,18 @@ async def delegate_to_specialist(
     )
     if framework_id:
         resolved_test_run_id = framework_id
-    elif agent_name == "script-agent":
+    elif agent_name == "script-agent" and source_type_normalized:
         resolved_test_run_id = mint_test_run_id()
         log.info(
-            "delegate_to_specialist: script-agent with no framework "
-            "test_run_id; minted %s (ignoring LLM tool arg)",
-            resolved_test_run_id,
+            "delegate_to_specialist.script_agent_mint",
+            extra={
+                "test_run_id": resolved_test_run_id,
+                "source_type": source_type_normalized,
+                "note": (
+                    "script-agent delegation with explicit source_type; "
+                    "minted authoritative test_run_id (ignoring LLM tool arg)"
+                ),
+            },
         )
     else:
         resolved_test_run_id = resolve_test_run_id(
