@@ -1,296 +1,154 @@
-# MCP Performance Suite - Changelog (September 2026)
+# 📋 PerfPilot-Hub — Changelog (October 2026)
 
-This document summarizes the enhancements and new features added to the MCP Performance Suite during September 2026.
+This document summarizes the enhancements added to PerfPilot-Hub during October 2026.
 
-> **Landed in:**
-> - [PR #8 — feat: add GitHub MCP, env/SCM resolvers, BlazeMeter test provisioning, and A2A new-JMX pipeline](https://github.com/canyonlabz/perfpilot-hub/pull/8) *(merged 2026-09-01)*
-> - `features/docker-per-mcp-images` branch *(Docker full-stack refactor — see §5)*
+> **Branch:** `feat/test-run-id-resolution-and-persistence`
 
----
-
-## Table of Contents
-
-- [1. New MCP: GitHub MCP](#1-new-mcp-github-mcp)
-- [2. BlazeMeter — Test Provisioning](#2-blazemeter--test-provisioning)
-- [3. A2A — New-JMX Pipeline](#3-a2a--new-jmx-pipeline)
-- [4. Repository-Wide Documentation Refactor](#4-repository-wide-documentation-refactor)
-- [5. Docker Full-Stack Refactor](#5-docker-full-stack-refactor)
-  - [5.1 Overview](#51-overview)
-  - [5.2 Health Check Standardization](#52-health-check-standardization)
-  - [5.3 Non-Root Users, `tini`, and CRLF Handling](#53-non-root-users-tini-and-crlf-handling)
-  - [5.4 Playwright MCP — Microsoft Official Base Image](#54-playwright-mcp--microsoft-official-base-image)
-  - [5.5 Agent Frontend — Image Size Optimization](#55-agent-frontend--image-size-optimization)
-  - [5.6 Full-Stack Compose Files — YAML Anchors](#56-full-stack-compose-files--yaml-anchors)
-  - [5.7 Gateway Standalone Defaults](#57-gateway-standalone-defaults)
-  - [5.8 End-to-End Validation](#58-end-to-end-validation)
-- [6. Files Created](#6-files-created)
-- [7. Files Modified](#7-files-modified)
-- [Previous Changelogs](#previous-changelogs)
+The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three ways the Script Agent receives the source. After that, validation, execution, monitoring, analysis, and reporting follow the same path and share one `test_run_id`.
 
 ---
 
-## 1. New MCP: GitHub MCP
+## 📑 Table of Contents
 
-A minimal GitHub Contents API bridge for the PerfPilot performance testing pipeline. Enables agents to push generated JMX scripts (and other artifacts) directly to a GitHub repository without needing shell access to `git`.
-
-### 1.1 Tools
-
-| Tool | Purpose |
-|------|---------|
-| `push_jmx_file` | Push a JMX file to a target repository / branch / path (creates or updates) |
-| `ensure_branch` | Create a branch from the default branch if it does not exist |
-| `get_default_branch` | Retrieve the default branch name for a repository |
-
-### 1.2 Token Resolution
-
-The MCP supports both **user-attributed** and **user-agnostic** token modes:
-
-- **User-attributed** — token resolved from the request context (per-user commits, respects GitHub audit trails)
-- **User-agnostic** — a shared bot token from `.env` (`GITHUB_TOKEN`) used when no per-user token is available
-
-### 1.3 Configuration
-
-- Config: `mcp-perf-suite/github-mcp/config.yaml` (base) + `config.example.yaml` (template)
-- Env: `.env.example` documents `GITHUB_TOKEN`, `GITHUB_DEFAULT_OWNER`, `GITHUB_DEFAULT_REPO`
-- Docker: `docker/github-mcp/` (Dockerfile, docker-compose.yml, README.md)
-
-### 1.4 Wiring
-
-- Mounted behind the PerfPilot gateway at `/perfpilot-mcp-github/mcp`
-- Standalone port: `8118`
+- [🆔 1. Framework-assigned `test_run_id`](#1-framework-assigned-test_run_id)
+- [🧪 2. Script creation inputs](#2-script-creation-inputs)
+- [🔄 3. Multi-turn pause and resume](#3-multi-turn-pause-and-resume)
+- [🖥️ 4. Web UI thread context](#4-web-ui-thread-context)
+- [📊 5. Comparison reports](#5-comparison-reports)
+- [📄 6. A2A server data contract](#6-a2a-server-data-contract)
+- [✨ 7. Files created](#7-files-created)
+- [🔧 8. Files modified](#8-files-modified)
+- [📚 Previous Changelogs](#previous-changelogs)
 
 ---
 
-## 2. BlazeMeter — Test Provisioning
+## 🆔 1. Framework-assigned `test_run_id`
 
-The BlazeMeter MCP gained the ability to **create** tests dynamically, not just execute pre-existing ones. This lets agents provision a full test → run → collect-results loop in a single workflow without manual pre-configuration in the BlazeMeter UI.
+The agent framework assigns `test_run_id`. Specialist agents reuse the id they are given. They do not mint one.
 
-Key additions:
+Every inbound request is classified into one of four outcomes:
 
-- Test creation tools (create, configure, associate with workspace / project)
-- Workspace and project resolvers for identifying targets by name instead of ID
-- Configuration templates for common test types (functional, load, threads / duration)
+| Outcome | When | What the server does |
+|---------|------|----------------------|
+| **Reuse** | An id is already on the task, in the payload, or in the user's message (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Keep that id |
+| **Mint** | The request creates a JMeter script (Playwright, HAR, or OpenAPI) and no id exists yet | Mint `YYYY-MM-DD-HH-MM-SS` in UTC and store it on the task |
+| **Skip mint** | The request is a comparison report and names two or more existing run ids | Do not mint. The reporting tools mint `comparison_id`, and the framework stores that value on the reporting task |
+| **Ask** | No id exists and the request is not script creation | Pause the task and ask the user which run to use |
 
-Together with the new-JMX pipeline (§3), this makes it possible for the Execution Agent to take a freshly generated JMX, provision a new BlazeMeter test around it, and kick off a run — all in one turn.
-
----
-
-## 3. A2A — New-JMX Pipeline
-
-The A2A server now supports a full **generate → validate → commit → provision → execute** pipeline for brand-new JMX scripts, orchestrated across the Script, Execution, and (optionally) Notifications agents.
-
-### 3.1 Env / SCM Resolvers
-
-A shared resolver layer under `agent-framework/backend/utils/` centralizes:
-
-- Environment lookups (BlazeMeter workspace, target URL, JMeter version)
-- SCM lookups (GitHub owner / repo / default branch, target directory for JMX artifacts)
-- Cross-tool coordination so the Script Agent can hand off to Execution Agent without redundant configuration
-
-### 3.2 Pipeline Flow
-
-```text
-Script Agent  →  validate JMX (jmeter-mcp)  →  commit (github-mcp)  →  
-Execution Agent  →  create BlazeMeter test  →  attach JMX  →  run test  →  
-Monitoring / Analysis / Report agents
-```
-
-Each step persists progress via `task_call_traces` and emits SSE updates to the CopilotKit UI, so a human watching the FlightDeck sees the full pipeline unfold in real time.
+Artifacts for a single run stay under `artifacts/{test_run_id}/`.
 
 ---
 
-## 4. Repository-Wide Documentation Refactor
+## 🧪 2. Script creation inputs
 
-A large sweep across the repository's public documentation, driven by the PerfPilot-Hub rename and the ongoing structural consolidation.
+One script-creation workflow. The Script Agent is the only part that changes with the source:
 
-### 4.1 Root `README.md`
+| Source | What the caller supplies | What the Script Agent uses |
+|--------|--------------------------|----------------------------|
+| Playwright | Step text in the task context | Those steps, written to `artifacts/{test_run_id}/test-specs/` |
+| HAR | A short summary, plus the URL of the capture file | The HAR-to-JMX converter |
+| OpenAPI | A short summary, plus the URL of the specification file | The OpenAPI-to-JMX converter |
 
-- Renamed project from `mcp-perf-suite` to **PerfPilot-Hub** (technical folder names retained)
-- Introduced the **aviation-model naming convention** (Pilot, Copilots, FlightDeck, ACARS, Flight Log, Black Box) for discoverability
-- Updated repository structure diagram to reflect the current layout
-- Refreshed high-level architecture, example workflow, and roadmap sections
-- Added a Docker deployment sub-section pointing to `docker/README.md` as the canonical deployment guide
-
-### 4.2 Per-MCP READMEs
-
-Every MCP server README was updated:
-
-- **FastMCP 3.4.x** version note added where relevant
-- Clone / setup instructions adjusted for the new `mcp-perf-suite/` sub-folder layout
-- Future-enhancement sections revised to reflect completed work and current goals
-
-### 4.3 Artifacts Folder README
-
-`mcp-perf-suite/artifacts/README.md` was rewritten to clearly document:
-
-- The canonical `artifacts/{test_run_id}/` layout
-- Sub-folder purposes (`blazemeter/`, `datadog/`, `analysis/`, `reports/`, `charts/`, `jmeter/`)
-- Test-comparison folder pattern (`artifacts/comparisons/{comparison_id}/`)
-
-### 4.4 Agent Framework Docs
-
-- `agent-framework/README.md` refreshed to reflect new module names and current MCP list
-- `agent-framework/AGENTS.md` updated for the new folder map and specialist agent status
-- `agent-framework/sql/README.md` refreshed with all `perfagent_state` tables and provisioning script usage
+A Playwright request must say `source_type: playwright` and include recognizable step lines (for example `Step 1:`, `TC01:`, or `Test Case 1:`). A request that declares Playwright and has no steps pauses instead of writing an empty spec.
 
 ---
 
-## 5. Docker Full-Stack Refactor
+## 🔄 3. Multi-turn pause and resume
 
-The largest infrastructure change of the month: a full refactor of every Dockerfile in `docker/` plus both full-stack compose files. Delivered on the `features/docker-per-mcp-images` branch.
+When the server needs more input, the task moves to `TASK_STATE_INPUT_REQUIRED`. The status message includes a question for the user and a `reasonCode` a client can switch on.
 
-### 5.1 Overview
+| `reasonCode` | When |
+|--------------|------|
+| `missing_test_run_id` | The request needs a run id and none was supplied |
+| `malformed_playwright_test_spec` | Playwright was declared and the task context has no recognizable steps |
 
-The refactor covers **12 Docker images** — 9 FastMCP servers, Playwright MCP, agent backend (dual A2A + AG-UI), and agent frontend — plus the two full-stack orchestration compose files.
-
-Goals:
-
-- Consistent behavior across every image (health, signal handling, users, permissions)
-- Simpler compose files (YAML anchors instead of copy-pasted blocks)
-- Cross-OS parity (Windows and macOS full-stack files use the same anchor patterns)
-- Standalone-friendly (every sub-folder still ships its own compose + env template)
-
-### 5.2 Health Check Standardization
-
-Every FastMCP MCP image now ships a Docker `HEALTHCHECK` directive that probes its `/health` endpoint with `wget -q -O /dev/null` (GET). Playwright MCP probes `/mcp` with `wget --spider` (accepting both HTTP 200 and 406, since MCP is a stateful protocol that returns 406 for bare GETs). Compose files no longer duplicate the health check — the Dockerfile is the single source of truth.
-
-| Image | Endpoint | Probe |
-|-------|----------|-------|
-| All 9 FastMCP MCPs (`blazemeter`, `datadog`, `jmeter`, `perfanalysis`, `perfreport`, `confluence`, `perfmemory`, `github`, `gateway`) | `/health` | `wget -q -O /dev/null` (GET) |
-| `perfpilot-mcp-playwright` | `/mcp` | `wget --spider` (accept 200 or 406) |
-| `perfpilot-a2a`, `perfpilot-agui` | `/health` | `curl -f` |
-| `perfpilot-ui` | `/` | `wget --spider` |
-
-### 5.3 Non-Root Users, `tini`, and CRLF Handling
-
-**Non-root `app:app` user** — every Python-based image now runs as a dedicated system user (`app:app`, UID/GID auto-assigned, `/usr/sbin/nologin` shell). No image runs as root at execution time. The Playwright image runs as `node` (its base image's default user); the frontend image runs as `app`.
-
-**`tini` as PID 1** — every image installs `tini` and sets it as PID 1 via `ENTRYPOINT ["/usr/bin/tini", "--", ...]`. This provides clean signal forwarding for `docker stop` / `docker compose down` and reaps zombie processes.
-
-**CRLF stripping** — Windows checkouts occasionally introduce `\r` line endings into shell scripts, which breaks POSIX interpretation. Every Dockerfile now runs `sed -i 's/\r$//'` against its entrypoint script during build, guaranteeing POSIX-clean scripts regardless of the developer's OS.
-
-### 5.4 Playwright MCP — Microsoft Official Base Image
-
-The Playwright MCP image was rebuilt on Microsoft's official Playwright base image, removing the requirement to build the `mcp/playwright:latest` base image separately:
-
-- **Base image:** `mcr.microsoft.com/playwright:v1.63.0-noble` (pinned)
-- **MCP layer:** `@playwright/mcp@0.0.80` (pinned)
-- **Browser scope:** Chromium only (Firefox and WebKit stripped from `/ms-playwright/`)
-- **Entrypoint:** custom `entrypoint.sh` that handles cert import, config injection, and MCP CLI launch
-- **Config:** baked-in `/app/config.json` (transport, browser mode, output paths)
-- **Certificate handling:**
-  - Single-variable env pattern: `PLAYWRIGHT_CERT_FILE` (basename or absolute path) + `PLAYWRIGHT_CERT_PASSPHRASE`
-  - Wildcard `AutoSelectCertificateForUrls` Chromium policy default (overridable via `PLAYWRIGHT_CERT_AUTO_SELECT_PATTERN`)
-  - Certs imported into both `~/.pki/nssdb` and `~/.local/share/pki/nssdb` for Chromium's NSS database
-- **Health check:** built into the image (previously the vendor base image shipped no `HEALTHCHECK`)
-
-### 5.5 Agent Frontend — Image Size Optimization
-
-Two changes reduced the agent frontend image size significantly:
-
-1. **`USER app` before `npm ci`** — The user is created and switched to *before* dependency installation, so all files in `/app/node_modules` are owned by `app:app` from creation. This avoids the layer-bloat that a post-install `chown -R app:app /app` would produce (which would duplicate the entire `node_modules` tree in a new layer).
-2. **`.dockerignore` recursion fix** — The root `.dockerignore` now uses `**/node_modules/`, `**/.next/`, `**/.next-*/`, and `**/.env.*` patterns to prevent local build artifacts from being copied into the image and then re-created by `npm ci`.
-
-Result: **-1.61 GB** vs the pre-refactor baseline for `perfpilot-ui:latest`.
-
-### 5.6 Full-Stack Compose Files — YAML Anchors
-
-Both `docker/docker-compose-full-windows.yaml` and `docker/docker-compose-full-mac.yaml` were simplified using YAML anchors:
-
-- **`x-artifacts:`** — shared volumes list (artifacts folder, docker sock, etc.) merged into every service via `volumes: *artifacts`
-- **`x-mcp-env:`** — shared environment block (deployment mode, log level, artifact root) merged into every MCP service via `<<: *mcp-env`
-
-Impact:
-
-| File | Before | After | Delta |
-|------|--------|-------|-------|
-| `docker-compose-full-windows.yaml` | 400 lines | 354 lines | -46 |
-| `docker-compose-full-mac.yaml` | 400 lines | 365 lines | -35 |
-
-Both files pass `docker compose config --quiet` cleanly. The Mac file additionally preserves its OS-specific bits (`user: "999:999"` and `PGDATA` on Postgres, `user: "0:0"` on Playwright).
-
-### 5.7 Gateway Standalone Defaults
-
-The gateway MCP standalone `docker/gateway-mcp/docker-compose.yml` now provides `${VAR:-default}` values for all 9 upstream `MCP_URL_*` variables (8 FastMCP siblings + Playwright at the bare `/mcp` path). This means the gateway container runs standalone without requiring the user to first populate every URL in `.env`.
-
-`.env` values still win when set — the defaults are only used when the variable is unset.
-
-### 5.8 End-to-End Validation
-
-The full stack was validated end-to-end on Windows:
-
-- All **13 containers healthy** simultaneously
-- BlazeMeter MCP verified via the Execution Agent path (agent → gateway → BlazeMeter MCP → BlazeMeter API)
-- Chat history persisted across restarts (Postgres + `perfagent_state`)
-- Frontend UI serves at `http://localhost:8080/` with full CopilotKit functionality
-
-macOS validation is planned for the next work cycle.
+The caller continues the same task by sending another message with the same task id and the same `contextId`. The follow-up can be a short answer. The original request stays on the task. A mismatched `contextId`, an unknown task id, or a task that is not paused is rejected.
 
 ---
 
-## 6. Files Created
+## 🖥️ 4. Web UI thread context
+
+On each Web UI turn, the backend loads `test_run_id` values already stored for that conversation and gives them to the orchestrator.
+
+- One known id is reused.
+- Several known ids are listed so the orchestrator can ask which run the user means.
+- A first turn with no known id follows the same reuse / mint / ask rules as an A2A request.
+
+---
+
+## 📊 5. Comparison reports
+
+A comparison report names the runs to compare. The framework does not mint a new `test_run_id` for that request. When the reporting agent returns `comparison_id`, that value is stored on the reporting task in the same column a single-run id uses, so later status reads and publishes can find the bundle.
+
+---
+
+## 📄 6. A2A server data contract
+
+New public reference: [`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md).
+
+It describes what an upstream framework sends on an inbound A2A request:
+
+- Exactly three parts on a new request: the user prompt, the task context, and extra context such as environment and work-item links.
+- Each part is `text` plus `metadata`, with `mediaType: text/markdown`.
+- Playwright steps travel in the task-context text. HAR and OpenAPI travel as a summary plus a source URL.
+- Comparison reports travel as a summary plus `task_type: comparison_report` and `test_run_ids`.
+- A resume message can be a short single-part answer.
+
+Examples use placeholder hosts (`example.com`, `example-org`).
+
+---
+
+## ✨ 7. Files created
 
 | File | Purpose |
 |------|---------|
-| `mcp-perf-suite/github-mcp/` | New GitHub MCP server (server, config, tools, README) |
-| `docker/github-mcp/` | GitHub MCP Dockerfile, docker-compose.yml, .env.example, README.md |
-| `docker/playwright-mcp/entrypoint.sh` | Playwright MCP startup script (cert import, config, CLI launch) |
-| `docker/playwright-mcp/config/config.json` | Baked-in Playwright MCP transport + browser config |
-| `docker/agent-backend/entrypoint.sh` | Agent backend startup script (A2A or AG-UI dispatch via `$@` or `AGENT_SERVER`) |
-| `docker/agent-backend/requirements.txt` | Docker-scoped pip requirements mirror (matches the per-image convention used by the FastMCP MCPs); kept in sync with `agent-framework/backend/requirements.txt` |
-| `docker/agent-backend/.dockerignore` | Per-image ignore rules (`.env`, `.venv`, `__pycache__`, logs) |
-| `docker/agent-frontend/.dockerignore` | Per-image ignore rules |
-| `docs/changelogs/CHANGELOG-2026-07.md` | Rotated July 2026 changelog |
-| `docs/changelogs/CHANGELOG-2026-08.md` | New August 2026 changelog |
-| `agent-framework/backend/services/env_resolver.py` | Shared env / SCM resolver for cross-agent workflows |
+| `agent-framework/backend/sql/011_extend_agent_tasks_status.sql` | Allows `input_required`, `rejected`, and `auth_required` on `agent_tasks` |
+| `agent-framework/backend/core/task_signals.py` | Signal used to pause a task for missing input |
+| `docs/a2a/a2a-server-data-contracts.md` | Public A2A inbound data contract |
+| `tests/agent_framework/stores/test_task_store_input_required.py` | Task-store coverage for pause, resume messages, and `test_run_id` persistence |
+| `tests/agent_framework/core/test_test_run_id.py` | Resolver outcome coverage |
+| `tests/agent_framework/a2a/test_parts_parser_task_split.py` | Prompt and optional task-tag parsing |
+| `tests/agent_framework/a2a/test_a2a_sse_input_required.py` | Pause-event coverage |
+| `tests/agent_framework/a2a/test_a2a_resume_flow.py` | Resume-path coverage |
+| `tests/agent_framework/a2a/test_spec_normalizer_strict_gate.py` | Playwright source gate |
+| `tests/agent_framework/agui/test_webui_context_load.py` | Web UI thread-context coverage |
+| `tests/agent_framework/services/test_orchestrator_input_required.py` | Orchestrator pause coverage |
+| `tests/agent_framework/services/test_specialist_envelope_reuse.py` | Specialist reuse and `comparison_id` capture |
+| `tests/agent_framework/services/test_persist_test_spec_strict.py` | Playwright spec persistence |
+| `tests/agent_framework/agents/test_delegate_source_type.py` | Orchestrator delegation of `source_type` and comparison payloads |
 
-## 7. Files Modified
+## 🔧 8. Files modified
 
 | File | Changes |
 |------|---------|
-| `README.md` (root) | PerfPilot-Hub rename, aviation-model naming, updated topology, Docker deployment section |
-| `docker/blazemeter-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/datadog-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/jmeter-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/perfanalysis-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/perfreport-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/confluence-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/perfmemory-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/github-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/gateway-mcp/Dockerfile` | Baked `HEALTHCHECK`, `tini`, non-root `app:app` user |
-| `docker/gateway-mcp/docker-compose.yml` | 9 `MCP_URL_*` defaults added for standalone use |
-| `docker/playwright-mcp/Dockerfile` | Rebuilt on `mcr.microsoft.com/playwright:v1.63.0-noble` + `@playwright/mcp@0.0.80`; NSS DB cert import; entrypoint-driven startup; baked `HEALTHCHECK` |
-| `docker/playwright-mcp/docker-compose.yml` | Simplified: entrypoint owns runtime flags; cross-OS `user: "0:0"` retained |
-| `docker/playwright-mcp/.env.example` | Rewritten around single `PLAYWRIGHT_CERT_FILE` variable |
-| `docker/agent-backend/Dockerfile` | Added `bash` + `tini`; non-root `app:app`; inline `HEALTHCHECK` reading `HEALTHCHECK_PORT`; new entrypoint; pip install now sources `docker/agent-backend/requirements.txt` (Docker-scoped mirror) instead of reaching into the source tree |
-| `docker/agent-frontend/Dockerfile` | `USER app` before `npm ci`; `COPY --chown=app:app`; port 8080 hardcoded; baked `HEALTHCHECK` |
-| `docker/docker-compose-full-windows.yaml` | YAML anchors (`x-mcp-env`, `x-artifacts`); simplified from 400 → 354 lines |
-| `docker/docker-compose-full-mac.yaml` | YAML anchors; simplified from 400 → 365 lines; macOS-specific user + PGDATA retained |
-| `.dockerignore` (root) | `**/node_modules/`, `**/.next/`, `**/.next-*/`, `**/.env.*` (recursion fix) |
-| `mcp-perf-suite/blazemeter-mcp/*` | Test provisioning tools + workspace / project resolvers |
-| `agent-framework/agents/execution-agent/agent.py` | New-JMX pipeline: create BlazeMeter test + attach JMX + run |
-| `agent-framework/agents/script-agent/agent.py` | Commit generated JMX via github-mcp before handoff |
-| `agent-framework/README.md` | Refreshed module map + current MCP list |
-| `agent-framework/AGENTS.md` | Refreshed folder map + specialist agent status |
-| `agent-framework/sql/README.md` | All `perfagent_state` tables + provisioning script docs |
-| `mcp-perf-suite/artifacts/README.md` | Canonical layout + sub-folder purpose clarification |
-| Every `mcp-perf-suite/*/README.md` | FastMCP 3.4.x note + updated clone / setup instructions |
+| `agent-framework/backend/stores/task_store.py` | Persist `test_run_id`, mark a task paused, append a resume message |
+| `agent-framework/backend/core/test_run_id.py` | Reuse, mint, skip-mint, and ask outcomes |
+| `agent-framework/backend/a2a/shared/parts_parser.py` | Read an optional task tag from the prompt part |
+| `agent-framework/backend/services/task_executor.py` | Pause when an id is missing; specialists reuse the id; capture `comparison_id`; persist Playwright specs from step text |
+| `agent-framework/backend/a2a/server/v1_helpers.py` | Lift a resume task id; include the pause message on the status event |
+| `agent-framework/backend/a2a/server/v1_routes.py` | Resume an existing paused task when the inbound message names it |
+| `agent-framework/backend/a2a/server/spec_normalizer.py` | Playwright extraction requires `source_type: playwright` |
+| `agent-framework/backend/agui_server.py` | Load prior `test_run_id` values for the Web UI thread |
+| `agent-framework/backend/agents/orchestrator/agent.py` | Delegation accepts `source_type` for the Script Agent and passes comparison run ids through |
+| `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | The framework assigns `test_run_id`; the model asks when more than one run is in play |
+| `agent-framework/backend/agents/script-agent/INSTRUCTIONS.md` | Use the `test_run_id` already on the payload |
 
 ---
 
-## Previous Changelogs
+## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
 |-------|------|------------|
-| August 2026 | [CHANGELOG-2026-08.md](docs/changelogs/CHANGELOG-2026-08.md) | Repository Restructuring, Agent Framework Docker Containers, HITL Approval Flow, User Identity Resolution, Task Management UI, Notifications + Reporting Agent Scaffolds |
-| July 2026 | [CHANGELOG-2026-07.md](docs/changelogs/CHANGELOG-2026-07.md) | Loop Engineering, LLM Round-Trip Reduction, Context/Token Tracking, Compaction, Token Ledger |
-| June 2026 | [CHANGELOG-2026-06.md](docs/changelogs/CHANGELOG-2026-06.md) | PerfPilot Agents Framework, Orchestrator, Execution Agent, Playwright Integration, CopilotKit Frontend |
-| May 2026 | [CHANGELOG-2026-05.md](docs/changelogs/CHANGELOG-2026-05.md) | PerfMemory Taxonomy, EntraID Correlation Engine, SharePoint MCP, FastMCP v3 Migration, PerfPilot Hub |
-| April 2026 | [CHANGELOG-2026-04.md](docs/changelogs/CHANGELOG-2026-04.md) | Skills Migration, Cursor Subagents, PerfMemory MCP + AGE Graph, MS Teams MCP, KPI Analysis, JMeter Script Validator |
-| March 2026 | [CHANGELOG-2026-03.md](docs/changelogs/CHANGELOG-2026-03.md) | HITL Editing Tools, Correlation Analysis v0.6/v0.7, AI-Assisted Debugging, Artifact Path Alignment, BlazeMeter Shared Folders |
-| February 2026 | [CHANGELOG-2026-02.md](docs/changelogs/CHANGELOG-2026-02.md) | Swagger/OpenAPI Adapter, HAR Adapter, Centralized SLA Config, JMeter Log Analysis, Bottleneck Analyzer v0.2 |
-| January 2026 | [CHANGELOG-2026-01.md](docs/changelogs/CHANGELOG-2026-01.md) | AI-Assisted Report Revision, Datadog Dynamic Limits, Report Enhancements, New Charts |
+| September 2026 | [CHANGELOG-2026-09.md](docs/changelogs/CHANGELOG-2026-09.md) | GitHub MCP, BlazeMeter test provisioning, A2A new-JMX pipeline, documentation refactor, Docker full-stack refactor |
+| August 2026 | [CHANGELOG-2026-08.md](docs/changelogs/CHANGELOG-2026-08.md) | Repository restructuring, agent-framework containers, HITL approval flow, user identity, task management UI |
+| July 2026 | [CHANGELOG-2026-07.md](docs/changelogs/CHANGELOG-2026-07.md) | Loop engineering, LLM round-trip reduction, context and token tracking, compaction |
+| June 2026 | [CHANGELOG-2026-06.md](docs/changelogs/CHANGELOG-2026-06.md) | PerfPilot Agents framework, orchestrator, Execution Agent, Playwright integration, CopilotKit frontend |
+| May 2026 | [CHANGELOG-2026-05.md](docs/changelogs/CHANGELOG-2026-05.md) | PerfMemory taxonomy, correlation engine, SharePoint MCP, FastMCP v3 migration, PerfPilot Hub |
+| April 2026 | [CHANGELOG-2026-04.md](docs/changelogs/CHANGELOG-2026-04.md) | Skills migration, Cursor subagents, PerfMemory MCP, MS Teams MCP, KPI analysis, JMeter script validator |
+| March 2026 | [CHANGELOG-2026-03.md](docs/changelogs/CHANGELOG-2026-03.md) | HITL editing tools, correlation analysis, AI-assisted debugging, artifact path alignment |
+| February 2026 | [CHANGELOG-2026-02.md](docs/changelogs/CHANGELOG-2026-02.md) | Swagger/OpenAPI adapter, HAR adapter, centralized SLA config, JMeter log analysis |
+| January 2026 | [CHANGELOG-2026-01.md](docs/changelogs/CHANGELOG-2026-01.md) | AI-assisted report revision, Datadog dynamic limits, report enhancements, new charts |
 
 ---
 
-*Last Updated: September 27, 2026*
+*Last Updated: October 11, 2026* ✨
