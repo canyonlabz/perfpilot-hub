@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -76,6 +77,12 @@ class TaskEvent:
     Mirrors the shape we will send over SSE in the A2A
     `tasks/sendSubscribe` endpoint. Includes both IDs from V2 Section 4.3
     so SSE consumers can correlate to the broader session.
+
+    When ``status == "input_required"``, the three ``input_required_*``
+    fields carry the question text and machine-readable reason code
+    that the SSE emitter composes into the A2A ``TaskStatus.message``
+    (A2A §4.1.3 TASK_STATE_INPUT_REQUIRED). On any other status these
+    fields are ``None`` and the SSE emitter ignores them.
     """
 
     task_id: str
@@ -87,6 +94,10 @@ class TaskEvent:
     result: Optional[dict] = None
     error: Optional[dict] = None
     timestamp: str = ""
+    # Populated only when ``status == "input_required"``.
+    input_required_text: Optional[str] = None
+    input_required_reason_code: Optional[str] = None
+    input_required_data: Optional[dict] = None
 
     def __post_init__(self) -> None:
         if not self.timestamp:
@@ -242,6 +253,11 @@ async def _inject_completion_message(task: task_store.AgentTask) -> None:
 
 async def execute_task(task_id: UUID) -> None:
     """Run the task end-to-end. Schedule with `asyncio.create_task(...)`."""
+    # Local import matches the module's convention for core.* symbols
+    # (keeps the file free of cycles if a future core submodule imports
+    # back into services.*).
+    from core.task_signals import TaskInputRequiredSignal
+
     task = await task_store.get_task(task_id)
     if task is None:
         log.error("execute_task: task %s not found", task_id)
@@ -300,6 +316,35 @@ async def execute_task(task_id: UUID) -> None:
             TaskEvent(status="cancelled", error={"reason": "execution cancelled"}, **common),
         )
         raise
+    except TaskInputRequiredSignal as sig:
+        # A2A §4.1.3 TASK_STATE_INPUT_REQUIRED (non-terminal). The agent
+        # cannot proceed without additional client input. Persist the
+        # structured prompt + reasonCode so the SSE stream can emit a
+        # spec-compliant TaskStatusUpdateEvent with TaskStatus.message,
+        # and so the HTTP poll endpoint sees the same info on reload.
+        # The client resumes by sending a follow-up message carrying the
+        # same taskId + contextId (A2A §6.3 multi-turn interaction).
+        log.info(
+            "execute_task: task %s needs input (%s)",
+            task_id,
+            sig.reason_code,
+        )
+        await task_store.mark_input_required(
+            task.task_id,
+            question_text=sig.question_text,
+            reason_code=sig.reason_code,
+            reason_data=sig.reason_data,
+        )
+        await _broadcast(
+            task.task_id,
+            TaskEvent(
+                status="input_required",
+                input_required_text=sig.question_text,
+                input_required_reason_code=sig.reason_code,
+                input_required_data=sig.reason_data,
+                **common,
+            ),
+        )
     except Exception as exc:
         log.exception("execute_task: task %s failed", task_id)
         error = {"type": type(exc).__name__, "message": str(exc)}
@@ -432,13 +477,42 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     thread_id = _extract_thread_id_from_payload(task.payload)
     user_message = _extract_user_message_from_payload(task.payload)
 
+    # A2A §6.3 resume messages — follow-up user turns appended to
+    # payload["resume_messages"] by task_store.append_resume_message
+    # when a client answers an input_required prompt. Extract their
+    # text once so both the LLM context and the resolver see the new
+    # content.
+    resume_messages = _extract_resume_messages_from_payload(task.payload)
+    resume_texts: list[str] = []
+    for rm in resume_messages:
+        rm_text = _resume_message_to_text(rm)
+        if rm_text:
+            resume_texts.append(rm_text)
+
+    # Build the "effective" user text passed to the test_run_id
+    # resolver so a resumed task that previously raised
+    # TaskInputRequiredSignal(missing_test_run_id) can satisfy the
+    # resolver on its next pass (the resume text typically carries the
+    # test_run_id the user supplied).
+    if resume_texts:
+        if user_message:
+            effective_user_text = user_message + "\n\n" + "\n\n".join(resume_texts)
+        else:
+            effective_user_text = "\n\n".join(resume_texts)
+    else:
+        effective_user_text = user_message
+
     # Phase markers so SSE consumers see liveness signals during a
     # potentially long LLM call.
     await _broadcast(task.task_id, TaskEvent(status="running", progress="loading_history", **common))
 
     history = await _load_thread_history_as_ag2_messages(thread_id) if thread_id else []
 
-    if user_message and thread_id:
+    if user_message and thread_id and not resume_texts:
+        # Only persist the original user message on the first execution.
+        # On resume, the original turn is already in conversation_store
+        # from the previous pass, so we only persist the new resume
+        # turns below.
         try:
             from stores import conversation_store
 
@@ -451,9 +525,30 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
         except Exception:
             log.exception("_run_orchestrator: failed to persist user message; continuing")
 
+    # Persist each resume turn to the conversation thread so later
+    # history loads include the follow-up content and so the Web UI
+    # renders a coherent transcript across turns.
+    if resume_texts and thread_id:
+        try:
+            from stores import conversation_store
+
+            for rm_text in resume_texts:
+                await conversation_store.append_message(
+                    thread_id,
+                    agent_name="user",
+                    role="user",
+                    content={"text": rm_text, "payload": task.payload},
+                )
+        except Exception:
+            log.exception("_run_orchestrator: failed to persist resume messages; continuing")
+
     messages_for_llm = list(history)
-    if user_message:
+    if user_message and not resume_texts:
+        # On the first pass, append the original user turn (history
+        # does not yet contain it since persistence happens just above).
         messages_for_llm.append({"role": "user", "content": user_message})
+    for rm_text in resume_texts:
+        messages_for_llm.append({"role": "user", "content": rm_text})
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
@@ -481,18 +576,19 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     agent_request_source_var.set("a2a")
     agent_task_id_var.set(str(task.task_id))
 
-    # Shared A2A + Web UI ingress: reuse metadata/payload/text ID when
-    # present; mint only for pre-script-creation (parts[] test specs or
-    # script-creation prose). Do NOT mint for unrelated chat turns.
-    from core.test_run_id import ensure_test_run_id_for_inbound
+    # Shared A2A + Web UI ingress: three-outcome resolver with
+    # INPUT_REQUIRED signalling. REUSE returns the existing ID, MINT
+    # mints + persists a fresh UTC timestamp (script-creation flows),
+    # SKIP_MINT returns None for comparison reports (PerfReport MCP
+    # mints its own comparison_id), and REJECT raises
+    # TaskInputRequiredSignal which execute_task catches to transition
+    # the task row to input_required (A2A §4.1.3) rather than failing.
+    from services.helpers.test_run_id_resolver import (
+        resolve_test_run_id_or_signal_input_required,
+    )
 
-    inbound_payload = task.payload if isinstance(task.payload, dict) else None
-    if inbound_payload is not None and getattr(task, "test_run_id", None):
-        inbound_payload.setdefault("test_run_id", task.test_run_id)
-    ensured_test_run_id = ensure_test_run_id_for_inbound(
-        payload=inbound_payload,
-        user_text=user_message,
-        parts=(inbound_payload.get("parts") if inbound_payload else None),
+    ensured_test_run_id = await resolve_test_run_id_or_signal_input_required(
+        task, effective_user_text, thread_id,
     )
     if ensured_test_run_id:
         agent_test_run_id_var.set(ensured_test_run_id)
@@ -796,31 +892,51 @@ def _coerce_message_text(content: Any) -> str:
 
 
 def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
-    """Normalize and persist test spec content from A2A parts to disk.
+    """Normalize and persist a Playwright test spec from A2A parts to disk.
 
-    When an incoming A2A request contains test case content in
-    ``parts[]`` (Markdown or structured JSON), normalize it to the
-    step-based Markdown format and save it under
-    ``artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md``.
+    Scope (strict Playwright gate):
 
-    If no ``test_run_id`` is provided in the request (typical for
-    script creation workflows where no BlazeMeter test has been
-    executed yet), one is minted using the ``YYYY-MM-DD-HH-MM-SS``
-    UTC timestamp format and set on the task payload so it flows
-    downstream to specialist agents. When the caller supplies an
-    existing ID via the task column, payload, or ``metadata.test_run_id``,
-    that value is reused.
+      This helper runs only when the inbound task payload declares
+      ``parts[1].metadata.source_type == "playwright"`` (see
+      ``core.test_run_id.extract_source_type``). HAR captures, OpenAPI
+      specs, and payloads with no ``source_type`` are no-ops — the
+      corresponding specialist tools fetch their own source files, so
+      the test-specs/ folder is only populated for the browser
+      automation path.
+
+    When the gate opens, the parts are normalized to the step-based
+    Markdown format expected by ``jmeter_get_browser_steps`` and saved
+    under ``artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md``.
+    The ``test_run_id`` is reused from the task row or payload only —
+    minting is NOT allowed here. The orchestrator-level resolver
+    (``services.helpers.test_run_id_resolver``) is responsible for
+    minting on first contact, so by the time this helper runs the ID
+    must already be present. If it's missing, we log a warning and
+    return defensively.
 
     The saved file path is set on ``agent_spec_file_var`` so
     ``delegate_to_specialist()`` can auto-inject it into child task
     payloads. This ensures the Script Agent can use the file directly
     for browser automation without calling ``jmeter_get_test_specs``.
 
-    Skips silently when:
+    Error signalling (A2A §4.1.3):
+
+      When Playwright is declared but the normalizer finds no
+      recognizable step-based content in the parts, this helper raises
+      ``TaskInputRequiredSignal`` with
+      ``reason_code="malformed_playwright_test_spec"``. The outer
+      ``execute_task`` wrapper catches the signal, transitions the
+      task to ``input_required``, and surfaces the question through
+      SSE so the client can resend corrected parts.
+
+    Skips silently (no raise) when:
+      - Payload is not a dict
       - No ``parts[]`` array in the payload
-      - Normalizer finds no test spec content in the parts
+      - ``source_type`` is not ``"playwright"`` (HAR / OpenAPI / none)
+      - ``test_run_id`` is not populated on either the task row or payload
     """
-    from core.test_run_id import resolve_or_mint_test_run_id
+    from core.task_signals import TaskInputRequiredSignal
+    from core.test_run_id import extract_source_type, resolve_test_run_id
 
     if not isinstance(task.payload, dict):
         return
@@ -829,30 +945,85 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     if not isinstance(parts, list) or not parts:
         return
 
-    # Script-creation with parts[] needs a test_run_id for the artifact
-    # folder. Reuse a caller-supplied ID; mint only when absent.
-    test_run_id = resolve_or_mint_test_run_id(
-        getattr(task, "test_run_id", None),
-        payload=task.payload,
-        mint_if_missing=True,
-    )
-    if not test_run_id:
+    # ── Strict Playwright gate ────────────────────────────────────
+    # HAR / OpenAPI inbound flows do not route through this helper —
+    # their specialist tools fetch their own source files. Only
+    # Playwright test specs are materialized to disk here.
+    source_type = extract_source_type(task.payload)
+    if source_type != "playwright":
+        log.debug(
+            "_persist_test_spec_from_parts.source_type_skip",
+            extra={
+                "source_type": source_type,
+                "task_id": str(task.task_id),
+                "parts_count": len(parts),
+            },
+        )
         return
 
+    # ── Reuse-only test_run_id resolution ────────────────────────
+    # The orchestrator-level resolver mints at ingress; by the time
+    # this helper runs the ID must already be present. If it's not,
+    # the resolver was bypassed somehow — log a warning and skip.
+    test_run_id = resolve_test_run_id(
+        getattr(task, "test_run_id", None),
+        payload=task.payload,
+    )
+    if not test_run_id:
+        log.warning(
+            "_persist_test_spec_from_parts.missing_test_run_id",
+            extra={
+                "source_type": source_type,
+                "task_id": str(task.task_id),
+                "note": (
+                    "orchestrator-level resolver should have populated "
+                    "test_run_id before this call; skipping spec write"
+                ),
+            },
+        )
+        return
+
+    # ── Propagate test_run_id via ContextVar for the LLM ─────────
     from agents.orchestrator.agent import agent_test_run_id_var
     agent_test_run_id_var.set(test_run_id)
 
+    # ── Normalize + validate ─────────────────────────────────────
     from a2a.server import spec_normalizer
 
     spec_content = spec_normalizer.normalize_parts_to_spec(parts)
     if not spec_content:
-        log.debug(
-            "_persist_test_spec_from_parts: no test spec content found "
-            "in parts[] for test_run_id=%s",
-            test_run_id,
+        # Playwright was declared but no step-based content was found.
+        # Raise INPUT_REQUIRED so the client can resend corrected
+        # parts rather than silently proceeding to a specialist that
+        # will fail opaquely.
+        log.info(
+            "_persist_test_spec_from_parts.malformed_playwright_test_spec",
+            extra={
+                "source_type": source_type,
+                "task_id": str(task.task_id),
+                "test_run_id": test_run_id,
+                "parts_count": len(parts),
+            },
         )
-        return
+        raise TaskInputRequiredSignal(
+            reason_code="malformed_playwright_test_spec",
+            question_text=(
+                "I received a Playwright test-spec request but the "
+                "parts payload did not contain any recognizable test "
+                "steps. Please resend the test case with step-based "
+                "content (for example lines starting with `Step 1:`, "
+                "`TC01:`, or an ADO test case JSON carrying "
+                "`test_cases[].steps[].action`), or correct the "
+                "`source_type` metadata if this is not a Playwright "
+                "request."
+            ),
+            reason_data={
+                "source_type": source_type,
+                "parts_count": len(parts),
+            },
+        )
 
+    # ── Write spec file + stash path on ContextVar ───────────────
     from utils.paths import get_artifacts_base
 
     spec_dir = get_artifacts_base() / test_run_id / "test-specs"
@@ -864,10 +1035,12 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
         spec_path = str(spec_file)
 
         log.info(
-            "_persist_test_spec_from_parts: saved normalized test spec "
-            "to %s (%d bytes)",
-            spec_path,
-            len(spec_content),
+            "_persist_test_spec_from_parts.saved",
+            extra={
+                "test_run_id": test_run_id,
+                "spec_path": spec_path,
+                "size_bytes": len(spec_content),
+            },
         )
 
         # Propagate the file path via ContextVar so delegate_to_specialist
@@ -877,9 +1050,11 @@ def _persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
 
     except OSError:
         log.exception(
-            "_persist_test_spec_from_parts: failed to save test spec "
-            "for test_run_id=%s",
-            test_run_id,
+            "_persist_test_spec_from_parts.write_failed",
+            extra={
+                "test_run_id": test_run_id,
+                "spec_dir": str(spec_dir),
+            },
         )
 
 
@@ -899,6 +1074,64 @@ def _extract_thread_id_from_payload(payload: Any) -> Optional[str]:
         tid = block.get("thread_id")
         if isinstance(tid, str) and tid:
             return tid
+    return None
+
+
+def _extract_resume_messages_from_payload(payload: Any) -> list[dict]:
+    """Pull A2A §6.3 resume messages (if any) out of the task payload.
+
+    When a client responds to a ``TASK_STATE_INPUT_REQUIRED`` by
+    re-sending a message with the same ``taskId`` + ``contextId``, the
+    ingress handler calls ``task_store.append_resume_message`` which
+    appends the follow-up to ``payload["resume_messages"]`` as a JSONB
+    array. On the resumed execution, this helper returns that list so
+    the orchestrator can incorporate the new turns.
+
+    Args:
+        payload: The task payload JSON dict.
+
+    Returns:
+        A list of resume-message dicts (newest-last). Returns an empty
+        list when the payload is not a dict, when the field is missing,
+        or when the field is malformed. Each dict is expected to carry
+        at least one of ``message_text`` / ``parts`` plus ``role`` and
+        ``received_at`` — but this helper does not validate shape; it
+        only guards against type errors so downstream code can iterate
+        safely.
+    """
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get("resume_messages")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _resume_message_to_text(resume_message: dict) -> Optional[str]:
+    """Resolve a resume message dict to a plain-text user turn.
+
+    Resolution order:
+      1. ``resume_message["message_text"]`` (populated when the
+         inbound body carried a top-level ``message`` string or when
+         ``_normalize_a2a_v1_body`` promoted the first text Part).
+      2. First ``text`` Part in ``resume_message["parts"]`` (fallback
+         for resume envelopes that only carry structured Parts).
+
+    Returns ``None`` when no text can be extracted — the caller
+    should skip empty resume messages rather than appending blank
+    user turns to the LLM context.
+    """
+    text = resume_message.get("message_text")
+    if isinstance(text, str) and text.strip():
+        return text
+    parts = resume_message.get("parts")
+    if isinstance(parts, list):
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            part_text = part.get("text")
+            if isinstance(part_text, str) and part_text.strip():
+                return part_text
     return None
 
 
@@ -1940,18 +2173,43 @@ async def _run_mcp_specialist_agent(
         agent_name: The specialist's name (e.g. ``"monitoring-agent"``).
     """
     payload = task.payload if isinstance(task.payload, dict) else {}
-    # Reuse a caller-supplied ID; mint only when the specialist still
-    # has none so MCP tool calls share one artifact folder. Write the
-    # value into a mutable payload copy BEFORE prompt composition so
-    # the LLM sees the authoritative ID.
-    from core.test_run_id import resolve_or_mint_test_run_id
+    # Reuse-only resolver: the orchestrator-level resolver (A2A ingress
+    # and Web-UI ingress) is responsible for minting on first contact.
+    # By the time a specialist envelope runs, the authoritative ID must
+    # already be present on either the task row or the payload.
+    #
+    # Last-resort fallback: script-agent is the sole exception — if the
+    # upstream resolver failed to populate the ID (e.g. a legacy caller
+    # that bypassed the ingress plumbing), mint locally so artifact
+    # folders don't fail opaquely. All other specialists proceed with
+    # test_run_id=None (not every tool call requires one).
+    from core.test_run_id import mint_test_run_id, resolve_test_run_id
 
     payload = dict(payload) if isinstance(payload, dict) else {}
-    test_run_id = resolve_or_mint_test_run_id(
+    test_run_id = resolve_test_run_id(
         getattr(task, "test_run_id", None),
         payload=payload,
-        mint_if_missing=True,
     )
+    if test_run_id:
+        # resolve_test_run_id does not write back to the payload (that's
+        # the orchestrator-level resolver's job). Mirror the previous
+        # behaviour here so prompt composition sees the ID.
+        payload["test_run_id"] = test_run_id
+    elif agent_name == SCRIPT_AGENT_NAME:
+        test_run_id = mint_test_run_id()
+        payload["test_run_id"] = test_run_id
+        log.warning(
+            "specialist_envelope.last_resort_mint",
+            extra={
+                "agent_name": agent_name,
+                "task_id": str(task.task_id),
+                "test_run_id": test_run_id,
+                "note": (
+                    "upstream resolver should have populated test_run_id "
+                    "before this envelope ran; minting defensively"
+                ),
+            },
+        )
 
     user_message = None
     for key in ("user_message", "message", "text", "prompt"):
@@ -2152,7 +2410,102 @@ async def _run_mcp_specialist_agent(
         envelope["context_tokens"] = ctx_metrics["context_tokens"]
         envelope["context_utilization_pct"] = ctx_metrics["context_utilization_pct"]
         envelope["context_limit"] = ctx_metrics["context_limit"]
+
+    # ── comparison_id capture (reporting-agent only) ─────────────
+    # The PerfReport MCP mints its own ``comparison_id`` on the way
+    # back from ``comparison_generate_report`` and sibling tools. The
+    # Phase 2 resolver returns SKIP_MINT for comparison intents (A2A
+    # payloads carrying ``task_type == "generate_comparison_report"``
+    # or Web-UI payloads carrying ``comparison.test_run_ids``), so no
+    # framework-side ID is persisted on the task row at that point.
+    # Capture the authoritative ``comparison_id`` from the tool result
+    # here and persist it to ``agent_tasks.test_run_id`` so the task
+    # row's foreign key links back to the correct artifact bundle.
+    #
+    # Why a regex scan: ``round_audit["results"][*]["snippet"]`` is
+    # truncated to 200 chars during audit capture, but PerfReport MCP
+    # tool JSON reliably places ``comparison_id`` near the start of
+    # the payload (first-level field, before any large nested arrays).
+    # A tolerant string scan is good enough until Phase 7 adds a
+    # structured envelope field.
+    if agent_name == REPORTING_AGENT_NAME:
+        comparison_id = _extract_comparison_id_from_tool_rounds(tool_rounds)
+        if comparison_id:
+            envelope["comparison_id"] = comparison_id
+            try:
+                await task_store.set_test_run_id(task.task_id, comparison_id)
+                log.info(
+                    "specialist_envelope.comparison_id_captured",
+                    extra={
+                        "agent_name": agent_name,
+                        "task_id": str(task.task_id),
+                        "comparison_id": comparison_id,
+                    },
+                )
+            except Exception:
+                log.exception(
+                    "specialist_envelope.comparison_id_persist_failed",
+                    extra={
+                        "agent_name": agent_name,
+                        "task_id": str(task.task_id),
+                        "comparison_id": comparison_id,
+                    },
+                )
+
     return envelope
+
+
+# A tolerant regex that scans tool-result snippets for a JSON
+# ``"comparison_id": "..."`` field. Matches cover:
+#   - top-level: {"comparison_id": "cmp-xxx", ...}
+#   - nested one level: {"data": {"comparison_id": "cmp-xxx", ...}}
+# Snippet truncation at 200 chars still leaves this field visible for
+# typical PerfReport responses. Returns the first match (loop-order).
+_COMPARISON_ID_RE = re.compile(
+    r'"comparison_id"\s*:\s*"([^"]+)"'
+)
+
+
+def _extract_comparison_id_from_tool_rounds(
+    tool_rounds: list[dict],
+) -> Optional[str]:
+    """Scan tool-result snippets for the first ``comparison_id`` value.
+
+    Walks every round's ``results`` entries newest-first (round order
+    reflects LLM call order) and returns the first non-empty
+    ``comparison_id`` found. Returns ``None`` when no snippet contains
+    the field — the caller treats this as "no comparison report was
+    generated during this specialist run" and makes no persistence
+    change.
+
+    Args:
+        tool_rounds: The per-round audit list produced by
+            ``_run_multi_turn_tool_loop``. Each round carries
+            ``results: [{"tool", "ok", "snippet"}, ...]``.
+
+    Returns:
+        The first captured ``comparison_id`` string, or ``None`` when
+        the scan finds no match.
+    """
+    for round_entry in tool_rounds:
+        results = round_entry.get("results") if isinstance(round_entry, dict) else None
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            if result.get("ok") is False:
+                # Failed tool calls do not carry a usable comparison_id.
+                continue
+            snippet = result.get("snippet")
+            if not isinstance(snippet, str) or not snippet:
+                continue
+            match = _COMPARISON_ID_RE.search(snippet)
+            if match:
+                captured = match.group(1).strip()
+                if captured:
+                    return captured
+    return None
 
 
 async def _call_mcp_tool_passthrough_for_specialist(

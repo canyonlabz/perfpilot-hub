@@ -76,7 +76,8 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
             "messageId": "...",
             "role": "ROLE_USER",
             "parts": [{"text": "Hello"}],
-            "contextId": "ctx-001"
+            "contextId": "ctx-001",
+            "taskId": "existing-task-uuid"   # <- A2A §6.3 resume signal
           },
           "configuration": {...},
           "metadata": {...}
@@ -85,12 +86,19 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
     Normalized internal structure::
 
         {
-          "message": "Hello",           # first text Part -> top-level message
-          "parts": [{"text": "Hello"}], # pass through for a2a.shared.parts_parser
-          "metadata": {...},            # merged from envelope + message metadata
-          "_a2a_v1_envelope": {...},    # stash original envelope for audit
-          "_a2a_v1_context_id": "ctx-001"
+          "message": "Hello",             # first text Part -> top-level message
+          "parts": [{"text": "Hello"}],   # pass through for a2a.shared.parts_parser
+          "metadata": {...},              # merged from envelope + message metadata
+          "_a2a_v1_envelope": {...},      # stash original envelope for audit
+          "_a2a_v1_context_id": "ctx-001",
+          "_a2a_v1_resume_task_id": "existing-task-uuid"
         }
+
+    The ``_a2a_v1_resume_task_id`` field is lifted when ``message.taskId`` is
+    present on the inbound envelope — this is the A2A §6.3 multi-turn
+    interaction signal. Ingress handlers check for this field before
+    ``create_task`` to decide whether to resume an existing task
+    (A2A TASK_STATE_INPUT_REQUIRED → TASK_STATE_WORKING) or start a new one.
     """
     from a2a.shared.models import is_a2a_v1_request
 
@@ -100,6 +108,7 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
     msg = body["message"]
     parts = msg.get("parts") or []
     context_id = msg.get("contextId") or msg.get("context_id")
+    resume_task_id = msg.get("taskId") or msg.get("task_id")
 
     first_text = None
     normalized_parts: list[dict] = []
@@ -131,6 +140,9 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
 
     if context_id:
         result["_a2a_v1_context_id"] = context_id
+
+    if isinstance(resume_task_id, str) and resume_task_id.strip():
+        result["_a2a_v1_resume_task_id"] = resume_task_id.strip()
 
     result["_a2a_v1_envelope"] = body
 
@@ -250,8 +262,26 @@ def _task_event_to_a2a_v1_sse(
     Returns a dict with exactly one ``statusUpdate`` key whose value is a
     ``TaskStatusUpdateEvent`` (A2A §3.2.3 / §4.2.1). Progress strings are
     carried in ``metadata.progress`` when present.
+
+    When ``event.status == "input_required"`` and the event carries
+    ``input_required_text``, the resulting ``TaskStatus.message`` is
+    populated with a two-part A2A ``Message``:
+
+      * ``parts[0]`` — ``text`` part carrying the human-readable prompt
+        (``media_type: text/plain``).
+      * ``parts[1]`` — ``data`` part carrying ``{"reasonCode": ..., ...}``
+        so client UIs can switch on a machine-readable code
+        (``media_type: application/json``).
+
+    The ``Message.role`` is ``ROLE_AGENT`` per A2A §4 (the server is
+    speaking to the client). This mirrors the A2A §4.1.3
+    ``TASK_STATE_INPUT_REQUIRED`` + §6.3 multi-turn interaction pattern:
+    the client resumes by replying to the same ``taskId`` + ``contextId``.
     """
     from a2a.shared.models import (
+        Message,
+        Part,
+        Role,
         StreamResponse,
         TaskStatus,
         TaskStatusUpdateEvent,
@@ -260,7 +290,38 @@ def _task_event_to_a2a_v1_sse(
     )
 
     a2a_state = perfpilot_status_to_a2a(event.status)
-    status = TaskStatus(state=a2a_state, timestamp=a2a_timestamp())
+
+    status_message: Optional[Message] = None
+    if event.status == "input_required" and event.input_required_text:
+        reason_code = event.input_required_reason_code or ""
+        data_body: dict[str, Any] = {"reasonCode": reason_code}
+        if isinstance(event.input_required_data, dict):
+            for key, value in event.input_required_data.items():
+                if isinstance(key, str) and key != "reasonCode":
+                    data_body[key] = value
+
+        status_message = Message(
+            message_id=f"{event.task_id}-input-required",
+            role=Role.ROLE_AGENT,
+            parts=[
+                Part(
+                    text=event.input_required_text,
+                    media_type="text/plain",
+                ),
+                Part(
+                    data=data_body,
+                    media_type="application/json",
+                ),
+            ],
+            task_id=event.task_id,
+            context_id=_context_id_from_task_or_event(context_id=context_id) or None,
+        )
+
+    status = TaskStatus(
+        state=a2a_state,
+        timestamp=a2a_timestamp(),
+        message=status_message,
+    )
     meta: Optional[dict[str, Any]] = None
     if event.progress:
         meta = {"progress": event.progress}

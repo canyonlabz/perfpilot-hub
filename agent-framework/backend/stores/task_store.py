@@ -23,8 +23,22 @@ from . import db
 
 log = logging.getLogger(__name__)
 
-VALID_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
-TERMINAL_STATUSES = ("completed", "failed", "cancelled")
+VALID_STATUSES = (
+    "pending",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    # A2A v1 TaskState additions (A2A specification §4.1.3). The DB CHECK
+    # constraint in sql/011_extend_agent_tasks_status.sql must allow these.
+    "input_required",   # TASK_STATE_INPUT_REQUIRED  (non-terminal, resumable)
+    "rejected",         # TASK_STATE_REJECTED        (terminal)
+    "auth_required",    # TASK_STATE_AUTH_REQUIRED   (non-terminal, resumable)
+)
+# Per A2A §4.1.3, INPUT_REQUIRED and AUTH_REQUIRED are "interrupted" rather
+# than terminal — the client is expected to resume with a new message on the
+# same taskId + contextId (A2A §6.3). Only states listed below are terminal.
+TERMINAL_STATUSES = ("completed", "failed", "cancelled", "rejected")
 
 
 @dataclass
@@ -222,6 +236,172 @@ async def delete_task(task_id: UUID) -> bool:
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute("DELETE FROM agent_tasks WHERE task_id = $1", task_id)
+    return result.endswith(" 1")
+
+
+# =============================================================================
+# A2A v1 spec-compliant state transitions and field updates
+# =============================================================================
+# Helpers that support the A2A §4.1.3 TASK_STATE_INPUT_REQUIRED pattern and
+# the §6.3 multi-turn interaction (resume) flow, plus `test_run_id`
+# updates on an existing row for cases where the authoritative value is
+# known only after the task row has been created.
+
+
+async def set_test_run_id(task_id: UUID, test_run_id: str) -> bool:
+    """Set `test_run_id` on an existing task row. Returns True if updated.
+
+    Used in two situations:
+
+    1. Orchestrator-level mint on a script-creation request: the task row
+       is created before the resolver assigns a fresh `test_run_id`, so
+       the ID is written back once minted.
+    2. Specialist writeback: a specialist (e.g. BlazeMeter execution)
+       receives the authoritative `test_run_id` from an MCP tool result
+       (for example PerfReport MCP returning its own `comparison_id`) and
+       persists it back onto the task so downstream turns can pick it up
+       via `list_tasks_for_thread`.
+
+    Args:
+        task_id: Primary key of the `agent_tasks` row to update.
+        test_run_id: Non-empty identifier. Surrounding whitespace is
+            stripped. A blank or whitespace-only string is rejected to
+            guard against silent "cleared ID" bugs upstream.
+
+    Returns:
+        True when exactly one row was updated. False when no row matched
+        the given `task_id` (i.e. the task does not exist or was deleted).
+
+    Raises:
+        ValueError: `test_run_id` is empty or whitespace-only.
+    """
+    if not isinstance(test_run_id, str) or not test_run_id.strip():
+        raise ValueError("test_run_id must be a non-empty string")
+    normalized = test_run_id.strip()
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE agent_tasks
+            SET test_run_id = $2,
+                updated_at = NOW()
+            WHERE task_id = $1
+            """,
+            task_id,
+            normalized,
+        )
+    return result.endswith(" 1")
+
+
+async def mark_input_required(
+    task_id: UUID,
+    question_text: str,
+    reason_code: str,
+    reason_data: Optional[dict] = None,
+) -> bool:
+    """Transition a non-terminal task to `input_required`.
+
+    Implements the A2A §4.1.3 TASK_STATE_INPUT_REQUIRED pattern: the agent
+    needs additional input from the client before it can proceed. The
+    question text and a machine-readable reason code are persisted on the
+    task row so the SSE emitter and subsequent HTTP polls can surface the
+    exact prompt back to the client.
+
+    This helper never overwrites a task that has already reached a terminal
+    state (`completed`, `failed`, `cancelled`, `rejected`) — a late
+    `input_required` request on an already-finished task is a no-op.
+
+    Args:
+        task_id: Primary key of the `agent_tasks` row to update.
+        question_text: Human-readable prompt sent back to the client as
+            the user-visible message body.
+        reason_code: Short machine-readable code (e.g. `missing_test_run_id`)
+            that clients and the Web UI can switch on to drive UX.
+        reason_data: Optional supplementary structured payload — for
+            example candidate `test_run_id` values collected from the
+            thread history, or form field metadata. Defaults to `{}`.
+
+    Returns:
+        True when exactly one non-terminal row transitioned to
+        `input_required`. False when no row matched (task missing or
+        already terminal).
+    """
+    body = {
+        "input_required": {
+            "question_text": question_text,
+            "reason_code": reason_code,
+            "reason_data": reason_data or {},
+        }
+    }
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE agent_tasks
+            SET status = 'input_required',
+                result = $2::jsonb,
+                updated_at = NOW()
+            WHERE task_id = $1
+              AND status NOT IN ('completed', 'failed', 'cancelled', 'rejected')
+            """,
+            task_id,
+            json.dumps(body),
+        )
+    return result.endswith(" 1")
+
+
+async def append_resume_message(task_id: UUID, message_part: dict) -> bool:
+    """Append a resume message and transition `input_required` -> `running`.
+
+    Implements the client side of the A2A §6.3 multi-turn interaction: the
+    client re-sends a message carrying the same `taskId` + `contextId`
+    while the task is in `input_required`, and that follow-up message
+    becomes the next turn's input.
+
+    The follow-up message is appended to `payload.resume_messages` as a
+    JSONB array so later turns can inspect the full resume history, and
+    the stored `result` (containing the previous `input_required` prompt)
+    is cleared to prevent the next SSE emit from re-sending stale input.
+
+    This helper only operates on tasks currently in `input_required`; any
+    other status (including terminal ones) is a no-op. Callers that want
+    to drive a `TaskNotCancelableError` / "wrong state" response can use
+    the False return value as the signal.
+
+    Args:
+        task_id: Primary key of the `agent_tasks` row to update.
+        message_part: One A2A Message-shaped dict to append to
+            `payload.resume_messages`. Shape is not validated here; the
+            caller (e.g. the v1 route handler) is responsible for
+            serializing the inbound message consistently.
+
+    Returns:
+        True when exactly one `input_required` row transitioned back to
+        `running`. False when the task does not exist or is not currently
+        in `input_required`.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE agent_tasks
+            SET payload = jsonb_set(
+                    payload,
+                    '{resume_messages}',
+                    COALESCE(payload->'resume_messages', '[]'::jsonb) || $2::jsonb,
+                    true
+                ),
+                status = 'running',
+                result = NULL,
+                updated_at = NOW()
+            WHERE task_id = $1
+              AND status = 'input_required'
+            """,
+            task_id,
+            json.dumps([message_part]),
+        )
     return result.endswith(" 1")
 
 

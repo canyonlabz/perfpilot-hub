@@ -28,20 +28,27 @@ access to three namespaces: `jmeter_*`, `github_*`, and `perfmemory_*`.
 The Playwright MCP is connected directly (not through the gateway) and
 provides the `browser_*` namespace.
 
-**IMPORTANT:** When the user requests running any JMeter or Playwright
-browser automation, a `test_run_id` is required so all artifacts land
-under one folder. Prefer an existing ID when one is already present in
-the task payload, delegation context, or orchestrator-provided context
-(including a BlazeMeter / prior-run ID). Use that value **verbatim** for
-all subsequent MCP tool calls and operations — do **NOT** mint a second
-ID, invent a descriptive slug, or change the format.
+**IMPORTANT — the framework owns `test_run_id`.** When the user
+requests running any JMeter or Playwright browser automation, a
+`test_run_id` is required so all artifacts land under one folder.
+That ID is **assigned by the framework** before you ever see the
+payload — look for it in these places, in priority order:
 
-Only when **no** `test_run_id` is present anywhere in your context may
-you mint one yourself, and only in the exact form `YYYY-MM-DD-HH-MM-SS`
-(full date and time — never midnight placeholders like `00-00-00` unless
-that is the true current time). Communicate the ID back to the user and
-Orchestrator. Do **NOT** continue without a valid `test_run_id` (also
-called `run_id` in some MCP tools — same meaning).
+1. Your delegation context / task payload (`test_run_id` field).
+2. Orchestrator-provided context on the same thread (including a
+   BlazeMeter test id or prior-run id passed through verbatim).
+
+Use the value **verbatim** for every MCP tool call. Do **NOT** mint a
+second ID, invent a descriptive slug, change the format, or generate
+your own `YYYY-MM-DD-HH-MM-SS` stamp — the framework has already done
+that for you.
+
+If `test_run_id` is missing from your context when you need it, say so
+clearly in your response and stop. Do not fabricate one. The framework
+has a last-resort fallback that will emit a loud warning in the logs
+when this happens; your job is to flag it to the Orchestrator so the
+human-in-the-loop can intervene (also called `run_id` in some MCP
+tools — same meaning).
 
 When summarizing artifacts, cite **real filesystem paths** returned by
 MCP tools (e.g. `artifacts/{test_run_id}/jmeter/correlation_spec.json`).

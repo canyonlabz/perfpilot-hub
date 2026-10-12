@@ -144,12 +144,18 @@ agent_test_run_id_var: ContextVar[Optional[str]] = ContextVar(
 # ``test_run_id`` is set at AG-UI / A2A ingress via
 # ``ensure_test_run_id_for_inbound`` so delegate_to_specialist prefers the
 # framework-resolved ID over any LLM-invented tool argument.
-_caller_identity: dict[str, Optional[str]] = {
+_caller_identity: dict[str, Any] = {
     "user_id": None,
     "thread_id": None,
     "session_id": None,
     "task_id": None,
     "test_run_id": None,
+    # Distinct test_run_ids previously minted or persisted on the current
+    # conversation thread (newest-first). Set at Web-UI ingress by
+    # ``set_known_test_run_ids`` and consumed by ``delegate_to_specialist``
+    # for comparison-report intents so specialists see the full candidate
+    # list. Empty list = no prior candidates / not populated.
+    "known_test_run_ids": [],
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -184,12 +190,37 @@ def set_caller_identity(
     _caller_identity["test_run_id"] = test_run_id
 
 
+def set_known_test_run_ids(ids: Optional[list[str]]) -> None:
+    """Populate the thread's known ``test_run_id`` candidates.
+
+    Called at Web-UI ingress after
+    ``services.helpers.webui_resolve.resolve_test_run_id_for_webui``
+    has prefetched the candidate list from ``task_store``. Kept as a
+    dedicated setter (rather than extending ``set_caller_identity``)
+    so A2A callers that don't prefetch retain their existing wiring.
+    Passing ``None`` or an empty list clears the slot.
+
+    Args:
+        ids: Distinct ``test_run_id`` values from the thread's prior
+            tasks (newest-first). Non-string entries are filtered.
+    """
+    if not ids:
+        _caller_identity["known_test_run_ids"] = []
+        return
+    cleaned = [
+        t.strip() for t in ids
+        if isinstance(t, str) and t.strip()
+    ]
+    _caller_identity["known_test_run_ids"] = cleaned
+
+
 def clear_caller_identity() -> None:
     _caller_identity["user_id"] = None
     _caller_identity["thread_id"] = None
     _caller_identity["session_id"] = None
     _caller_identity["task_id"] = None
     _caller_identity["test_run_id"] = None
+    _caller_identity["known_test_run_ids"] = []
 
 
 # =============================================================================
@@ -531,6 +562,15 @@ async def delegate_to_specialist(
         Optional[str],
         "Optional test_run_id for correlation across the PTLC pipeline.",
     ] = None,
+    source_type: Annotated[
+        Optional[str],
+        (
+            "For script-agent delegations only: one of 'playwright', 'har', "
+            "or 'openapi'. Signals the script-source classifier so the "
+            "framework can mint a test_run_id for the new script-creation "
+            "run. Silently ignored for any other agent_name."
+        ),
+    ] = None,
 ) -> str:
     """Create and dispatch work on a specialist agent.
 
@@ -616,11 +656,58 @@ async def delegate_to_specialist(
     if spec_file and "test_spec_file" not in body:
         body["test_spec_file"] = spec_file
 
+    # Normalize + thread the optional source_type arg. Only honored
+    # for script-agent delegations; other specialists ignore it
+    # (silent debug log so operators can audit when the LLM passes
+    # it to the wrong agent).
+    source_type_normalized: Optional[str] = None
+    if isinstance(source_type, str) and source_type.strip():
+        source_type_normalized = source_type.strip().lower()
+        if agent_name == "script-agent":
+            body["source_type"] = source_type_normalized
+        else:
+            log.debug(
+                "delegate_to_specialist.source_type_ignored",
+                extra={
+                    "agent_name": agent_name,
+                    "source_type": source_type_normalized,
+                    "note": (
+                        "source_type is only honored for script-agent "
+                        "delegations; silently dropped for other agents"
+                    ),
+                },
+            )
+
+    # Comparison-report intent observability: when the LLM delegates
+    # to reporting-agent with ``comparison.test_run_ids`` on the
+    # payload, surface it in the log stream so operators can trace
+    # the end-to-end comparison flow (orchestrator → reporting-agent
+    # envelope → PerfReport MCP). The payload itself passes through
+    # unchanged via the ``body = dict(payload or {})`` shallow copy.
+    if agent_name == "reporting-agent":
+        comparison = body.get("comparison")
+        if isinstance(comparison, dict):
+            cmp_ids = comparison.get("test_run_ids")
+            if isinstance(cmp_ids, list) and cmp_ids:
+                log.info(
+                    "delegate_to_specialist.comparison_intent",
+                    extra={
+                        "agent_name": agent_name,
+                        "test_run_ids_count": len(cmp_ids),
+                    },
+                )
+
     # Framework-authoritative test_run_id resolution (A2A + Web UI):
-    #   1. ContextVar / _caller_identity (minted or reused at ingress)
-    #   2. For script-agent: mint if still missing — do NOT honor an
-    #      LLM-invented tool-arg timestamp (e.g. 2023-10-07-12-00-00)
-    #   3. For other specialists: allow tool arg / body (BlazeMeter IDs)
+    #   1. ContextVar / _caller_identity (minted or reused at ingress).
+    #   2. For script-agent WITH source_type set: mint a fresh ID when
+    #      none is on the ContextVars — this is the explicit
+    #      script-creation signal the orchestrator LLM must send.
+    #   3. For script-agent WITHOUT source_type: fall through to the
+    #      LLM-tool-arg/body-dict branch; if that also returns None,
+    #      ``_run_mcp_specialist_agent`` emits its last-resort mint
+    #      warning so operators notice the missing contract field.
+    #   4. For other specialists: allow tool arg / body (e.g. BlazeMeter
+    #      IDs that are not UTC timestamps).
     from core.test_run_id import mint_test_run_id, resolve_test_run_id
 
     framework_id = resolve_test_run_id(
@@ -629,12 +716,18 @@ async def delegate_to_specialist(
     )
     if framework_id:
         resolved_test_run_id = framework_id
-    elif agent_name == "script-agent":
+    elif agent_name == "script-agent" and source_type_normalized:
         resolved_test_run_id = mint_test_run_id()
         log.info(
-            "delegate_to_specialist: script-agent with no framework "
-            "test_run_id; minted %s (ignoring LLM tool arg)",
-            resolved_test_run_id,
+            "delegate_to_specialist.script_agent_mint",
+            extra={
+                "test_run_id": resolved_test_run_id,
+                "source_type": source_type_normalized,
+                "note": (
+                    "script-agent delegation with explicit source_type; "
+                    "minted authoritative test_run_id (ignoring LLM tool arg)"
+                ),
+            },
         )
     else:
         resolved_test_run_id = resolve_test_run_id(
