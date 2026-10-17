@@ -30,6 +30,7 @@ from core.test_run_id import (
     OUTCOME_MINT,
     OUTCOME_REJECT,
     REASON_MISSING_TEST_RUN_ID,
+    is_performance_test_start_request,
     resolve_test_run_id_outcome,
 )
 from services.helpers.input_required_msgs import compose_input_required_question
@@ -59,7 +60,10 @@ async def resolve_test_run_id_or_signal_input_required(
                         receives its ID later from the MCP tool result
                         and persists it via ``set_test_run_id``.
       * ``reject``    — raise ``TaskInputRequiredSignal`` with the
-                        composed question text and reasonCode.
+                        composed question text and reasonCode, **unless**
+                        this is a performance-test *start* request
+                        (vendor mints ``run_id`` after start; allow
+                        ``None`` and adopt it later).
 
     Args:
         task: The orchestrator task currently executing.
@@ -73,10 +77,11 @@ async def resolve_test_run_id_or_signal_input_required(
 
     Returns:
         The authoritative ``test_run_id`` for reuse/mint, or ``None``
-        for the skip_mint case.
+        for skip_mint and for start-test allow-null.
 
     Raises:
-        TaskInputRequiredSignal: when the resolver outcome is ``reject``.
+        TaskInputRequiredSignal: when the resolver outcome is ``reject``
+            and the request is not a performance-test start.
     """
     inbound_payload = task.payload if isinstance(task.payload, dict) else None
     if inbound_payload is not None and getattr(task, "test_run_id", None):
@@ -103,14 +108,30 @@ async def resolve_test_run_id_or_signal_input_required(
                 extra={"thread_id": thread_id},
             )
 
+    parts = inbound_payload.get("parts") if inbound_payload else None
     outcome = resolve_test_run_id_outcome(
         payload=inbound_payload,
         user_text=user_message,
-        parts=(inbound_payload.get("parts") if inbound_payload else None),
+        parts=parts,
         thread_test_run_ids=thread_candidates or None,
     )
 
     if outcome.outcome == OUTCOME_REJECT:
+        # Start-test: BlazeMeter (or future vendor) creates run_id only
+        # after start. Do not mint a timestamp and do not pause for
+        # input_required — return None; execution-agent adopts the
+        # vendor run_id onto the task row when start succeeds.
+        if is_performance_test_start_request(
+            user_text=user_message,
+            parts=parts,
+            payload=inbound_payload,
+        ):
+            log.info(
+                "test_run_id_resolver.start_test_allow_null",
+                extra={"task_id": str(task.task_id)},
+            )
+            return None
+
         reason_code = outcome.reason_code or REASON_MISSING_TEST_RUN_ID
         question_text = compose_input_required_question(
             reason_code=reason_code,

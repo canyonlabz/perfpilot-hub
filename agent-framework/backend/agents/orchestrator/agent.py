@@ -698,7 +698,7 @@ async def delegate_to_specialist(
                 )
 
     # Framework-authoritative test_run_id resolution (A2A + Web UI):
-    #   1. ContextVar / _caller_identity (minted or reused at ingress).
+    #   1. _caller_identity / ContextVar (minted or reused at ingress).
     #   2. For script-agent WITH source_type set: mint a fresh ID when
     #      none is on the ContextVars — this is the explicit
     #      script-creation signal the orchestrator LLM must send.
@@ -711,8 +711,8 @@ async def delegate_to_specialist(
     from core.test_run_id import mint_test_run_id, resolve_test_run_id
 
     framework_id = resolve_test_run_id(
-        agent_test_run_id_var.get(),
         _caller_identity.get("test_run_id"),
+        agent_test_run_id_var.get(),
     )
     if framework_id:
         resolved_test_run_id = framework_id
@@ -855,6 +855,32 @@ async def _delegate_via_a2a(
 # Tool 3 (PBI 3.7.5): check_task_status
 # =============================================================================
 
+def _adopt_test_run_id_from_start_result(result: Any) -> Optional[str]:
+    """Update delegation context when a successful start returns its vendor ID."""
+    if not isinstance(result, dict):
+        return None
+    if (
+        result.get("agent") != "execution-agent"
+        or result.get("tool") != "start_performance_test"
+    ):
+        return None
+
+    tool_result = result.get("tool_result")
+    test_run_id = result.get("test_run_id")
+    if (
+        not isinstance(tool_result, dict)
+        or tool_result.get("ok") is not True
+        or not isinstance(test_run_id, str)
+        or not test_run_id.strip()
+    ):
+        return None
+
+    adopted = test_run_id.strip()
+    agent_test_run_id_var.set(adopted)
+    _caller_identity["test_run_id"] = adopted
+    return adopted
+
+
 async def check_task_status(
     agent_name: Annotated[str, "Specialist agent that owns the task."],
     task_id: Annotated[str, "UUID of a previously-delegated task."],
@@ -889,6 +915,8 @@ async def check_task_status(
             "ok": False,
             "error": {"type": "NotFound", "message": f"Task {task_id} not found."},
         })
+
+    _adopt_test_run_id_from_start_result(task_row.get("result"))
 
     return json.dumps({
         "ok": True,

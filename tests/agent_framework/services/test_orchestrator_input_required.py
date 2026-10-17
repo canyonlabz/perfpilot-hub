@@ -296,6 +296,82 @@ async def test_resolve_signals_input_required_when_no_id_and_no_source_type(
     assert sig.reason_data is None
 
 
+async def test_resolve_allow_null_for_start_test_prose(
+    task_store_mock: dict[str, list],
+) -> None:
+    """Start-test has no test_run_id until the vendor returns run_id —
+    do not raise INPUT_REQUIRED; return None so execution can proceed."""
+    task = _make_task(payload={})
+
+    result = await test_run_id_resolver.resolve_test_run_id_or_signal_input_required(
+        task,
+        user_message=(
+            "Can you run a BlazeMeter test with this test ID 14493190? "
+            "This is a 10-user load test against the BlazeDemo product store."
+        ),
+        thread_id=None,
+    )
+
+    assert result is None
+    assert task_store_mock["set_test_run_id"] == []
+    assert task_store_mock["mark_input_required"] == []
+
+
+async def test_resolve_allow_null_for_start_performance_test_tool_payload(
+    task_store_mock: dict[str, list],
+) -> None:
+    task = _make_task(
+        payload={
+            "tool": "start_performance_test",
+            "args": {"test_id": "14493190"},
+        }
+    )
+
+    result = await test_run_id_resolver.resolve_test_run_id_or_signal_input_required(
+        task, user_message=None, thread_id=None,
+    )
+
+    assert result is None
+    assert task_store_mock["set_test_run_id"] == []
+
+
+async def test_resolve_allow_null_for_first_part_start_test_metadata(
+    task_store_mock: dict[str, list],
+) -> None:
+    task = _make_task(
+        payload={
+            "parts": [
+                {"text": "start this test", "metadata": {"task": "start_test"}},
+                {"text": "test details"},
+            ]
+        }
+    )
+
+    result = await test_run_id_resolver.resolve_test_run_id_or_signal_input_required(
+        task, user_message=None, thread_id=None,
+    )
+
+    assert result is None
+    assert task_store_mock["set_test_run_id"] == []
+    assert task_store_mock["mark_input_required"] == []
+
+
+async def test_resolve_still_signals_for_post_test_without_id(
+    task_store_mock: dict[str, list],
+) -> None:
+    """Post-test flows (analyze / extract) still ask for a test_run_id."""
+    task = _make_task(payload={})
+
+    with pytest.raises(TaskInputRequiredSignal) as exc_info:
+        await test_run_id_resolver.resolve_test_run_id_or_signal_input_required(
+            task,
+            user_message="analyze jmeter log for the last run",
+            thread_id=None,
+        )
+
+    assert exc_info.value.reason_code == "missing_test_run_id"
+
+
 async def test_resolve_signals_for_unknown_source_type_like_blazemeter(
     task_store_mock: dict[str, list],
 ) -> None:

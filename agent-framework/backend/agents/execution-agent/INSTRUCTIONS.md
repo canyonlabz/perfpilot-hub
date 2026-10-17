@@ -182,9 +182,13 @@ keep both in sync if either changes.
 MCP tool: blazemeter_get_run_results(run_id=test_run_id)
 ```
 
-**Capture from the response:** `start_time`, `end_time`, `sessionsId`
-(the list of BlazeMeter session IDs participating in this run — single
-for a 1-worker run, multiple for multi-worker / distributed runs).
+**Capture from the response:** `start_time`, `end_time`, `sessions_id`
+(also returned as `sessionsId` by some BlazeMeter payloads) — the full
+**list** of BlazeMeter session IDs participating in this run. There is
+**one session ID per load generator** (a single-generator run returns a
+one-element list; multi-generator / distributed runs return multiple).
+Persist the full list on the return JSON's top-level `sessions_id` field
+so later retries or pass-through calls can reuse it without re-fetching.
 
 If `start_time` or `end_time` cannot be parsed, record that fact in the
 return JSON's `notes` field and continue. Step 5 (aggregate report) may
@@ -402,7 +406,8 @@ object of this exact shape (matches `.cursor/agents/blazemeter-extractor.md`):
 {
   "subagent": "execution-agent",
   "status": "success | partial | failed",
-  "test_run_id": "<test_run_id>",
+  "test_run_id": "<test_run_id — same value as the BlazeMeter run_id>",
+  "sessions_id": ["<opaque BlazeMeter session id per load generator>"],
   "start_time": "<ISO 8601 UTC or null if unavailable>",
   "end_time":   "<ISO 8601 UTC or null if unavailable>",
   "mcp_artifacts_base_path": "<absolute base from get_artifacts_path() - diagnostic only; the agent never reads or writes this path>",

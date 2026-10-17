@@ -259,8 +259,23 @@ def test_mint_normalizes_source_type_case() -> None:
 def test_mint_for_webui_prose_hint_when_metadata_absent() -> None:
     """Web-UI chat path has no A2A metadata; prose heuristic takes over."""
     result = trid.resolve_test_run_id_outcome(
-        user_text="please create a JMeter script from the HAR I'll upload",
+        user_text="please create a script from the HAR I'll upload",
     )
+    assert result.outcome == trid.OUTCOME_MINT
+    assert result.id is not None
+    assert _TRID_FORMAT_RE.match(result.id)
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "generate a JMeter script",
+        "create a JMeter script please",
+        "generate jmx",
+    ],
+)
+def test_mint_for_verb_qualified_jmeter_creation(user_text: str) -> None:
+    result = trid.resolve_test_run_id_outcome(user_text=user_text)
     assert result.outcome == trid.OUTCOME_MINT
     assert result.id is not None
     assert _TRID_FORMAT_RE.match(result.id)
@@ -270,7 +285,7 @@ def test_mint_writes_back_to_payload_when_payload_is_dict() -> None:
     payload: dict = {}
     result = trid.resolve_test_run_id_outcome(
         payload=payload,
-        user_text="generate a JMeter script",
+        user_text="generate a script",
     )
     assert result.outcome == trid.OUTCOME_MINT
     assert payload["test_run_id"] == result.id
@@ -279,7 +294,7 @@ def test_mint_writes_back_to_payload_when_payload_is_dict() -> None:
 def test_mint_does_not_write_back_when_payload_is_none() -> None:
     """Mint path must be defensive for callers that pass no payload."""
     result = trid.resolve_test_run_id_outcome(
-        user_text="generate a JMeter script",
+        user_text="generate a script",
     )
     assert result.outcome == trid.OUTCOME_MINT
     assert result.id is not None
@@ -383,6 +398,85 @@ def test_reject_for_unknown_source_type_like_blazemeter() -> None:
     assert result.outcome == trid.OUTCOME_REJECT
 
 
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "Can you run a BlazeMeter test with this test ID 14493190? "
+        "This is a 10-user load test against the BlazeDemo product store.",
+        "analyze jmeter log for the last run",
+        "please edit the jmx script",
+        "help with correlation naming",
+        "analyze network capture for failures",
+    ],
+)
+def test_reject_ambiguous_prose_does_not_mint(user_text: str) -> None:
+    """Bare product names / edit-analyze verbs must not mint a timestamp."""
+    result = trid.resolve_test_run_id_outcome(user_text=user_text)
+    assert result.outcome == trid.OUTCOME_REJECT
+    assert result.id is None
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "Run test 14493190 using the existing HAR script",
+        "Start BlazeMeter test 14493190 using the existing HAR script",
+        "Run BlazeMeter test 14493190 and share the public report",
+    ],
+)
+def test_start_detection_prevents_script_creation_mint(user_text: str) -> None:
+    result = trid.resolve_test_run_id_outcome(user_text=user_text)
+    assert result.outcome == trid.OUTCOME_REJECT
+    assert result.id is None
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "Analyze the last run of test 14493190",
+        "Show the last run results for test 14493190",
+    ],
+)
+def test_is_performance_test_start_request_ignores_post_test_references(
+    user_text: str,
+) -> None:
+    assert not trid.is_performance_test_start_request(user_text=user_text)
+
+
+def test_is_performance_test_start_request_from_tool_payload() -> None:
+    assert trid.is_performance_test_start_request(
+        payload={"tool": "start_performance_test", "args": {"test_id": "14493190"}},
+    )
+
+
+def test_is_performance_test_start_request_from_prose_with_test_id() -> None:
+    assert trid.is_performance_test_start_request(
+        user_text=(
+            "Can you run a BlazeMeter test with this test ID 14493190? "
+            "This is a 10-user load test against the BlazeDemo product store."
+        ),
+    )
+
+
+def test_is_performance_test_start_request_from_first_part_metadata() -> None:
+    payload = {
+        "parts": [
+            {"text": "start test", "metadata": {"task": "start_test"}},
+            {"text": "details"},
+        ]
+    }
+    assert trid.is_performance_test_start_request(payload=payload)
+
+
+def test_is_performance_test_start_request_false_for_post_test() -> None:
+    assert not trid.is_performance_test_start_request(
+        user_text="analyze jmeter log for run 83636431",
+    )
+    assert not trid.is_performance_test_start_request(
+        payload={"tool": "extract_test_run_artifacts", "args": {"test_run_id": "83636431"}},
+    )
+
+
 def test_reject_carries_candidate_ids_from_thread() -> None:
     result = trid.resolve_test_run_id_outcome(
         payload={},
@@ -449,7 +543,7 @@ def test_ensure_inbound_returns_bare_str_on_reuse() -> None:
 
 def test_ensure_inbound_returns_minted_str_on_mint() -> None:
     result = trid.ensure_test_run_id_for_inbound(
-        user_text="create a JMeter script please",
+        user_text="create a script please",
     )
     assert isinstance(result, str)
     assert _TRID_FORMAT_RE.match(result)

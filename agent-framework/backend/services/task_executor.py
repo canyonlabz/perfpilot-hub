@@ -1347,6 +1347,53 @@ async def _load_specialist_module(agent_name: str) -> Any:
         return module
 
 
+async def _adopt_vendor_run_id_after_start(
+    task: task_store.AgentTask,
+    tool_result: dict,
+) -> Optional[str]:
+    """Persist vendor ``run_id`` as framework ``test_run_id`` after start.
+
+    Returns the adopted ID, or ``None`` when the tool result is not a
+    successful start with a usable ``run_id``.
+    """
+    if not tool_result.get("ok"):
+        return None
+    run_id = tool_result.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        return None
+    adopted = run_id.strip()
+    try:
+        await task_store.set_test_run_id(task.task_id, adopted)
+    except Exception:
+        log.exception(
+            "execution_agent.adopt_vendor_run_id.failed",
+            extra={"task_id": str(task.task_id), "test_run_id": adopted},
+        )
+        # Still return the ID so the envelope carries it even if the
+        # DB write failed — downstream LLM context can use it.
+        return adopted
+    log.info(
+        "execution_agent.adopt_vendor_run_id",
+        extra={"task_id": str(task.task_id), "test_run_id": adopted},
+    )
+    return adopted
+
+
+def _extract_sessions_id_from_mcp_payload(payload: Any) -> list[str]:
+    """Pull the load-generator ``sessions_id`` list from an MCP result."""
+    data = payload
+    if isinstance(data, dict) and "result" in data and isinstance(data["result"], dict):
+        data = data["result"]
+    if not isinstance(data, dict):
+        return []
+    sid = data.get("sessions_id") or data.get("sessionsId") or []
+    if isinstance(sid, (list, tuple)):
+        return [str(x) for x in sid if x is not None and str(x).strip()]
+    if isinstance(sid, str) and sid.strip():
+        return [sid.strip()]
+    return []
+
+
 async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict:
     """Dispatch the task payload's `tool` to the matching execution-agent function.
 
@@ -1363,9 +1410,9 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
     field is the explicit dispatch key read directly here. The `action`
     field is a free-form course-of-action label echoed into the result
     envelope for audit / traceability (e.g. distinguishing a "fresh_run"
-    from a "retest" that reuses an existing run_id). `test_run_id` is
-    the PerfPilot artifact-folder key that travels through the whole
-    pipeline (NOT the BlazeMeter run_id, which the tools mint themselves).
+    from a "retest" that reuses an existing run_id). After a successful
+    `start_performance_test`, the vendor `run_id` **is** the framework
+    `test_run_id` (same value; artifact folders use that ID).
 
     Return envelope (always the same shape, success or failure)::
 
@@ -1455,7 +1502,10 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
             TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
         )
         try:
-            mcp_result = await _call_mcp_tool_passthrough(tool, args)
+            if tool == "blazemeter_process_session_artifacts":
+                mcp_result = await _passthrough_process_session_artifacts(args)
+            else:
+                mcp_result = await _call_mcp_tool_passthrough(tool, args)
         except Exception as exc:
             log.exception("MCP pass-through failed for tool %s", tool)
             envelope["tool_result"] = {
@@ -1555,6 +1605,16 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         TaskEvent(status="running", progress=f"tool_complete:{tool}", **common),
     )
     envelope["tool_result"] = tool_result
+
+    # After a successful start, the vendor run_id IS the framework
+    # test_run_id. Persist it on the task row and echo it in the
+    # envelope so later turns (Web UI thread prefetch / A2A context)
+    # reuse the same ID for artifact extraction.
+    if tool == "start_performance_test" and isinstance(tool_result, dict):
+        adopted = await _adopt_vendor_run_id_after_start(task, tool_result)
+        if adopted:
+            envelope["test_run_id"] = adopted
+
     return envelope
 
 
@@ -2672,3 +2732,83 @@ async def _call_mcp_tool_passthrough(tool_name: str, args: dict) -> dict:
             },
             "attempts": max_attempts,
         }
+
+
+async def _passthrough_process_session_artifacts(args: dict) -> dict:
+    """Pass-through for ``blazemeter_process_session_artifacts``.
+
+    The MCP tool requires both ``run_id`` and ``sessions_id`` (list; one
+    entry per load generator). When the orchestrator omits
+    ``sessions_id``, fetch it via ``blazemeter_get_run_results`` first
+    rather than sending an incomplete call that fails pydantic validation.
+    """
+    run_id = args.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        return {
+            "ok": False,
+            "tool": "blazemeter_process_session_artifacts",
+            "error": {
+                "type": "InvalidArgs",
+                "message": (
+                    "blazemeter_process_session_artifacts requires "
+                    "args.run_id (string)."
+                ),
+            },
+            "attempts": 0,
+        }
+
+    sessions_id = args.get("sessions_id")
+    if isinstance(sessions_id, (list, tuple)):
+        sessions_id = [str(x) for x in sessions_id if x is not None and str(x).strip()]
+    elif isinstance(sessions_id, str) and sessions_id.strip():
+        sessions_id = [sessions_id.strip()]
+    else:
+        sessions_id = []
+
+    if not sessions_id:
+        summary = await _call_mcp_tool_passthrough(
+            "blazemeter_get_run_results",
+            {"run_id": run_id.strip()},
+        )
+        if not summary.get("ok"):
+            return {
+                "ok": False,
+                "tool": "blazemeter_process_session_artifacts",
+                "error": {
+                    "type": "MissingSessionsId",
+                    "message": (
+                        "sessions_id was not provided and "
+                        "blazemeter_get_run_results failed while "
+                        "auto-fetching it."
+                    ),
+                    "upstream": summary.get("error"),
+                },
+                "attempts": summary.get("attempts", 0),
+            }
+        sessions_id = _extract_sessions_id_from_mcp_payload(summary.get("result"))
+        if not sessions_id:
+            return {
+                "ok": False,
+                "tool": "blazemeter_process_session_artifacts",
+                "error": {
+                    "type": "MissingSessionsId",
+                    "message": (
+                        "sessions_id was not provided and "
+                        "blazemeter_get_run_results returned no "
+                        "sessions_id list for this run_id."
+                    ),
+                },
+                "attempts": summary.get("attempts", 0),
+            }
+        log.info(
+            "execution_agent.passthrough.autofetch_sessions_id",
+            extra={
+                "run_id": run_id.strip(),
+                "sessions_count": len(sessions_id),
+            },
+        )
+
+    return await _call_mcp_tool_passthrough(
+        "blazemeter_process_session_artifacts",
+        {"run_id": run_id.strip(), "sessions_id": sessions_id},
+    )
