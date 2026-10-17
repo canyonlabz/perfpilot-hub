@@ -321,20 +321,21 @@ def is_performance_test_start_request(
         if parts is None and isinstance(nested_parts, list):
             parts = nested_parts
 
-    if isinstance(parts, Sequence) and len(parts) >= 2:
-        meta = parts[1].get("metadata") if isinstance(parts[1], Mapping) else None
-        if isinstance(meta, Mapping):
-            for key in ("tool", "task", "task_type"):
-                val = meta.get(key)
-                if isinstance(val, str):
-                    normalized = val.strip().lower().replace("-", "_")
-                    if normalized in {
-                        "start_performance_test",
-                        "start_test",
-                        "start_blazemeter_test",
-                        "run_performance_test",
-                    }:
-                        return True
+    if isinstance(parts, Sequence):
+        for part in parts[:2]:
+            meta = part.get("metadata") if isinstance(part, Mapping) else None
+            if isinstance(meta, Mapping):
+                for key in ("tool", "task", "task_type"):
+                    val = meta.get(key)
+                    if isinstance(val, str):
+                        normalized = val.strip().lower().replace("-", "_")
+                        if normalized in {
+                            "start_performance_test",
+                            "start_test",
+                            "start_blazemeter_test",
+                            "run_performance_test",
+                        }:
+                            return True
 
     if isinstance(user_text, str) and user_text.strip():
         if _START_TEST_PROSE_RE.search(user_text) and _TEST_ID_IN_TEXT_RE.search(
