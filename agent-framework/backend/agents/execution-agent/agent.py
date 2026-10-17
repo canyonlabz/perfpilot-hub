@@ -996,6 +996,7 @@ async def _extract_test_run_artifacts_with_client(
     result["start_time"] = parsed["start_time"]
     result["end_time"] = parsed["end_time"]
     sessions_id = parsed["sessions_id"]
+    result["sessions_id"] = list(sessions_id) if sessions_id else []
     if parsed.get("warnings"):
         notes.extend(parsed["warnings"])
 
@@ -1274,6 +1275,7 @@ def _new_extraction_result(test_run_id: str) -> dict:
         "subagent": "execution-agent",
         "status": "failed",  # default; overridden on success/partial
         "test_run_id": test_run_id,
+        "sessions_id": [],  # full list from get_run_results (one per load generator)
         "start_time": None,
         "end_time": None,
         "mcp_artifacts_base_path": None,

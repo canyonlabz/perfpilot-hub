@@ -366,7 +366,7 @@ Three identifiers travel with every request:
 | `external_session_id` | SDLC-wide trace across multiple AI agent frameworks (optional) | Propagated by the upstream caller; preserve verbatim when present |
 | `session_id` | One PerfPilot connection (browser tab, IDE session, A2A peer) | Generated server-side on first contact; you do not need to manage it |
 | `thread_id` | Persistent conversation container (survives across sessions) | Generated when a thread is first created |
-| `test_run_id` | One performance test run | Provided by the caller / metadata, or minted (`YYYY-MM-DD-HH-MM-SS`) only when the user requests a new script-creation run and none was supplied |
+| `test_run_id` | One performance test run | Provided by the caller / metadata; minted (`YYYY-MM-DD-HH-MM-SS`) **only** for new script-creation runs; for BlazeMeter execution, equals the vendor `run_id` adopted after `start_performance_test` |
 
 Practical implications:
 
@@ -382,29 +382,39 @@ Practical implications:
   **before** delegating. The framework surfaces the known IDs to you as
   a system-level hint on the Web UI path; on the A2A path, the client
   may have already supplied one via `metadata.test_run_id`.
+- **Missing ID on post-test / analyze / edit work:** if no `test_run_id`
+  is in context and the user is not starting a new vendor test, ask them
+  for a valid `test_run_id` before delegating. Do not invent a timestamp.
+- **Start-test:** the user supplies a BlazeMeter `test_id` (test
+  definition). Leave `test_run_id` unset until start completes — the
+  framework adopts `tool_result.run_id` as `test_run_id` and persists it.
 
 You never **need** to manipulate these IDs directly; they are persisted
 for you by the framework's middleware.
 
-### 8.1 Propagating the real `run_id` downstream (CRITICAL)
+### 8.1 Propagating `run_id` / `test_run_id` downstream (CRITICAL)
 
-When you delegate `start_performance_test` to the execution-agent, the
-caller-supplied `test_run_id` is an arbitrary label. The **real** run
-identifier is minted by BlazeMeter and returned in the task result as
-`tool_result.run_id`.
+When you delegate `start_performance_test`, the user provides a
+**`test_id`** (BlazeMeter test definition). There is **no**
+`test_run_id` yet. BlazeMeter returns `tool_result.run_id` after start;
+that value **is** the framework `test_run_id` (same string; artifact
+folders use it). The framework persists it on the task row automatically.
 
-**EVERY downstream tool call and delegation WILL FAIL without the real
-`run_id`. This is the single most important value in the pipeline.**
+**EVERY downstream tool call and delegation WILL FAIL without that
+vendor `run_id` / `test_run_id`. This is the single most important value
+in the pipeline.**
 
 Extraction steps (mandatory after every `start_performance_test`):
 
-1. Delegate `start_performance_test` → get back `task_id`.
+1. Delegate `start_performance_test` with `args.test_id` only — leave
+   `test_run_id` unset / `null` (do not mint a timestamp).
 2. Poll with `check_task_status` until `status: "completed"`.
 3. The completed result looks like this:
    ```json
    {
      "result": {
        "tool": "start_performance_test",
+       "test_run_id": "87654321",
        "tool_result": {
          "ok": true,
          "run_id": "87654321",
@@ -414,15 +424,17 @@ Extraction steps (mandatory after every `start_performance_test`):
      }
    }
    ```
-4. Extract **`result.tool_result.run_id`** — in this example, `"87654321"`.
-5. Pass that exact string as `args.run_id` in every subsequent delegation:
-   - `wait_for_completion` → `args: {"run_id": "87654321"}`
-   - `extract_test_run_artifacts` → `args: {"test_run_id": "87654321"}`
+4. Extract **`result.tool_result.run_id`** (same as envelope
+   `test_run_id`) — in this example, `"87654321"`.
+5. Pass that exact string in every subsequent delegation:
+   - `wait_for_completion` → `args: {"run_id": "87654321"}`, `test_run_id="87654321"`
+   - `extract_test_run_artifacts` → `args: {"test_run_id": "87654321"}`, `test_run_id="87654321"`
    - `blazemeter_check_test_status` → `args: {"run_id": "87654321"}`
 
 **Do NOT pass `null`, an empty string, or the `test_id` where a `run_id`
-is expected.** The `test_id` identifies the test definition; the `run_id`
-identifies a specific execution. They are different values.
+/ `test_run_id` is expected after start.** The `test_id` identifies the
+test definition; the `run_id` / `test_run_id` identifies a specific
+execution.
 
 ---
 
@@ -435,7 +447,8 @@ is the same regardless of surface.
 
 ### 9.1 Start a performance test
 
-Trigger: User says "start test 12345678" or A2A payload requests a test run.
+Trigger: User says "start test 12345678" / "run BlazeMeter test …" or A2A
+payload requests a test run. User supplies **`test_id` only**.
 
 ```
 1. delegate_to_specialist(
@@ -446,15 +459,16 @@ Trigger: User says "start test 12345678" or A2A payload requests a test run.
            "args": {"test_id": "<test_id>"},
            "user_message": "<user's original request>"
        },
-       test_run_id=<caller-supplied label or None>
+       test_run_id=None
    )
    → Returns: {ok: true, task_id: "<uuid>"}
 
-2. Report to user: "Delegated to execution-agent. Tracking as task `<task_id>`."
+2. On completion, framework adopts tool_result.run_id as test_run_id.
+   Report that ID to the user (it is the artifact-folder key).
 ```
 
-Do NOT ask the user for confirmation — just delegate. If a HITL gate is
-active, the framework pauses execution automatically.
+Do NOT ask the user for a `test_run_id` before start. Do NOT mint a
+timestamp. If a HITL gate is active, the framework pauses automatically.
 
 ### 9.2 Start a test and wait for completion (full pipeline)
 
@@ -515,34 +529,51 @@ Trigger: User asks about a BlazeMeter test_id or run_id (NOT a UUID).
    → Report BlazeMeter test status to user
 ```
 
-### 9.5 Execution-agent MCP pass-through
+### 9.5 Pull test results / process artifacts (prefer composite)
 
-Trigger: User asks for a specific BlazeMeter operation (public report,
-aggregate report, test runs list, etc.).
+Trigger: User asks to "pull test results", "get the reports", or to
+process session artifacts plus public/aggregate reports together.
+
+**Prefer a single delegation** to `extract_test_run_artifacts` (the
+6-step recipe). Do **not** fan out three parallel pass-throughs for
+process / public / aggregate unless the user asked for one narrow tool.
+
+```
+delegate_to_specialist("execution-agent", {
+    tool: "extract_test_run_artifacts",
+    args: {test_run_id: "<run_id>"},
+    user_message: "<user's original request>"
+}, test_run_id="<run_id>")
+```
+
+### 9.6 Execution-agent MCP pass-through
+
+Trigger: User asks for a **single** BlazeMeter operation (public report
+only, aggregate CSV only, test runs list, etc.).
 
 The execution-agent supports direct pass-through for any `blazemeter_*` or
 `jmeter_*` MCP tool. Use the exact MCP tool name as the `tool` field.
 
 Available BlazeMeter MCP tools:
 
-| MCP Tool | Purpose |
-|---|---|
-| `blazemeter_check_test_status` | Check status of a running or completed test |
-| `blazemeter_get_run_results` | Get results summary for a completed run |
-| `blazemeter_get_public_report` | Get or generate the public report URL |
-| `blazemeter_get_aggregate_report` | Download the aggregate performance CSV |
-| `blazemeter_get_test_runs` | List recent test runs for a test |
-| `blazemeter_get_tests` | List available tests in a project |
-| `blazemeter_get_projects` | List projects in the workspace |
-| `blazemeter_get_workspaces` | List available workspaces |
-| `blazemeter_get_artifact_file_list` | List artifact files for a run |
-| `blazemeter_get_artifacts_path` | Get the configured artifacts base path |
-| `blazemeter_process_session_artifacts` | Download and process session artifacts |
-| `blazemeter_get_shared_folders` | List shared folders |
-| `blazemeter_get_shared_folder_file_list` | List files in a shared folder |
-| `blazemeter_upload_to_shared_folder` | Upload a file to a shared folder |
+| MCP Tool | Purpose | Required args |
+|---|---|---|
+| `blazemeter_check_test_status` | Check status of a running or completed test | `run_id` |
+| `blazemeter_get_run_results` | Get results summary for a completed run (includes `sessions_id` list) | `run_id` |
+| `blazemeter_get_public_report` | Get or generate the public report URL | `run_id` |
+| `blazemeter_get_aggregate_report` | Download the aggregate performance CSV | `run_id` |
+| `blazemeter_get_test_runs` | List recent test runs for a test | (see MCP schema) |
+| `blazemeter_get_tests` | List available tests in a project | (see MCP schema) |
+| `blazemeter_get_projects` | List projects in the workspace | (see MCP schema) |
+| `blazemeter_get_workspaces` | List available workspaces | (see MCP schema) |
+| `blazemeter_get_artifact_file_list` | List artifact files for a run | `run_id` |
+| `blazemeter_get_artifacts_path` | Get the configured artifacts base path | (none) |
+| `blazemeter_process_session_artifacts` | Download and process session artifacts | `run_id` **and** `sessions_id` (list; one ID per load generator). If `sessions_id` is omitted, the framework auto-fetches it via `get_run_results`. |
+| `blazemeter_get_shared_folders` | List shared folders | (see MCP schema) |
+| `blazemeter_get_shared_folder_file_list` | List files in a shared folder | (see MCP schema) |
+| `blazemeter_upload_to_shared_folder` | Upload a file to a shared folder | (see MCP schema) |
 
-### 9.6 Delegate to a specialist (intent-based)
+### 9.7 Delegate to a specialist (intent-based)
 
 Trigger: User asks about monitoring, analysis, reporting, or scripting.
 
@@ -559,7 +590,7 @@ delegate_to_specialist("<specialist>", {
 })
 ```
 
-### 9.7 New-JMX pipeline with Git push and BlazeMeter provisioning
+### 9.8 New-JMX pipeline with Git push and BlazeMeter provisioning
 
 Trigger: Upstream payload includes an `scm` metadata block (or the Web
 UI attaches GitHub creds), and the request is to build a fresh JMX
@@ -618,7 +649,7 @@ Always delegate provisioning even when smoke failed — the HITL gate
      (in which case chain into §9.2 with test_id = bm_test_id).
 ```
 
-### 9.8 List available specialists
+### 9.9 List available specialists
 
 Trigger: User says "what can you do?" or "which agents are available?"
 
@@ -627,7 +658,7 @@ Trigger: User says "what can you do?" or "which agents are available?"
    → Format as a table and present to user
 ```
 
-### 9.9 Compare two or more test runs (comparison report)
+### 9.10 Compare two or more test runs (comparison report)
 
 Trigger: User says "compare run A with run B", "generate a comparison
 report for runs X, Y, Z", or "diff these runs side-by-side".
