@@ -335,6 +335,27 @@ async def test_resolve_allow_null_for_start_performance_test_tool_payload(
     assert task_store_mock["set_test_run_id"] == []
 
 
+async def test_resolve_allow_null_for_first_part_start_test_metadata(
+    task_store_mock: dict[str, list],
+) -> None:
+    task = _make_task(
+        payload={
+            "parts": [
+                {"text": "start this test", "metadata": {"task": "start_test"}},
+                {"text": "test details"},
+            ]
+        }
+    )
+
+    result = await test_run_id_resolver.resolve_test_run_id_or_signal_input_required(
+        task, user_message=None, thread_id=None,
+    )
+
+    assert result is None
+    assert task_store_mock["set_test_run_id"] == []
+    assert task_store_mock["mark_input_required"] == []
+
+
 async def test_resolve_still_signals_for_post_test_without_id(
     task_store_mock: dict[str, list],
 ) -> None:

@@ -75,6 +75,11 @@ _SCRIPT_CREATION_HINTS = (
     "generate script",
     "script creation",
 )
+_JMX_CREATION_RE = re.compile(
+    r"\b(?:create|generate)\s+(?:(?:a|an|the)\s+)?"
+    r"(?:jmeter\s+script|jmx(?:\s+script)?)\b",
+    re.IGNORECASE,
+)
 
 # A2A Part media types that imply inbound test-spec / script-creation content.
 _SCRIPT_CREATION_MEDIA_TYPES = frozenset({
@@ -257,7 +262,10 @@ def is_script_creation_request(
 
     if isinstance(user_text, str) and user_text.strip():
         lowered = user_text.lower()
-        if any(hint in lowered for hint in _SCRIPT_CREATION_HINTS):
+        if _JMX_CREATION_RE.search(user_text) or any(
+            re.search(rf"(?<!\w){re.escape(hint)}(?!\w)", lowered)
+            for hint in _SCRIPT_CREATION_HINTS
+        ):
             return True
 
     return False
@@ -267,7 +275,8 @@ def is_script_creation_request(
 # A2A ingress can allow a null test_run_id (BlazeMeter mints run_id on
 # start) instead of raising TASK_STATE_INPUT_REQUIRED.
 _START_TEST_PROSE_RE = re.compile(
-    r"\b(?:start|run|launch|kick\s*off|trigger)\b.{0,80}\b(?:test|blazemeter|load\s*test)\b",
+    r"\b(?:start|launch|kick\s*off|trigger)\b.{0,80}\b(?:test|blazemeter|load\s*test)\b"
+    r"|\b(?:run|execute)\b(?:(?!\b(?:of|results?)\b).){0,40}\b(?:test|blazemeter)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _TEST_ID_IN_TEXT_RE = re.compile(
@@ -294,8 +303,8 @@ def is_performance_test_start_request(
       * Payload ``tool == "start_performance_test"``
       * Payload ``args.test_id`` / top-level ``test_id`` with start-ish
         ``action`` (``fresh_run``, ``retest``, ``start``, …)
-      * A2A ``parts[1].metadata.tool`` / ``task`` / ``task_type`` naming
-        start_performance_test / start_test
+      * A2A ``parts[0]`` or ``parts[1]`` metadata ``tool`` / ``task`` /
+        ``task_type`` naming start_performance_test / start_test
       * User prose that both (a) asks to start/run a test and (b)
         mentions a numeric test id
     """
@@ -321,7 +330,7 @@ def is_performance_test_start_request(
         if parts is None and isinstance(nested_parts, list):
             parts = nested_parts
 
-    if isinstance(parts, Sequence):
+    if isinstance(parts, Sequence) and not isinstance(parts, (str, bytes)):
         for part in parts[:2]:
             meta = part.get("metadata") if isinstance(part, Mapping) else None
             if isinstance(meta, Mapping):
@@ -499,9 +508,18 @@ def resolve_test_run_id_outcome(
         )
         return ResolveResult(id=None, outcome=OUTCOME_SKIP_MINT)
 
+    # Start requests must wait for the vendor's run_id, even when their
+    # prose mentions a script format or contains a word matching a script
+    # creation hint. The ingress wrapper maps this reject to allow-null.
+    is_start_request = is_performance_test_start_request(
+        user_text=user_text,
+        parts=parts,
+        payload=payload,
+    )
+
     # 3. MINT — A2A parts[1].metadata.source_type drives the primary path.
     source_type = extract_source_type(payload)
-    if source_type and source_type in _SCRIPT_CREATION_SOURCE_TYPES:
+    if not is_start_request and source_type and source_type in _SCRIPT_CREATION_SOURCE_TYPES:
         minted = mint_test_run_id()
         if isinstance(payload, dict):
             payload["test_run_id"] = minted
@@ -516,7 +534,7 @@ def resolve_test_run_id_outcome(
         return ResolveResult(id=minted, outcome=OUTCOME_MINT)
 
     # 3b. MINT — Web-UI prose heuristic fallback when parts metadata is absent.
-    if is_script_creation_request(
+    if not is_start_request and is_script_creation_request(
         user_text=user_text, parts=parts, payload=payload,
     ):
         minted = mint_test_run_id()

@@ -26,6 +26,7 @@ required. End-to-end integration lives in Phase 9.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -308,6 +309,50 @@ async def test_resolved_test_run_id_still_wins_over_llm_tool_arg(orch) -> None:
     captured = orch._captured_create_task
     assert captured["test_run_id"] == "2026-10-07-14-00-00"
     assert captured["payload"]["test_run_id"] == "2026-10-07-14-00-00"
+
+
+async def test_check_task_status_adopts_successful_start_run_id(
+    orch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_id = "83630000"
+    new_id = "83636431"
+    orch.agent_test_run_id_var.set(old_id)
+    _prime_caller_identity(orch, test_run_id=old_id)
+    child_task_id = uuid4()
+
+    async def _get_task(task_id: UUID) -> dict:
+        assert task_id == child_task_id
+        return {
+            "task_id": child_task_id,
+            "session_id": uuid4(),
+            "agent_name": "execution-agent",
+            "status": "completed",
+            "result": {
+                "agent": "execution-agent",
+                "tool": "start_performance_test",
+                "test_run_id": new_id,
+                "tool_result": {"ok": True, "run_id": new_id},
+            },
+        }
+
+    monkeypatch.setattr(orch, "_standalone_get_task", _get_task)
+
+    response = json.loads(
+        await orch.check_task_status("execution-agent", str(child_task_id))
+    )
+
+    assert response["ok"] is True
+    assert orch.agent_test_run_id_var.get() == new_id
+    assert orch._caller_identity["test_run_id"] == new_id
+
+    await orch.delegate_to_specialist(
+        "execution-agent",
+        {"tool": "wait_for_completion", "args": {"run_id": new_id}},
+        test_run_id=new_id,
+    )
+    assert orch._captured_create_task["test_run_id"] == new_id
+    assert orch._captured_create_task["payload"]["test_run_id"] == new_id
 
 
 async def test_resolved_test_run_id_wins_over_source_type_mint(orch) -> None:
