@@ -33,7 +33,7 @@ from uuid import uuid4
 import pytest
 
 from core.test_run_id import mint_test_run_id, resolve_test_run_id
-from services.task_executor import (
+from services.specialist_agents import (
     REPORTING_AGENT_NAME,
     SCRIPT_AGENT_NAME,
     _extract_comparison_id_from_tool_rounds,

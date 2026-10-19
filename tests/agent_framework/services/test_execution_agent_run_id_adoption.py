@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from services import task_executor
+from services import specialist_agents
 from stores import task_store
 
 
@@ -45,7 +45,7 @@ async def test_adopt_vendor_run_id_after_successful_start(
     task = _make_execution_task(
         payload={"tool": "start_performance_test", "args": {"test_id": "14493190"}},
     )
-    adopted = await task_executor._adopt_vendor_run_id_after_start(
+    adopted = await specialist_agents._adopt_vendor_run_id_after_start(
         task,
         {"ok": True, "run_id": "83636431", "vendor": "blazemeter", "test_id": "14493190"},
     )
@@ -66,7 +66,7 @@ async def test_adopt_vendor_run_id_skips_failed_start(
     task = _make_execution_task(
         payload={"tool": "start_performance_test", "args": {"test_id": "14493190"}},
     )
-    adopted = await task_executor._adopt_vendor_run_id_after_start(
+    adopted = await specialist_agents._adopt_vendor_run_id_after_start(
         task,
         {"ok": False, "error": {"type": "Boom", "message": "nope"}},
     )
@@ -74,16 +74,16 @@ async def test_adopt_vendor_run_id_skips_failed_start(
 
 
 def test_extract_sessions_id_from_mcp_payload_shapes() -> None:
-    assert task_executor._extract_sessions_id_from_mcp_payload(
+    assert specialist_agents._extract_sessions_id_from_mcp_payload(
         {"sessions_id": ["r-v4-aaa", "r-v4-bbb"]}
     ) == ["r-v4-aaa", "r-v4-bbb"]
-    assert task_executor._extract_sessions_id_from_mcp_payload(
+    assert specialist_agents._extract_sessions_id_from_mcp_payload(
         {"sessionsId": ["r-v4-ccc"]}
     ) == ["r-v4-ccc"]
-    assert task_executor._extract_sessions_id_from_mcp_payload(
+    assert specialist_agents._extract_sessions_id_from_mcp_payload(
         {"result": {"sessions_id": ["r-v4-ddd"]}}
     ) == ["r-v4-ddd"]
-    assert task_executor._extract_sessions_id_from_mcp_payload("not-a-dict") == []
+    assert specialist_agents._extract_sessions_id_from_mcp_payload("not-a-dict") == []
 
 
 @pytest.mark.asyncio
@@ -114,10 +114,10 @@ async def test_passthrough_process_session_artifacts_autofetches_sessions(
         raise AssertionError(f"unexpected tool {tool_name}")
 
     monkeypatch.setattr(
-        task_executor, "_call_mcp_tool_passthrough", _fake_passthrough,
+        specialist_agents, "_call_mcp_tool_passthrough", _fake_passthrough,
     )
 
-    result = await task_executor._passthrough_process_session_artifacts(
+    result = await specialist_agents._passthrough_process_session_artifacts(
         {"run_id": "83636431"},
     )
 
@@ -141,10 +141,10 @@ async def test_passthrough_process_session_artifacts_uses_provided_sessions(
         return {"ok": True, "tool": tool_name, "result": {"status": "success"}, "attempts": 1}
 
     monkeypatch.setattr(
-        task_executor, "_call_mcp_tool_passthrough", _fake_passthrough,
+        specialist_agents, "_call_mcp_tool_passthrough", _fake_passthrough,
     )
 
-    result = await task_executor._passthrough_process_session_artifacts(
+    result = await specialist_agents._passthrough_process_session_artifacts(
         {
             "run_id": "83636431",
             "sessions_id": ["r-v4-aaa", "r-v4-bbb"],
