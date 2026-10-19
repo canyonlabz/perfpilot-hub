@@ -1,14 +1,14 @@
 """Regression guards around ``spec_normalizer`` after Phase 6.
 
 Phase 6 kept ``spec_normalizer`` unchanged — the strict Playwright gate
-lives upstream in ``services.task_executor._persist_test_spec_from_parts``
+lives upstream in ``services.helpers.test_specs.persist_test_spec_from_parts``
 where ``source_type`` is accessible via the full payload. These tests
 pin the invariant that:
 
   * ``spec_normalizer._looks_like_test_spec`` continues to detect
     step-based prose (Web-UI prose fallback). It is NOT a dispatch
     signal — only a shape check for text parts inside the strict gate.
-  * The strict gate at ``_persist_test_spec_from_parts`` is what
+  * The strict gate at ``persist_test_spec_from_parts`` is what
     requires ``source_type == "playwright"``; the normalizer itself
     is media-type-agnostic and will happily extract content from HAR
     or OpenAPI parts if called directly (the gate upstream prevents
@@ -86,7 +86,7 @@ def test_looks_like_test_spec_rejects_pure_prose() -> None:
 
 
 # =============================================================================
-# Strict gate wrapper semantics — gate is at ``_persist_test_spec_from_parts``
+# Strict gate wrapper semantics — gate is at ``persist_test_spec_from_parts``
 # =============================================================================
 
 
@@ -95,18 +95,18 @@ def test_strict_gate_requires_source_type_playwright(
 ) -> None:
     """Pin the dependency direction: ``spec_normalizer.normalize_parts_to_spec``
     is called ONLY from inside the strict gate at
-    ``_persist_test_spec_from_parts`` after that caller has verified
+    ``persist_test_spec_from_parts`` after that caller has verified
     ``source_type == "playwright"``. The normalizer itself does NOT
     know about ``source_type`` — it's a pure parts→markdown function.
 
     This test observes the dependency by patching
     ``spec_normalizer.normalize_parts_to_spec`` and confirming it is
     never called when the gate upstream classifies the request as HAR
-    (verified via ``_persist_test_spec_from_parts``)."""
+    (verified via ``persist_test_spec_from_parts``)."""
     from datetime import datetime, timezone
     from uuid import uuid4
 
-    from services.task_executor import _persist_test_spec_from_parts
+    from services.helpers.test_specs import persist_test_spec_from_parts
     from stores import task_store
 
     normalize_calls: list[list[dict]] = []
@@ -137,7 +137,7 @@ def test_strict_gate_requires_source_type_playwright(
         submitted_at=now,
         updated_at=now,
     )
-    _persist_test_spec_from_parts(har_task)
+    persist_test_spec_from_parts(har_task)
     # The HAR source_type blocks the gate — normalizer must never run.
     assert normalize_calls == []
 
@@ -152,7 +152,7 @@ def test_strict_gate_rejects_har_or_openapi(
     from datetime import datetime, timezone
     from uuid import uuid4
 
-    from services.task_executor import _persist_test_spec_from_parts
+    from services.helpers.test_specs import persist_test_spec_from_parts
     from stores import task_store
 
     normalize_calls: list[list[dict]] = []
@@ -182,7 +182,7 @@ def test_strict_gate_rejects_har_or_openapi(
             submitted_at=now,
             updated_at=now,
         )
-        _persist_test_spec_from_parts(task)
+        persist_test_spec_from_parts(task)
 
     assert normalize_calls == []
 
@@ -197,7 +197,7 @@ def test_strict_gate_opens_for_source_type_playwright(
     from pathlib import Path
     from uuid import uuid4
 
-    from services.task_executor import _persist_test_spec_from_parts
+    from services.helpers.test_specs import persist_test_spec_from_parts
     from stores import task_store
 
     # Prevent any real filesystem write — this test is about the
@@ -233,7 +233,7 @@ def test_strict_gate_opens_for_source_type_playwright(
         submitted_at=now,
         updated_at=now,
     )
-    _persist_test_spec_from_parts(playwright_task)
+    persist_test_spec_from_parts(playwright_task)
     assert len(normalize_calls) == 1
     # The normalizer saw the FULL parts list (both parts), not just the
     # second one — the gate selects whether to call it at all, not what

@@ -63,7 +63,7 @@ def _a2a_v1_response_headers(
 
 def _normalize_a2a_v1_body(body: dict) -> dict:
     """Translate an A2A v1 ``SendMessageRequest`` envelope into the internal
-    payload format that ``task_executor._extract_user_message_from_payload()``
+    payload format that ``a2a.server.v1_payload.extract_user_message_from_payload()``
     and ``a2a.shared.parts_parser`` already understand.
 
     If the body is already a legacy PerfPilot payload (top-level ``message``

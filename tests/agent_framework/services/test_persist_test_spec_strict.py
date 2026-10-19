@@ -1,4 +1,4 @@
-"""Tests for ``_persist_test_spec_from_parts`` strict Playwright gate.
+"""Tests for ``persist_test_spec_from_parts`` strict Playwright gate.
 
 Phase 6 locks down the test-specs materialization helper so it only runs
 for Playwright inbound payloads. HAR captures and OpenAPI specs are
@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from core.task_signals import TaskInputRequiredSignal
-from services.task_executor import _persist_test_spec_from_parts
+from services.helpers.test_specs import persist_test_spec_from_parts
 from stores import task_store
 
 
@@ -133,7 +133,7 @@ def test_har_payload_is_a_noop(
         ],
     }
     task = _make_task(payload=payload)
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
     assert no_filesystem_writes == []
 
 
@@ -153,7 +153,7 @@ def test_openapi_payload_is_a_noop(
         ],
     }
     task = _make_task(payload=payload)
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
     assert no_filesystem_writes == []
 
 
@@ -171,7 +171,7 @@ def test_no_source_type_metadata_is_a_noop(
         ],
     }
     task = _make_task(payload=payload)
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
     assert no_filesystem_writes == []
 
 
@@ -184,7 +184,7 @@ def test_no_parts_is_a_noop(
         "message": "regular chat message",
     }
     task = _make_task(payload=payload)
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
     assert no_filesystem_writes == []
 
 
@@ -194,7 +194,7 @@ def test_non_dict_payload_is_a_noop(
     """Guard: non-dict payload is a no-op (defensive)."""
     task = _make_task(payload={})
     object.__setattr__(task, "payload", "not a dict")  # type: ignore[arg-type]
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
     assert no_filesystem_writes == []
 
 
@@ -221,7 +221,7 @@ def test_playwright_with_valid_steps_writes_file_no_mint(
     )
     task = _make_task(payload=payload)
 
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
 
     assert len(no_filesystem_writes) == 1
     spec_path, content = no_filesystem_writes[0]
@@ -245,7 +245,7 @@ def test_playwright_with_valid_steps_reads_test_run_id_from_task_row(
         payload=payload,
         test_run_id="2026-10-06-10-00-00",  # row has ID
     )
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
     assert len(no_filesystem_writes) == 1
     spec_path, _ = no_filesystem_writes[0]
     assert "2026-10-06-10-00-00" in spec_path
@@ -266,18 +266,18 @@ def test_playwright_with_missing_test_run_id_logs_warning_and_skips(
     have minted at ingress, so a missing ID here signals a bypass."""
     import logging
 
-    import services.task_executor as te
+    import services.helpers.test_specs as test_specs_mod
 
-    caplog.set_level(logging.WARNING, logger=te.log.name)
+    caplog.set_level(logging.WARNING, logger=test_specs_mod.log.name)
 
     payload = _playwright_payload(test_run_id=None)
     task = _make_task(payload=payload, test_run_id=None)
 
-    _persist_test_spec_from_parts(task)
+    persist_test_spec_from_parts(task)
 
     assert no_filesystem_writes == []
     assert any(
-        "_persist_test_spec_from_parts.missing_test_run_id" in r.message
+        "persist_test_spec_from_parts.missing_test_run_id" in r.message
         for r in caplog.records
     )
 
@@ -310,7 +310,7 @@ def test_playwright_with_no_steps_raises_malformed_playwright_test_spec(
     task = _make_task(payload=payload)
 
     with pytest.raises(TaskInputRequiredSignal) as exc_info:
-        _persist_test_spec_from_parts(task)
+        persist_test_spec_from_parts(task)
 
     sig = exc_info.value
     assert sig.reason_code == "malformed_playwright_test_spec"
@@ -346,7 +346,7 @@ def test_playwright_with_empty_ado_steps_raises_malformed_playwright_test_spec(
     task = _make_task(payload=payload)
 
     with pytest.raises(TaskInputRequiredSignal) as exc_info:
-        _persist_test_spec_from_parts(task)
+        persist_test_spec_from_parts(task)
 
     assert exc_info.value.reason_code == "malformed_playwright_test_spec"
     assert no_filesystem_writes == []
