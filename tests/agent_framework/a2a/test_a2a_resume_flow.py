@@ -455,20 +455,20 @@ async def test_resume_tolerates_missing_context_id_on_task(
 # =============================================================================
 # Integration-ish: resume message reaches the resolver via the executor
 # =============================================================================
-# This test checks the executor helper ``_resume_message_to_text`` picks
+# This test checks the payload helper ``resume_message_to_text`` picks
 # up ``message_text`` and (fallback) first-text part, mirroring the
 # contract the resolver relies on when a client answers an
 # ``input_required`` prompt with the missing ``test_run_id``.
 
 
 def test_resume_message_text_contains_test_run_id_reaches_resolver() -> None:
-    """``_resume_message_to_text`` returns the ``message_text`` so the
+    """``resume_message_to_text`` returns the ``message_text`` so the
     orchestrator's effective_user_text (passed to the resolver) contains
     the test_run_id supplied in the resume turn — this is the critical
     behaviour that lets a REJECT outcome succeed on the next pass."""
-    from services.task_executor import (
-        _resume_message_to_text,
-        _extract_resume_messages_from_payload,
+    from a2a.server.v1_payload import (
+        extract_resume_messages_from_payload,
+        resume_message_to_text,
     )
 
     payload = {
@@ -481,18 +481,18 @@ def test_resume_message_text_contains_test_run_id_reaches_resolver() -> None:
             },
         ],
     }
-    messages = _extract_resume_messages_from_payload(payload)
+    messages = extract_resume_messages_from_payload(payload)
     assert len(messages) == 1
-    text = _resume_message_to_text(messages[0])
+    text = resume_message_to_text(messages[0])
     assert text is not None
     assert "2026-10-07-14-00-00" in text
 
 
 def test_resume_message_text_falls_back_to_first_text_part() -> None:
     """When a resume message carries only ``parts`` (no top-level
-    ``message_text``), ``_resume_message_to_text`` returns the first
+    ``message_text``), ``resume_message_to_text`` returns the first
     text Part so the resolver still sees the content."""
-    from services.task_executor import _resume_message_to_text
+    from a2a.server.v1_payload import resume_message_to_text
 
     rm = {
         "role": "ROLE_USER",
@@ -501,7 +501,7 @@ def test_resume_message_text_falls_back_to_first_text_part() -> None:
             {"text": "test_run_id = 2026-10-07-14-00-00"},
         ],
     }
-    text = _resume_message_to_text(rm)
+    text = resume_message_to_text(rm)
     assert text is not None
     assert "2026-10-07-14-00-00" in text
 
@@ -510,24 +510,24 @@ def test_resume_message_text_returns_none_for_empty_message() -> None:
     """A resume message with neither ``message_text`` nor text Parts
     returns ``None`` so the executor skips the empty turn rather than
     appending a blank user message to the LLM context."""
-    from services.task_executor import _resume_message_to_text
+    from a2a.server.v1_payload import resume_message_to_text
 
     rm = {"role": "ROLE_USER", "parts": [{"data": {"k": "v"}}]}
-    assert _resume_message_to_text(rm) is None
+    assert resume_message_to_text(rm) is None
 
 
 def test_extract_resume_messages_from_non_dict_payload_returns_empty() -> None:
     """Guard: a non-dict payload must not crash the executor; the
     extractor returns ``[]`` so the resume branch cleanly skips."""
-    from services.task_executor import _extract_resume_messages_from_payload
+    from a2a.server.v1_payload import extract_resume_messages_from_payload
 
-    assert _extract_resume_messages_from_payload(None) == []
-    assert _extract_resume_messages_from_payload("string") == []
-    assert _extract_resume_messages_from_payload([1, 2, 3]) == []
+    assert extract_resume_messages_from_payload(None) == []
+    assert extract_resume_messages_from_payload("string") == []
+    assert extract_resume_messages_from_payload([1, 2, 3]) == []
 
 
 def test_extract_resume_messages_from_payload_without_field_returns_empty() -> None:
     """Guard: a payload without ``resume_messages`` returns ``[]``."""
-    from services.task_executor import _extract_resume_messages_from_payload
+    from a2a.server.v1_payload import extract_resume_messages_from_payload
 
-    assert _extract_resume_messages_from_payload({"message": "x"}) == []
+    assert extract_resume_messages_from_payload({"message": "x"}) == []

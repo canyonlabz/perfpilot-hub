@@ -71,7 +71,7 @@ described below is identical.
 
 ### 2.2 Fields the framework surfaces to the orchestrator LLM
 
-`services/task_executor.py::_format_metadata_context` extracts the
+`a2a/server/v1_payload.py::format_metadata_context` extracts the
 following into the orchestrator's system context so it can reason about
 delegation:
 
