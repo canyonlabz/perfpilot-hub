@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from services import specialist_agents
+from services.helpers import mcp_passthrough
 from stores import task_store
 
 
@@ -74,16 +75,16 @@ async def test_adopt_vendor_run_id_skips_failed_start(
 
 
 def test_extract_sessions_id_from_mcp_payload_shapes() -> None:
-    assert specialist_agents._extract_sessions_id_from_mcp_payload(
+    assert mcp_passthrough.extract_sessions_id_from_mcp_payload(
         {"sessions_id": ["r-v4-aaa", "r-v4-bbb"]}
     ) == ["r-v4-aaa", "r-v4-bbb"]
-    assert specialist_agents._extract_sessions_id_from_mcp_payload(
+    assert mcp_passthrough.extract_sessions_id_from_mcp_payload(
         {"sessionsId": ["r-v4-ccc"]}
     ) == ["r-v4-ccc"]
-    assert specialist_agents._extract_sessions_id_from_mcp_payload(
+    assert mcp_passthrough.extract_sessions_id_from_mcp_payload(
         {"result": {"sessions_id": ["r-v4-ddd"]}}
     ) == ["r-v4-ddd"]
-    assert specialist_agents._extract_sessions_id_from_mcp_payload("not-a-dict") == []
+    assert mcp_passthrough.extract_sessions_id_from_mcp_payload("not-a-dict") == []
 
 
 @pytest.mark.asyncio
@@ -114,10 +115,10 @@ async def test_passthrough_process_session_artifacts_autofetches_sessions(
         raise AssertionError(f"unexpected tool {tool_name}")
 
     monkeypatch.setattr(
-        specialist_agents, "_call_mcp_tool_passthrough", _fake_passthrough,
+        mcp_passthrough, "call_mcp_tool_passthrough", _fake_passthrough,
     )
 
-    result = await specialist_agents._passthrough_process_session_artifacts(
+    result = await mcp_passthrough.passthrough_process_session_artifacts(
         {"run_id": "83636431"},
     )
 
@@ -141,10 +142,10 @@ async def test_passthrough_process_session_artifacts_uses_provided_sessions(
         return {"ok": True, "tool": tool_name, "result": {"status": "success"}, "attempts": 1}
 
     monkeypatch.setattr(
-        specialist_agents, "_call_mcp_tool_passthrough", _fake_passthrough,
+        mcp_passthrough, "call_mcp_tool_passthrough", _fake_passthrough,
     )
 
-    result = await specialist_agents._passthrough_process_session_artifacts(
+    result = await mcp_passthrough.passthrough_process_session_artifacts(
         {
             "run_id": "83636431",
             "sessions_id": ["r-v4-aaa", "r-v4-bbb"],
