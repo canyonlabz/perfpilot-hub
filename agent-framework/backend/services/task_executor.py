@@ -61,6 +61,7 @@ from services.subscriptions import (
     subscribe,
     unsubscribe,
 )
+from services.helpers.tool_loop import run_multi_turn_tool_loop
 from services.specialist_agents import (
     ANALYSIS_AGENT_NAME,
     EXECUTION_AGENT_NAME,
@@ -71,7 +72,6 @@ from services.specialist_agents import (
     _run_analysis_agent,
     _run_execution_agent,
     _run_monitoring_agent,
-    _run_multi_turn_tool_loop,
     _run_reporting_agent,
     _run_script_agent,
     _run_stub_agent,
@@ -669,7 +669,7 @@ async def _invoke_orchestrator_with_tool_loop(
             asyncio.create_task(execute_task(pending_task_id))
 
     reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
-        await _run_multi_turn_tool_loop(
+        await run_multi_turn_tool_loop(
             agent=agent,
             messages=messages,
             max_tool_rounds=max_tool_rounds,
