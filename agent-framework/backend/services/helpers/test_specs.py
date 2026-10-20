@@ -1,12 +1,12 @@
 """Persist inbound A2A Playwright test specs to the artifacts tree.
 
-Normalizes ``parts[]`` (via ``a2a.server.spec_normalizer``) and writes
+Normalizes ``parts[]`` (via ``a2a.server.helpers.spec_normalizer``) and writes
 Markdown under ``artifacts/{test_run_id}/test-specs/``. Propagates the
 saved path and ``test_run_id`` through orchestrator ContextVars so
 ``delegate_to_specialist`` can inject them into child payloads.
 
 Dependency direction: this module imports from ``core/``,
-``a2a.server.spec_normalizer``, ``utils.paths``, and orchestrator
+``a2a.server.helpers.spec_normalizer``, ``utils.paths``, and orchestrator
 ContextVars. It must NOT import ``services.task_executor``.
 """
 
@@ -116,7 +116,7 @@ def persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
     agent_test_run_id_var.set(test_run_id)
 
     # ── Normalize + validate ─────────────────────────────────────
-    from a2a.server import spec_normalizer
+    from a2a.server.helpers import spec_normalizer
 
     spec_content = spec_normalizer.normalize_parts_to_spec(parts)
     if not spec_content:

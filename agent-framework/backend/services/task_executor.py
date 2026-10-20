@@ -357,7 +357,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     specialist tasks via ContextVars (``agent_session_id_var``,
     ``agent_thread_id_var``, ``agent_user_id_var``).
     """
-    from a2a.server.v1_payload import (
+    from a2a.server.helpers.payload import (
         extract_resume_messages_from_payload,
         extract_thread_id_from_payload,
         extract_user_message_from_payload,

@@ -1,7 +1,7 @@
 """Tests for the A2A v1 SSE ``TaskStatusUpdateEvent`` emission on
 ``input_required`` status.
 
-Covers ``a2a.server.v1_helpers._task_event_to_a2a_v1_sse``. The function
+Covers ``a2a.server.helpers.converters._task_event_to_a2a_v1_sse``. The function
 converts a ``TaskEvent`` into an A2A v1 SSE ``StreamResponse`` payload:
 
   * Non-``input_required`` events render as a plain
@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from a2a.server.v1_helpers import _task_event_to_a2a_v1_sse
+from a2a.server.helpers.converters import _task_event_to_a2a_v1_sse
 from services.task_executor import TaskEvent
 
 

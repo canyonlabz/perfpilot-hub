@@ -1,167 +1,18 @@
-"""A2A v1.0.0 shared helper functions.
+"""Convert internal task rows and events into A2A v1 Task / StreamResponse dicts.
 
-Constants, response header builders, request body normalizer, and task
-converters used by both the HTTP+JSON/REST and JSON-RPC 2.0 bindings.
-
-Extracted from ``a2a_server.py`` during the sub-module refactor to keep
-the main server file focused on app creation, lifespan, and legacy
-routes.
-
-These helpers are protocol-agnostic — they produce dicts and headers
-consumed by the route handlers in ``a2a.server.v1_routes``.
+Protocol-agnostic — consumed by both REST and JSON-RPC bindings.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 from services import task_executor
 from stores import task_store
 
-
-# =============================================================================
-# Constants
-# =============================================================================
-
-A2A_V1_AGENT_NAME = "orchestrator"
-"""The agent name used for all A2A v1 routes (implicit target)."""
-
-A2A_VERSION_HEADER = "1.0"
-"""Value of the ``A2A-Version`` response header."""
-
-
-# =============================================================================
-# Response headers
-# =============================================================================
-
-
-def _a2a_v1_response_headers(
-    thread_headers: Optional[dict] = None,
-) -> dict:
-    """Build response headers for A2A v1 routes.
-
-    Always includes ``A2A-Version: 1.0``. Thread headers are merged when
-    provided (task-creating endpoints pass the result of
-    ``_thread_response_headers()``).
-
-    Args:
-        thread_headers: Optional dict of thread-related headers to merge.
-
-    Returns:
-        A dict of response headers.
-    """
-    headers: dict = {"A2A-Version": A2A_VERSION_HEADER}
-    if thread_headers is not None:
-        headers.update(thread_headers)
-    return headers
-
-
-# =============================================================================
-# Request body normalizer
-# =============================================================================
-
-
-def _normalize_a2a_v1_body(body: dict) -> dict:
-    """Translate an A2A v1 ``SendMessageRequest`` envelope into the internal
-    payload format that ``a2a.server.v1_payload.extract_user_message_from_payload()``
-    and ``a2a.shared.parts_parser`` already understand.
-
-    If the body is already a legacy PerfPilot payload (top-level ``message``
-    string, ``text``, ``prompt``, or ``parts[]``), it is returned unchanged.
-
-    A2A v1 structure::
-
-        {
-          "message": {
-            "messageId": "...",
-            "role": "ROLE_USER",
-            "parts": [{"text": "Hello"}],
-            "contextId": "ctx-001",
-            "taskId": "existing-task-uuid"   # <- A2A §6.3 resume signal
-          },
-          "configuration": {...},
-          "metadata": {...}
-        }
-
-    Normalized internal structure::
-
-        {
-          "message": "Hello",             # first text Part -> top-level message
-          "parts": [{"text": "Hello"}],   # pass through for a2a.shared.parts_parser
-          "metadata": {...},              # merged from envelope + message metadata
-          "_a2a_v1_envelope": {...},      # stash original envelope for audit
-          "_a2a_v1_context_id": "ctx-001",
-          "_a2a_v1_resume_task_id": "existing-task-uuid"
-        }
-
-    The ``_a2a_v1_resume_task_id`` field is lifted when ``message.taskId`` is
-    present on the inbound envelope — this is the A2A §6.3 multi-turn
-    interaction signal. Ingress handlers check for this field before
-    ``create_task`` to decide whether to resume an existing task
-    (A2A TASK_STATE_INPUT_REQUIRED → TASK_STATE_WORKING) or start a new one.
-    """
-    from a2a.shared.models import is_a2a_v1_request
-
-    if not is_a2a_v1_request(body):
-        return body
-
-    msg = body["message"]
-    parts = msg.get("parts") or []
-    context_id = msg.get("contextId") or msg.get("context_id")
-    resume_task_id = msg.get("taskId") or msg.get("task_id")
-
-    first_text = None
-    normalized_parts: list[dict] = []
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        normalized_parts.append(part)
-        if first_text is None and isinstance(part.get("text"), str):
-            first_text = part["text"]
-
-    result: dict = {}
-
-    if first_text:
-        result["message"] = first_text
-
-    if normalized_parts:
-        result["parts"] = normalized_parts
-
-    envelope_metadata = body.get("metadata")
-    msg_metadata = msg.get("metadata")
-    if isinstance(envelope_metadata, dict) or isinstance(msg_metadata, dict):
-        merged: dict = {}
-        if isinstance(msg_metadata, dict):
-            merged.update(msg_metadata)
-        if isinstance(envelope_metadata, dict):
-            merged.update(envelope_metadata)
-        if merged:
-            result["metadata"] = merged
-
-    if context_id:
-        result["_a2a_v1_context_id"] = context_id
-
-    if isinstance(resume_task_id, str) and resume_task_id.strip():
-        result["_a2a_v1_resume_task_id"] = resume_task_id.strip()
-
-    result["_a2a_v1_envelope"] = body
-
-    config = body.get("configuration")
-    if isinstance(config, dict):
-        result["_a2a_v1_configuration"] = config
-
-    test_run_id = None
-    if isinstance(envelope_metadata, dict):
-        test_run_id = envelope_metadata.get("test_run_id")
-    if test_run_id and isinstance(test_run_id, str):
-        result["test_run_id"] = test_run_id
-
-    return result
-
-
-# =============================================================================
-# Task converters
-# =============================================================================
+# Sentinel: REST SSE path (not JSON-RPC)
+_SSE_REST = object()
 
 
 def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
@@ -250,6 +101,15 @@ def _context_id_from_task_or_event(
         if isinstance(cid, str) and cid:
             return cid
     return ""
+
+
+def _payload_context_id(payload: Any) -> Optional[str]:
+    """Return ``_a2a_v1_context_id`` from a task payload when present."""
+    if isinstance(payload, dict):
+        cid = payload.get("_a2a_v1_context_id")
+        if isinstance(cid, str) and cid:
+            return cid
+    return None
 
 
 def _task_event_to_a2a_v1_sse(
@@ -365,3 +225,45 @@ def _task_event_to_a2a_v1_artifact_sse(
         ),
     )
     return stream.model_dump(by_alias=True, exclude_none=True)
+
+
+def _yield_task_event_sse(
+    event: Any,
+    *,
+    context_id: Optional[str],
+    jsonrpc_id: Any = _SSE_REST,
+) -> list[dict]:
+    """Build SSE yield dicts for one TaskEvent (artifact then status).
+
+    On completed events with ``reply_text``, emits an A2A ``artifactUpdate``
+    immediately before the terminal ``statusUpdate``.
+    """
+    frames: list[dict] = []
+    artifact_payload = _task_event_to_a2a_v1_artifact_sse(
+        event, context_id=context_id,
+    )
+    status_payload = _task_event_to_a2a_v1_sse(event, context_id=context_id)
+
+    if jsonrpc_id is _SSE_REST:
+        if artifact_payload:
+            frames.append({
+                "event": "artifact",
+                "data": json.dumps(artifact_payload),
+            })
+        frames.append({
+            "event": "status",
+            "data": json.dumps(status_payload),
+        })
+    else:
+        from a2a.shared.jsonrpc import jsonrpc_sse_event
+
+        if artifact_payload:
+            frames.append({
+                "event": "artifact",
+                "data": jsonrpc_sse_event(jsonrpc_id, artifact_payload),
+            })
+        frames.append({
+            "event": "status",
+            "data": jsonrpc_sse_event(jsonrpc_id, status_payload),
+        })
+    return frames

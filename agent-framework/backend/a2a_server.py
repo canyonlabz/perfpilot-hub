@@ -29,10 +29,10 @@ A2A v1.0.0 JSON-RPC 2.0 binding (Spec Section 9):
 
 Route registration for A2A v1 is delegated to sub-modules:
 
-    a2a.server.v1_helpers  — constants, response headers, body normalizer,
-                             task converters (protocol-agnostic)
-    a2a.server.v1_routes   — register_a2a_v1_routes(),
-                             register_a2a_v1_jsonrpc_route()
+    a2a.server.v1_jsonrpc  — register_a2a_v1_jsonrpc_route()
+    a2a.server.v1_rest     — register_a2a_v1_routes()
+    a2a.server.helpers     — normalize, converters, resume, payload
+    a2a.server.utils       — response headers, thread/context resolution
     a2a.shared.errors      — google.rpc.Status error builders (HTTP binding)
     a2a.shared.jsonrpc     — JSON-RPC 2.0 envelope, error helpers
 
@@ -61,10 +61,9 @@ import json
 import logging
 import os
 import sys
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 if __package__ is None:
@@ -78,9 +77,10 @@ from sse_starlette.sse import EventSourceResponse
 from utils import agents_config
 from services import task_executor
 from core import base_agent
-from stores import db, task_store, thread_store
+from stores import db, task_store
 from utils.paths import get_framework_dir
 from services.session_middleware import SessionMiddleware
+from a2a.server.utils import context
 
 log = logging.getLogger(__name__)
 
@@ -98,17 +98,6 @@ try:
     del _load_dotenv
 except ImportError:
     pass
-
-# PBI 3.7.8 / Decision 17: when an A2A caller omits `X-External-Thread-Id`,
-# auto-mint one per (external_session_id) and cache it so all requests in
-# the same upstream session share the same thread. Bounded LRU-ish dict
-# kept small because A2A external sessions are short-lived. Epic 4 swaps
-# this for a Redis / Postgres-LISTEN cache when multi-process deployment
-# arrives.
-_AUTO_MINT_CACHE: dict[str, str] = {}
-_AUTO_MINT_CACHE_MAX = 1024
-_AUTO_MINT_LOCK = asyncio.Lock()
-
 
 # =============================================================================
 # App lifespan
@@ -142,10 +131,8 @@ def create_app() -> FastAPI:
 
     _register_routes(app)
 
-    from a2a.server.v1_routes import (
-        register_a2a_v1_routes,
-        register_a2a_v1_jsonrpc_route,
-    )
+    from a2a.server.v1_jsonrpc import register_a2a_v1_jsonrpc_route
+    from a2a.server.v1_rest import register_a2a_v1_routes
     _a2a_v1_ctx = {
         "agents_config": agents_config,
         "base_agent": base_agent,
@@ -157,9 +144,9 @@ def create_app() -> FastAPI:
         "require_enabled_agent": _require_enabled_agent,
         "require_session": _require_session,
         "read_json_body": _read_json_body,
-        "resolve_a2a_thread": _resolve_a2a_thread,
+        "resolve_a2a_thread": context._resolve_a2a_thread,
         "extract_subscriber_endpoints": _extract_subscriber_endpoints,
-        "thread_response_headers": _thread_response_headers,
+        "thread_response_headers": context._thread_response_headers,
     }
     register_a2a_v1_routes(app, _a2a_v1_ctx)
     register_a2a_v1_jsonrpc_route(app, _a2a_v1_ctx)
@@ -389,113 +376,8 @@ def _extract_subscriber_endpoints(body: dict) -> list[str]:
     return out
 
 
-async def _resolve_a2a_thread(request: Request, agent_name: str) -> thread_store.AgentThread:
-    """Implement Decision 17 thread resolution for an A2A request.
-
-    Precedence:
-      1. `X-External-Thread-Id` header present -> idempotent lookup;
-         create the thread on first sight, reuse on subsequent calls.
-      2. `external_session_id` already has a cached auto-minted label
-         from an earlier call in this same upstream session -> reuse it
-         (lookup, possibly create if the row was reaped).
-      3. Otherwise -> auto-mint a fresh label, cache by
-         `external_session_id` (so subsequent calls inside the session
-         all land on the same thread), insert the row.
-
-    Returns the materialized `AgentThread`. The caller stamps
-    `thread.thread_id` + `thread.external_thread_id` into both the task
-    payload (for the executor) and the response headers (for the
-    upstream caller's resumption).
-    """
-    explicit_label = request.headers.get("X-External-Thread-Id") or request.headers.get("x-external-thread-id")
-    external_session_id = getattr(request.state, "external_session_id", None)
-    internal_session_id = getattr(request.state, "session_id", None)
-    # The cache key is whatever session-equivalent we have available --
-    # external session label preferred (so different A2A peers in the
-    # same upstream "session" all share the thread) but internal
-    # session_id is a fine fallback when the caller did not supply an
-    # external label (which is the common case for IDE / CLI clients
-    # and for the smoke test).
-    cache_key: Optional[str] = external_session_id or (
-        str(internal_session_id) if internal_session_id else None
-    )
-
-    if explicit_label:
-        return await _lookup_or_create_a2a_thread(
-            external_thread_id=explicit_label.strip(),
-            agent_name=agent_name,
-            external_session_id=external_session_id,
-        )
-
-    if cache_key:
-        async with _AUTO_MINT_LOCK:
-            cached_label = _AUTO_MINT_CACHE.get(cache_key)
-        if cached_label:
-            return await _lookup_or_create_a2a_thread(
-                external_thread_id=cached_label,
-                agent_name=agent_name,
-                external_session_id=external_session_id,
-            )
-
-    minted_label = _mint_external_thread_label(agent_name)
-    if cache_key:
-        async with _AUTO_MINT_LOCK:
-            # Bound the cache: drop the oldest entry when we hit the cap.
-            if len(_AUTO_MINT_CACHE) >= _AUTO_MINT_CACHE_MAX:
-                _AUTO_MINT_CACHE.pop(next(iter(_AUTO_MINT_CACHE)), None)
-            _AUTO_MINT_CACHE[cache_key] = minted_label
-
-    return await _lookup_or_create_a2a_thread(
-        external_thread_id=minted_label,
-        agent_name=agent_name,
-        external_session_id=external_session_id,
-    )
-
-
-async def _lookup_or_create_a2a_thread(
-    *,
-    external_thread_id: str,
-    agent_name: str,
-    external_session_id: Optional[str],
-) -> thread_store.AgentThread:
-    """Fetch the thread for `external_thread_id`, creating it if absent."""
-    existing = await thread_store.get_by_external_thread_id(external_thread_id)
-    if existing is not None:
-        return existing
-    return await thread_store.create_thread(
-        source="a2a_external",
-        external_thread_id=external_thread_id,
-        title=f"A2A thread for {agent_name}",
-        metadata={
-            "created_by": "a2a_server._resolve_a2a_thread",
-            "agent_name": agent_name,
-            "external_session_id": external_session_id,
-        },
-    )
-
-
-def _mint_external_thread_label(agent_name: str) -> str:
-    """Server-side label for an A2A thread that did not bring its own.
-
-    Format: `auto-<agent>-<uuid>`. The `auto-` prefix lets operators
-    distinguish self-minted threads from caller-supplied labels in logs
-    and the sidebar.
-    """
-    return f"auto-{agent_name}-{uuid.uuid4().hex[:16]}"
-
-
-def _thread_response_headers(thread: thread_store.AgentThread) -> dict:
-    """Headers exposed on every task-creating endpoint per Decision 17.
-
-    Upstream callers persist `X-Thread-Id` (internal id, opaque to them)
-    and `X-External-Thread-Id` (their canonical label, identical to
-    whatever they sent in or the auto-minted fallback). Either header
-    is sufficient for resumption on the next request.
-    """
-    headers: dict = {"X-Thread-Id": thread.thread_id}
-    if thread.external_thread_id:
-        headers["X-External-Thread-Id"] = thread.external_thread_id
-    return headers
+_resolve_a2a_thread = context._resolve_a2a_thread
+_thread_response_headers = context._thread_response_headers
 
 
 def _task_to_dict(task: task_store.AgentTask) -> dict:
@@ -513,21 +395,6 @@ def _task_to_dict(task: task_store.AgentTask) -> dict:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
-
-
-# =============================================================================
-# Backward-compat re-exports (smoke tests import these from a2a_server)
-# =============================================================================
-
-from a2a.server.v1_helpers import (  # noqa: F401 — re-exported for backward compat
-    A2A_V1_AGENT_NAME,
-    A2A_VERSION_HEADER,
-    _a2a_v1_response_headers,
-    _normalize_a2a_v1_body,
-    _task_to_a2a_v1,
-    _task_event_to_a2a_v1_sse,
-    _task_event_to_a2a_v1_artifact_sse,
-)
 
 
 # =============================================================================
