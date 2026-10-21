@@ -23,7 +23,7 @@
   ],
   "capabilities": {
     "streaming": true,
-    "pushNotifications": true,
+    "pushNotifications": false,
     "extendedAgentCard": false,
     "long_running_tasks": false,
     "webhook_subscribers": true,

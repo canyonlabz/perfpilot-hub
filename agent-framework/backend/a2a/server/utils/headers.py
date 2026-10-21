@@ -13,6 +13,9 @@ A2A_V1_AGENT_NAME = "orchestrator"
 A2A_VERSION_HEADER = "1.0"
 """Value of the ``A2A-Version`` response header."""
 
+A2A_JSON_MEDIA_TYPE = "application/a2a+json"
+"""Preferred Content-Type for A2A HTTP+JSON/REST responses."""
+
 
 def _a2a_v1_response_headers(
     thread_headers: Optional[dict] = None,

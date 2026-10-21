@@ -125,13 +125,9 @@ def _task_event_to_a2a_v1_sse(
 
     When ``event.status == "input_required"`` and the event carries
     ``input_required_text``, the resulting ``TaskStatus.message`` is
-    populated with a two-part A2A ``Message``:
-
-      * ``parts[0]`` — ``text`` part carrying the human-readable prompt
-        (``media_type: text/plain``).
-      * ``parts[1]`` — ``data`` part carrying ``{"reasonCode": ..., ...}``
-        so client UIs can switch on a machine-readable code
-        (``media_type: application/json``).
+    populated with a single text part whose ``metadata.reasonCode``
+    (plus any supplementary keys from ``input_required_data``) is the
+    machine-readable switch clients use.
 
     The ``Message.role`` is ``ROLE_AGENT`` per A2A §4 (the server is
     speaking to the client). This mirrors the A2A §4.1.3
@@ -153,12 +149,13 @@ def _task_event_to_a2a_v1_sse(
 
     status_message: Optional[Message] = None
     if event.status == "input_required" and event.input_required_text:
-        reason_code = event.input_required_reason_code or ""
-        data_body: dict[str, Any] = {"reasonCode": reason_code}
+        part_metadata: dict[str, Any] = {
+            "reasonCode": event.input_required_reason_code or "",
+        }
         if isinstance(event.input_required_data, dict):
             for key, value in event.input_required_data.items():
                 if isinstance(key, str) and key != "reasonCode":
-                    data_body[key] = value
+                    part_metadata[key] = value
 
         status_message = Message(
             message_id=f"{event.task_id}-input-required",
@@ -166,11 +163,8 @@ def _task_event_to_a2a_v1_sse(
             parts=[
                 Part(
                     text=event.input_required_text,
-                    media_type="text/plain",
-                ),
-                Part(
-                    data=data_body,
-                    media_type="application/json",
+                    media_type="text/markdown",
+                    metadata=part_metadata,
                 ),
             ],
             task_id=event.task_id,

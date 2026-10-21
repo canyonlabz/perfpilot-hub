@@ -88,6 +88,7 @@ def synthesize_stub_card(agent_name: str, framework_version: str = "0.1.0") -> d
         "tags": ["stub", "epic-3"],
         "capabilities": {
             "streaming": True,
+            "pushNotifications": False,
             "long_running_tasks": True,
             "webhook_subscribers": True,
         },

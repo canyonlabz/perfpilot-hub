@@ -23,6 +23,10 @@ from a2a.server.helpers.converters import (
     _yield_task_event_sse,
 )
 from a2a.server.helpers.normalize import _normalize_a2a_v1_body
+from a2a.server.helpers.wait import (
+    return_immediately_from_payload,
+    start_task_and_maybe_wait,
+)
 from a2a.server.utils.headers import A2A_V1_AGENT_NAME, _a2a_v1_response_headers
 
 log = logging.getLogger(__name__)
@@ -56,8 +60,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         jsonrpc_sse_event,
         jsonrpc_success,
         parse_jsonrpc_request,
+        push_notification_not_supported_error,
         task_not_found_error,
         unsupported_operation_error,
+        PUSH_NOTIFICATION_METHODS,
         JSONRPC_INTERNAL_ERROR,
         JSONRPC_INVALID_PARAMS,
         JSONRPC_PARSE_ERROR,
@@ -134,9 +140,11 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         resume = await try_handle_resume(body)
         if resume.kind == RESUME_KIND_ERROR:
             return _resume_error_to_jsonrpc_response(resume, rpc.id)
+        immediate = return_immediately_from_payload(body)
         if resume.kind == RESUME_KIND_RESUMED:
-            resumed_task = resume.task
-            asyncio.create_task(task_executor.execute_task(resumed_task.task_id))
+            resumed_task = await start_task_and_maybe_wait(
+                resume.task, task_executor, immediate,
+            )
             return jsonrpc_success(
                 rpc.id, {"task": _task_to_a2a_v1(resumed_task)},
             )
@@ -150,8 +158,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             thread_id=thread.thread_id,
             subscriber_endpoints=_extract_subscriber_endpoints(body),
         )
-        asyncio.create_task(task_executor.execute_task(task.task_id))
-
+        task = await start_task_and_maybe_wait(task, task_executor, immediate)
         return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(task)})
 
     async def _handle_get_task(rpc: JsonRpcRequest) -> dict:
@@ -180,7 +187,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         task = await task_store.get_task(task_uuid)
         if task is None:
             return task_not_found_error(rpc.id, task_id)
-        return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(task)})
+        return jsonrpc_success(rpc.id, _task_to_a2a_v1(task))
 
     async def _handle_cancel_task(rpc: JsonRpcRequest) -> dict:
         """Dispatch ``CancelTask`` — cancels and returns updated Task."""
@@ -213,7 +220,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         refreshed = await task_store.get_task(task_uuid)
         if refreshed is None:
             refreshed = task
-        return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(refreshed)})
+        return jsonrpc_success(rpc.id, _task_to_a2a_v1(refreshed))
 
     async def _stream_send_message(
         rpc: JsonRpcRequest, request: Request,
@@ -400,7 +407,6 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
                 result = await _handle_send_message(rpc, request)
                 return JSONResponse(
                     content=result,
-                    status_code=202 if "result" in result else 200,
                     headers=_v1_headers(),
                 )
 
@@ -441,6 +447,12 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
                         "GetExtendedAgentCard",
                         detail="Extended agent cards are not configured",
                     ),
+                    headers=_v1_headers(),
+                )
+
+            if method in PUSH_NOTIFICATION_METHODS:
+                return JSONResponse(
+                    content=push_notification_not_supported_error(rpc.id, method),
                     headers=_v1_headers(),
                 )
 

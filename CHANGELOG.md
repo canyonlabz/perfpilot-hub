@@ -19,6 +19,7 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [✨ 7. Files created](#7-files-created)
 - [🔧 8. Files modified](#8-files-modified)
 - [🚫 9. Removed custom A2A task routes](#9-removed-custom-a2a-task-routes)
+- [🔌 10. A2A wire-format compliance](#10-a2a-wire-format-compliance)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -147,6 +148,19 @@ delegation is in-process; it no longer HTTP-POSTs the deleted routes.
 
 See [A2A server data contract §12](docs/a2a/a2a-server-data-contracts.md#12-removed-api)
 for the replacement table.
+
+---
+
+## 🔌 10. A2A wire-format compliance
+
+JSON-RPC `GetTask` / `CancelTask` now return a bare `Task` in `result`.
+`SendMessage` (both bindings) returns `{ "task": Task }`. REST success
+and error bodies use `Content-Type: application/a2a+json`.
+`configuration.returnImmediately` (default `false`) is the blocking
+switch. `INPUT_REQUIRED` emits a single text part with
+`metadata.reasonCode`. Agent cards advertise `pushNotifications: false`;
+push methods return `-32003`. REST gained `GET /tasks/{id}:subscribe`
+and `GET /tasks` (list is still unimplemented).
 
 ---
 

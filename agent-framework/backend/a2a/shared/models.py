@@ -210,10 +210,15 @@ class TaskArtifactUpdateEvent(A2ABaseModel):
 
 
 class SendMessageConfiguration(A2ABaseModel):
-    """Client-specified configuration for a SendMessage request."""
+    """Client-specified configuration for a SendMessage request.
+
+    ``return_immediately`` defaults to ``False`` (blocking): the server
+    waits until the task is terminal or interrupted before responding.
+    """
 
     accepted_output_modes: Optional[list[str]] = None
-    blocking: Optional[bool] = None
+    history_length: Optional[int] = None
+    return_immediately: bool = False
 
 
 class SendMessageRequest(A2ABaseModel):
@@ -222,6 +227,13 @@ class SendMessageRequest(A2ABaseModel):
     message: Message
     configuration: Optional[SendMessageConfiguration] = None
     metadata: Optional[dict[str, Any]] = None
+
+
+class SendMessageResponse(A2ABaseModel):
+    """A2A ``SendMessage`` result: exactly one of ``task`` or ``message``."""
+
+    task: Optional[Task] = None
+    message: Optional[Message] = None
 
 
 class StreamResponse(A2ABaseModel):

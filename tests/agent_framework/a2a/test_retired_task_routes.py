@@ -27,6 +27,8 @@ _KEPT_PATHS = frozenset({
     "/message:stream",
     "/tasks/{task_id}",
     "/tasks/{task_id}:cancel",
+    "/tasks/{task_id}:subscribe",
+    "/tasks",
     "/a2a/v1",
 })
 

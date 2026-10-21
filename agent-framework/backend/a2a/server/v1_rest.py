@@ -24,7 +24,15 @@ from a2a.server.helpers.converters import (
     _yield_task_event_sse,
 )
 from a2a.server.helpers.normalize import _normalize_a2a_v1_body
-from a2a.server.utils.headers import A2A_V1_AGENT_NAME, _a2a_v1_response_headers
+from a2a.server.helpers.wait import (
+    return_immediately_from_payload,
+    start_task_and_maybe_wait,
+)
+from a2a.server.utils.headers import (
+    A2A_JSON_MEDIA_TYPE,
+    A2A_V1_AGENT_NAME,
+    _a2a_v1_response_headers,
+)
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +70,9 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     from a2a.shared.errors import (
         http_bad_request,
         http_not_found,
+        http_push_notification_not_supported,
         http_task_not_found,
+        http_unsupported_operation,
         httpexception_to_a2a,
     )
     from a2a.server.helpers.resume import (
@@ -79,6 +89,14 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     def _v1_headers(thread=None):
         th = _thread_response_headers(thread) if thread is not None else None
         return _a2a_v1_response_headers(th)
+
+    def _rest_json(content: dict, *, status_code: int = 200, thread=None) -> JSONResponse:
+        return JSONResponse(
+            content=content,
+            status_code=status_code,
+            media_type=A2A_JSON_MEDIA_TYPE,
+            headers=_v1_headers(thread),
+        )
 
     def _resume_error_to_rest_response(
         result: ResumeResult, thread=None,
@@ -131,15 +149,15 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             AGENTS_DIR / A2A_V1_AGENT_NAME,
             fallback_framework_version=SERVER_VERSION,
         )
-        return JSONResponse(card, headers=_v1_headers())
+        return _rest_json(card)
 
     # -- SendMessage (A2A v1 Section 11) -------------------------------------
     @app.post("/message:send", status_code=202, tags=["a2a-v1", "tasks"])
     async def a2a_v1_send_message(request: Request) -> JSONResponse:
         """Submit a message to the orchestrator (A2A v1 REST binding).
 
-        Accepts both A2A v1 ``SendMessageRequest`` envelopes and legacy
-        PerfPilot payloads. Returns an A2A v1 ``Task`` object.
+        Returns a ``SendMessageResponse`` wrapper ``{"task": Task}``.
+        Blocking is the default (``returnImmediately`` omitted or false).
         """
         try:
             agent_name = A2A_V1_AGENT_NAME
@@ -163,13 +181,16 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         resume = await try_handle_resume(body)
         if resume.kind == RESUME_KIND_ERROR:
             return _resume_error_to_rest_response(resume, thread=thread)
+
+        immediate = return_immediately_from_payload(body)
         if resume.kind == RESUME_KIND_RESUMED:
-            resumed_task = resume.task
-            asyncio.create_task(task_executor.execute_task(resumed_task.task_id))
-            return JSONResponse(
-                content=_task_to_a2a_v1(resumed_task),
-                status_code=202,
-                headers=_v1_headers(thread),
+            resumed_task = await start_task_and_maybe_wait(
+                resume.task, task_executor, immediate,
+            )
+            return _rest_json(
+                {"task": _task_to_a2a_v1(resumed_task)},
+                status_code=202 if immediate else 200,
+                thread=thread,
             )
 
         task = await task_store.create_task(
@@ -181,12 +202,11 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             thread_id=thread.thread_id,
             subscriber_endpoints=_extract_subscriber_endpoints(body),
         )
-        asyncio.create_task(task_executor.execute_task(task.task_id))
-
-        return JSONResponse(
-            content=_task_to_a2a_v1(task),
-            status_code=202,
-            headers=_v1_headers(thread),
+        task = await start_task_and_maybe_wait(task, task_executor, immediate)
+        return _rest_json(
+            {"task": _task_to_a2a_v1(task)},
+            status_code=202 if immediate else 200,
+            thread=thread,
         )
 
     # -- SendStreamingMessage (A2A v1 Section 11) ----------------------------
@@ -282,8 +302,68 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         if task is None:
             return http_task_not_found(task_id)
 
-        return JSONResponse(
-            content=_task_to_a2a_v1(task),
+        return _rest_json(_task_to_a2a_v1(task))
+
+    # -- ListTasks (A2A v1 Section 11) ---------------------------------------
+    @app.get("/tasks", tags=["a2a-v1", "tasks"])
+    async def a2a_v1_list_tasks() -> JSONResponse:
+        """List tasks (A2A REST binding). Not implemented yet."""
+        return http_unsupported_operation(
+            "ListTasks",
+            detail="Filtered task listing is not yet implemented",
+        )
+
+    # -- SubscribeToTask (A2A v1 Section 11) ---------------------------------
+    @app.get("/tasks/{task_id}:subscribe", tags=["a2a-v1", "tasks"])
+    async def a2a_v1_subscribe_to_task(task_id: str, request: Request):
+        """Subscribe to an existing task as SSE (A2A REST binding)."""
+        try:
+            task_uuid = UUID(task_id)
+        except ValueError:
+            return http_bad_request(
+                "Malformed task_id",
+                reason="INVALID_ARGUMENT",
+                metadata={"taskId": task_id},
+            )
+
+        task = await task_store.get_task(task_uuid)
+        if task is None:
+            return http_task_not_found(task_id)
+
+        if task.status in task_store.TERMINAL_STATUSES:
+            return http_unsupported_operation(
+                "SubscribeToTask",
+                detail=f"Task is already in terminal state: {task.status}",
+            )
+
+        queue = await task_executor.subscribe(task.task_id)
+
+        async def _stream():
+            context_id = _payload_context_id(task.payload)
+            yield {
+                "event": "task",
+                "data": json.dumps(_task_to_a2a_v1(task)),
+            }
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield {"event": "ping", "data": "{}"}
+                        continue
+                    for frame in _yield_task_event_sse(
+                        event, context_id=context_id,
+                    ):
+                        yield frame
+                    if event.status in task_store.TERMINAL_STATUSES:
+                        break
+            finally:
+                await task_executor.unsubscribe(task.task_id, queue)
+
+        return EventSourceResponse(
+            _stream(),
             headers=_v1_headers(),
         )
 
@@ -310,8 +390,36 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         if refreshed is None:
             refreshed = task
 
-        return JSONResponse(
-            content=_task_to_a2a_v1(refreshed),
-            headers=_v1_headers(),
+        return _rest_json(_task_to_a2a_v1(refreshed))
+
+    # -- Push notifications (advertised as unsupported) ----------------------
+    @app.post("/tasks/{task_id}/pushNotificationConfigs", tags=["a2a-v1", "push"])
+    async def a2a_v1_create_push_config(task_id: str) -> JSONResponse:
+        return http_push_notification_not_supported(
+            "CreateTaskPushNotificationConfig",
+        )
+
+    @app.get("/tasks/{task_id}/pushNotificationConfigs", tags=["a2a-v1", "push"])
+    async def a2a_v1_list_push_configs(task_id: str) -> JSONResponse:
+        return http_push_notification_not_supported(
+            "ListTaskPushNotificationConfigs",
+        )
+
+    @app.get(
+        "/tasks/{task_id}/pushNotificationConfigs/{config_id}",
+        tags=["a2a-v1", "push"],
+    )
+    async def a2a_v1_get_push_config(task_id: str, config_id: str) -> JSONResponse:
+        return http_push_notification_not_supported(
+            "GetTaskPushNotificationConfig",
+        )
+
+    @app.delete(
+        "/tasks/{task_id}/pushNotificationConfigs/{config_id}",
+        tags=["a2a-v1", "push"],
+    )
+    async def a2a_v1_delete_push_config(task_id: str, config_id: str) -> JSONResponse:
+        return http_push_notification_not_supported(
+            "DeleteTaskPushNotificationConfig",
         )
 

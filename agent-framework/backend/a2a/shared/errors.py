@@ -40,6 +40,7 @@ from typing import Any, Optional
 from fastapi.responses import JSONResponse
 
 from .models import (
+    A2A_ERROR_NAMES,
     A2A_ERROR_TASK_NOT_CANCELABLE,
     A2A_ERROR_TASK_NOT_FOUND,
     A2A_ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED,
@@ -191,6 +192,7 @@ def a2a_http_error_response(
     return JSONResponse(
         content=a2a_http_error(http_status, grpc_status, message, details),
         status_code=http_status,
+        media_type="application/a2a+json",
         headers=headers,
     )
 
@@ -234,6 +236,38 @@ def http_bad_request(
         "INVALID_ARGUMENT",
         message,
         [_error_detail(reason, metadata=metadata)],
+    )
+
+
+def http_unsupported_operation(
+    operation: str,
+    detail: Optional[str] = None,
+) -> JSONResponse:
+    """Return a 400 ``UnsupportedOperationError`` response."""
+    metadata: dict[str, str] = {"operation": operation}
+    if detail:
+        metadata["detail"] = detail
+    return a2a_http_error_response(
+        400,
+        "FAILED_PRECONDITION",
+        A2A_ERROR_NAMES.get(A2A_ERROR_UNSUPPORTED_OPERATION, "UnsupportedOperationError"),
+        [_error_detail("UNSUPPORTED_OPERATION", metadata=metadata)],
+    )
+
+
+def http_push_notification_not_supported(operation: str) -> JSONResponse:
+    """Return a 400 ``PushNotificationNotSupportedError`` response."""
+    return a2a_http_error_response(
+        400,
+        "FAILED_PRECONDITION",
+        A2A_ERROR_NAMES.get(
+            A2A_ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED,
+            "PushNotificationNotSupportedError",
+        ),
+        [_error_detail(
+            "PUSH_NOTIFICATION_NOT_SUPPORTED",
+            metadata={"operation": operation},
+        )],
     )
 
 

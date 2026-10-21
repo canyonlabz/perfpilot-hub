@@ -22,13 +22,21 @@ depends on any private hostname, workspace, or API key.
 
 | Binding | Endpoint | Method | Response |
 |---------|----------|--------|----------|
-| **REST — send** | `POST /message:send` | HTTP | `202 Accepted` with an A2A v1 `Task` object |
+| **REST — send** | `POST /message:send` | HTTP | `SendMessageResponse` `{ "task": Task }` (`Content-Type: application/a2a+json`). `200` when the server waited; `202` when `returnImmediately` is true |
 | **REST — stream** | `POST /message:stream` | HTTP (`Accept: text/event-stream`) | Server-Sent Events stream of `StreamResponse` frames |
-| **JSON-RPC — send** | `POST /a2a/v1` | `"method": "SendMessage"` | JSON-RPC success envelope wrapping a `Task` object |
+| **REST — subscribe** | `GET /tasks/{task_id}:subscribe` | HTTP (`Accept: text/event-stream`) | SSE stream for an existing non-terminal task |
+| **JSON-RPC — send** | `POST /a2a/v1` | `"method": "SendMessage"` | JSON-RPC `result` is `{ "task": Task }` (or `{ "message": Message }`) |
 | **JSON-RPC — stream** | `POST /a2a/v1` | `"method": "SendStreamingMessage"` | JSON-RPC success envelope wrapping an SSE stream |
+| **JSON-RPC — get / cancel** | `POST /a2a/v1` | `"method": "GetTask"` / `"CancelTask"` | JSON-RPC `result` is a **bare** `Task` (not `{ "task": ... }`) |
 | **Discovery** | `GET /.well-known/agent-card.json` | HTTP | Public agent card (A2A §8) |
-| **Task fetch** | `GET /tasks/{task_id}` | HTTP | `Task` object |
-| **Task cancel** | `POST /tasks/{task_id}:cancel` | HTTP | Updated `Task` object |
+| **Task fetch** | `GET /tasks/{task_id}` | HTTP | Bare `Task` object |
+| **Task cancel** | `POST /tasks/{task_id}:cancel` | HTTP | Bare updated `Task` object |
+| **Task list** | `GET /tasks` | HTTP | Not implemented (`UnsupportedOperationError`) |
+
+`SendMessageConfiguration.returnImmediately` defaults to `false` (blocking):
+the server waits until the task is terminal or interrupted
+(`INPUT_REQUIRED` / `AUTH_REQUIRED`) before returning. Set
+`returnImmediately: true` to get the submitted task back immediately.
 
 The same server accepts the same `message` body on all four of the send
 paths. Clients pick the binding that matches their transport

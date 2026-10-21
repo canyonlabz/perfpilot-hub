@@ -22,6 +22,7 @@ from typing import Any, Optional, Union
 
 from .models import (
     A2A_ERROR_NAMES,
+    A2A_ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED,
     A2A_ERROR_TASK_NOT_FOUND,
     A2A_ERROR_UNSUPPORTED_OPERATION,
     a2a_timestamp,
@@ -56,6 +57,14 @@ STREAMING_METHODS: frozenset[str] = frozenset({
     "SubscribeToTask",
 })
 
+PUSH_NOTIFICATION_METHODS: frozenset[str] = frozenset({
+    "CreateTaskPushNotificationConfig",
+    "GetTaskPushNotificationConfig",
+    "ListTaskPushNotificationConfigs",
+    "DeleteTaskPushNotificationConfig",
+    "SetTaskPushNotificationConfig",
+})
+
 SUPPORTED_METHODS: frozenset[str] = frozenset({
     "SendMessage",
     "SendStreamingMessage",
@@ -64,7 +73,7 @@ SUPPORTED_METHODS: frozenset[str] = frozenset({
     "CancelTask",
     "SubscribeToTask",
     "GetExtendedAgentCard",
-})
+}) | PUSH_NOTIFICATION_METHODS
 
 
 def is_streaming_method(method: str) -> bool:
@@ -359,6 +368,33 @@ def task_not_found_error(
         a2a_error_data(
             "TASK_NOT_FOUND",
             metadata={"taskId": task_id, "timestamp": a2a_timestamp()},
+        ),
+    )
+
+
+def push_notification_not_supported_error(
+    req_id: Union[str, int, None],
+    operation: str,
+) -> dict:
+    """Build a ``PushNotificationNotSupportedError`` JSON-RPC response.
+
+    Args:
+        req_id: The JSON-RPC request identifier.
+        operation: The push-notification method that was requested.
+
+    Returns:
+        A complete JSON-RPC error response dict.
+    """
+    return jsonrpc_error(
+        req_id,
+        A2A_ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED,
+        A2A_ERROR_NAMES.get(
+            A2A_ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED,
+            "PushNotificationNotSupportedError",
+        ),
+        a2a_error_data(
+            "PUSH_NOTIFICATION_NOT_SUPPORTED",
+            metadata={"operation": operation},
         ),
     )
 
