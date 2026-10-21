@@ -23,6 +23,7 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [🧵 11. Required `contextId`](#11-required-contextid)
 - [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
 - [🪪 13. A2A Agent Cards](#13-a2a-agent-cards)
+- [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -89,7 +90,8 @@ A comparison report names the runs to compare. The framework does not mint a new
 
 ## 📄 6. A2A server data contract
 
-New public reference: [`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md).
+Public reference: [`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md)
+(rewritten after the A2A compliance pass; see §14).
 
 It describes what an upstream framework sends on an inbound A2A request:
 
@@ -197,6 +199,17 @@ On-disk Agent Cards and the stub synthesizer now use official A2A
 moved into `metadata`. `provider.url` is the `{host}:{port}`
 placeholder (hostname auto-injection stays backlog-only).
 `list_available_specialists` reads those metadata fields.
+
+---
+
+## 📘 14. A2A data-contract rewrite
+
+[`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md)
+is the post-compliance inbound contract: required `contextId` (never
+minted), optional matching `X-External-Thread-Id`, official envelope
+`metadata`, no flat legacy payload, correct JSON-RPC / REST wrappers,
+Removed API, and Agent Card metadata. Unit coverage for those rules
+lives under `tests/agent_framework/a2a/`.
 
 ---
 

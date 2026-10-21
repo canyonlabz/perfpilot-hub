@@ -43,6 +43,8 @@ def _route_paths() -> set[str]:
 
 
 def test_retired_custom_task_routes_are_unregistered() -> None:
+    """Unregistered paths 404. This suite stays DB-free by checking the
+    route table instead of issuing HTTP."""
     paths = _route_paths()
     still_present = _RETIRED_PATHS & paths
     assert not still_present, (
