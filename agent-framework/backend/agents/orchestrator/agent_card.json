@@ -54,7 +54,7 @@
     {
       "id": "delegate_to_specialist",
       "name": "Delegate to a specialist",
-      "description": "Routes a task payload to a specific specialist agent via the local A2A surface (POST /agents/{agent_name}/tasks/send). Returns the specialist's task_id immediately; the underlying work is asynchronous and tracked through `check_task_status`. The orchestrator includes the call's `test_run_id` (when present) and the resolved `session_id` / `external_session_id` in the propagated payload so downstream agents can correlate.",
+      "description": "Routes a task payload to a specific specialist agent in-process. Returns the specialist's task_id immediately; the underlying work is asynchronous and tracked through `check_task_status`. The orchestrator includes the call's `test_run_id` (when present) and the resolved `session_id` / `external_session_id` in the propagated payload so downstream agents can correlate.",
       "tags": ["delegation", "a2a", "async"],
       "examples": [
         "Run a load test on the spec I uploaded.",
@@ -67,7 +67,7 @@
     {
       "id": "check_task_status",
       "name": "Check task status",
-      "description": "Polls a previously-delegated task and returns its current status (pending / running / completed / failed / cancelled) plus the result or error payload when terminal. Used by the orchestrator to decide when to advance the pipeline to the next stage, and by users to ask 'is it done yet?'. Polling cadence is throttled (>=5 seconds between checks); SSE subscription via /agents/{name}/tasks/sendSubscribe is preferred when the caller wants live updates.",
+      "description": "Polls a previously-delegated task and returns its current status (pending / running / completed / failed / cancelled) plus the result or error payload when terminal. Used by the orchestrator to decide when to advance the pipeline to the next stage, and by users to ask 'is it done yet?'. Polling cadence is throttled (>=5 seconds between checks); SSE subscription via POST /message:stream (or JSON-RPC SendStreamingMessage) is preferred when the caller wants live updates.",
       "tags": ["status", "polling", "async"],
       "examples": [
         "Is the load test done yet?",

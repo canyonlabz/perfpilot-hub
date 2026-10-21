@@ -25,11 +25,11 @@ and wrap the result.
 - Tools are defined as module-level functions so the smoke test can
   import and exercise them directly (`from agents.orchestrator.agent
   import list_available_specialists`) without spinning up an LLM.
-- `delegate_to_specialist` and `check_task_status` call back into the
-  *local* A2A surface via httpx (default `http://127.0.0.1:8101`,
-  overridable via `PERFPILOT_A2A_BASE_URL`). They return structured
-  dicts (success or error) rather than raising, so the LLM can narrate
-  failures to the user instead of the agent loop crashing.
+- `delegate_to_specialist` and `check_task_status` create and read
+  specialist tasks in-process via `task_store` + `task_executor`.
+  They return structured dicts (success or error) rather than raising,
+  so the LLM can narrate failures to the user instead of the agent
+  loop crashing.
 - `request_human_approval` is `async` (AG2 0.13.3 supports async tools
   natively): it inserts a row via `hitl_store.create_prompt`, polls
   `hitl_store.get_approval` until terminal state or timeout.
@@ -72,12 +72,6 @@ AGENTS_ROOT = FRAMEWORK_DIR / "agents"  # agent-framework/backend/agents/
 INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
 AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"
 
-# A2A base URL for the orchestrator's delegate / check tools. Defaults to
-# the local A2A server on port 8101; operators can override via env var if
-# they ever decouple the deployment topology.
-DEFAULT_A2A_BASE_URL = "http://127.0.0.1:8101"
-A2A_BASE_URL_ENV = "PERFPILOT_A2A_BASE_URL"
-
 # AG-UI base URL for Web UI delegation. Resolution order:
 #   1. PERFPILOT_AGUI_BASE_URL  (full URL override)
 #   2. http://127.0.0.1:{AGUI_PORT}  (reads same env var agui_server.py uses)
@@ -93,11 +87,11 @@ AGUI_PORT_ENV = "AGUI_PORT"
 
 # ── ContextVars (A2A task-executor path only) ──
 # AG2 runs tool functions in an isolated thread, so ContextVars set in
-# the AG-UI handler do NOT propagate into tool execution. Web UI tool
-# functions therefore use HTTP calls to the AG-UI server's own endpoints
-# (POST /api/delegate, GET /api/tasks/{id}) instead of direct DB access.
-# These ContextVars remain only for the A2A task_executor path, which
-# invokes the orchestrator in the same thread where the vars are set.
+# the AG-UI handler do NOT propagate into tool execution. Specialist
+# delegation therefore uses standalone DB connections
+# (`_standalone_create_task` / `_standalone_get_task`) rather than the
+# shared pool. These ContextVars remain for the A2A task_executor path,
+# which invokes the orchestrator in the same thread where the vars are set.
 agent_user_id_var: ContextVar[Optional[str]] = ContextVar("perfpilot_agent_user_id", default=None)
 agent_thread_id_var: ContextVar[Optional[str]] = ContextVar("perfpilot_agent_thread_id", default=None)
 agent_external_session_id_var: ContextVar[Optional[str]] = ContextVar(
@@ -406,11 +400,11 @@ def _register_tools(agent: Any) -> None:
     agent.register_for_llm(
         name="delegate_to_specialist",
         description=(
-            "Route a task payload to a specific specialist agent via the local A2A "
-            "surface (POST /agents/{agent_name}/tasks/send). Returns immediately with "
-            "the specialist's task_id; the actual work runs asynchronously. Always include "
-            "test_run_id when the work is part of a tracked test run so downstream agents "
-            "correlate. Use after list_available_specialists confirms the target is enabled."
+            "Route a task payload to a specific specialist agent in-process. Returns "
+            "immediately with the specialist's task_id; the actual work runs asynchronously. "
+            "Always include test_run_id when the work is part of a tracked test run so "
+            "downstream agents correlate. Use after list_available_specialists confirms "
+            "the target is enabled."
         ),
     )(delegate_to_specialist)
     agent.register_for_execution()(delegate_to_specialist)
@@ -574,20 +568,11 @@ async def delegate_to_specialist(
 ) -> str:
     """Create and dispatch work on a specialist agent.
 
-    Dual routing: the target surface depends on where the
-    orchestrator itself was invoked from.
-
-      - **Web UI** (``agent_request_source_var == "web_ui"``):
-        Direct in-process delegation via ``task_store.create_task()``
-        + ``task_executor.execute_task()``. The CopilotKit
-        ``thread_id`` is stored directly on the task so the browser's
-        Tasks panel can discover it. No HTTP hop — avoids the event-
-        loop deadlock that occurs when a synchronous tool POSTs back
-        to the same ASGI server.
-      - **A2A / headless** (default):
-        Async HTTP POST to the A2A server
-        ``/agents/{name}/tasks/send``. The thread travels as
-        ``X-External-Thread-Id``.
+    Always in-process: ``task_store.create_task()`` plus
+    ``task_executor.execute_task()``. The caller thread (Web UI
+    CopilotKit ``thread_id`` or A2A ``X-Thread-Id``) is stored on the
+    child task so the Tasks panel and SSE proxy can discover it. No
+    HTTP hop back to the A2A surface.
 
     Returns immediately (the work runs asynchronously). Use
     ``check_task_status(agent_name, task_id)`` for polling.
@@ -815,42 +800,6 @@ async def _delegate_via_agui(
     return json.dumps(body_out)
 
 
-async def _delegate_via_a2a(
-    agent_name: str,
-    payload: Optional[dict],
-    test_run_id: Optional[str],
-) -> str:
-    """HTTP delegation to the A2A server for external framework callers."""
-    import httpx
-
-    base = _a2a_base_url()
-    url = f"{base}/agents/{agent_name}/tasks/send"
-    headers = _agent_outbound_headers()
-    body = dict(payload or {})
-    if test_run_id is not None:
-        body.setdefault("test_run_id", test_run_id)
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=body, headers=headers)
-    except Exception as exc:
-        log.warning("delegate_to_specialist HTTP error (%s): %s", url, exc)
-        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
-
-    if response.status_code >= 400:
-        return json.dumps({
-            "ok": False,
-            "error": {
-                "type": "HTTPError",
-                "status_code": response.status_code,
-                "message": response.text[:500],
-            },
-        })
-    body_out = response.json() if response.content else {}
-    body_out["ok"] = True
-    return json.dumps(body_out)
-
-
 # =============================================================================
 # Tool 3 (PBI 3.7.5): check_task_status
 # =============================================================================
@@ -887,11 +836,7 @@ async def check_task_status(
 ) -> str:
     """GET the current status of a previously-delegated task.
 
-    Dual routing: mirrors ``delegate_to_specialist``.
-
-      - **Web UI**: direct ``task_store.get_task()`` (no HTTP hop).
-      - **A2A**: async HTTP GET to
-        ``/agents/{name}/tasks/{id}`` on the A2A surface.
+    Always in-process via ``task_store.get_task()`` (no HTTP hop).
 
     Returns:
         On success: the full task dict (``task_id``, ``status``,
@@ -965,44 +910,6 @@ async def _check_task_status_agui(task_id: str) -> str:
     body_out = response.json() if response.content else {}
     body_out["ok"] = True
     return json.dumps(body_out)
-
-
-async def _check_task_status_a2a(agent_name: str, task_id: str) -> str:
-    """HTTP task status check via the A2A server."""
-    import httpx
-
-    base = _a2a_base_url()
-    url = f"{base}/agents/{agent_name}/tasks/{task_id}"
-    headers = _agent_outbound_headers()
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url, headers=headers)
-    except Exception as exc:
-        log.warning("check_task_status HTTP error: %s", exc)
-        return json.dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
-
-    if response.status_code == 404:
-        return json.dumps({
-            "ok": False,
-            "error": {
-                "type": "NotFound",
-                "status_code": 404,
-                "message": f"Task {task_id} not found for agent {agent_name}.",
-            },
-        })
-    if response.status_code >= 400:
-        return json.dumps({
-            "ok": False,
-            "error": {
-                "type": "HTTPError",
-                "status_code": response.status_code,
-                "message": response.text[:500],
-            },
-        })
-    body = response.json() if response.content else {}
-    body["ok"] = True
-    return json.dumps(body)
 
 
 # =============================================================================
@@ -1209,11 +1116,6 @@ def _resolved_config_filename() -> str:
 
     path = resolve_agent_config_path(AGENT_DIR)
     return path.name if path else "<none>"
-
-
-def _a2a_base_url() -> str:
-    """Return the local A2A surface base URL (env-overridable)."""
-    return os.environ.get(A2A_BASE_URL_ENV, DEFAULT_A2A_BASE_URL).rstrip("/")
 
 
 def _agui_base_url() -> str:

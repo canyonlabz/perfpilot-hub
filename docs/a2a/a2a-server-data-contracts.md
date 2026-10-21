@@ -735,3 +735,34 @@ Standard A2A error codes used by PerfPilot:
 | `-32001`| `TaskNotFoundError`             | Resume targeted a `taskId` that does not exist     |
 | `-32004`| `UnsupportedOperationError`     | Resume targeted a non-paused task, or `contextId` mismatch |
 | `-32602`| `InvalidParams` (JSON-RPC std.) | Request body is missing required fields            |
+
+---
+
+## 🚫 12. Removed API
+
+The following custom PerfPilot task routes are **gone**. They are not
+aliased, rewritten, or dual-maintained. Callers must use the A2A v1
+bindings in §1.
+
+| Removed | Replacement |
+|---------|-------------|
+| `POST /agents/{name}/tasks/send` | JSON-RPC `POST /a2a/v1` (`SendMessage`) or REST `POST /message:send` |
+| `POST /agents/{name}/tasks/sendSubscribe` | JSON-RPC `POST /a2a/v1` (`SendStreamingMessage`) or REST `POST /message:stream` |
+| `GET /agents/{name}/tasks/{task_id}` | JSON-RPC `GetTask` or REST `GET /tasks/{task_id}` |
+| `POST /agents/{name}/tasks/{task_id}/cancel` | JSON-RPC `CancelTask` or REST `POST /tasks/{task_id}:cancel` |
+| `GET /agents/{name}/tasks/get?task_id=...` | REST `GET /tasks/{task_id}` |
+| Catalog field `tasks_send_url` on `GET /agents` | Dropped. Catalog still returns `name` and `agent_card_url` |
+
+Public A2A traffic is orchestrator-centric. Specialist work is created
+in-process by the orchestrator's `delegate_to_specialist` tool; it is
+not submitted over `/agents/{name}/tasks/*`.
+
+Kept (not A2A task routes):
+
+- `GET /health`
+- `GET /agents` (Web UI catalog)
+- `GET /agents/{name}/.well-known/agent.json` (Web UI catalog)
+- AG-UI port 8102 (`/api/delegate`, `/api/tasks`, `/api/events`, `/copilotkit/`) — unchanged
+
+Snake-case flat task bodies on the retired paths are not accepted on
+the v1 bindings. New clients send the A2A Message envelope in §1.1.

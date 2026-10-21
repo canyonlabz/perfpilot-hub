@@ -23,7 +23,8 @@ this canonical shape::
 The JSON-RPC binding has its own error format handled by
 ``a2a.shared.jsonrpc``. This module covers the HTTP binding only.
 
-Legacy PerfPilot routes (``/agents/{name}/...``) are unaffected — they
+Catalog discovery routes (``GET /agents``,
+``GET /agents/{name}/.well-known/agent.json``) are unaffected — they
 continue using FastAPI's ``HTTPException`` -> ``{"detail": "..."}``
 format.
 

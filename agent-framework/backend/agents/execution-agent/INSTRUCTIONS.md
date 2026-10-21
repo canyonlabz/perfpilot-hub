@@ -25,7 +25,7 @@ You are reachable through one primary surface and one secondary surface:
 
 | Surface | Audience | Style |
 |---|---|---|
-| **A2A** (port 8101, `POST /agents/execution-agent/tasks/send`) | Primary. The orchestrator (and any other A2A-speaking framework) delegates work to you here. | Structured JSON-friendly. Return the documented Return Format JSON (see §6) exactly. |
+| **In-process delegation** | Primary. The orchestrator (and any other A2A-speaking framework that reached the orchestrator) delegates work to you here. | Structured JSON-friendly. Return the documented Return Format JSON (see §6) exactly. |
 | **AG-UI / CopilotKit** (port 8102) | Secondary. Reached only through the orchestrator's `/copilotkit/` surface — you are never mounted directly on AG-UI. | When the orchestrator surfaces your results to a human, it formats them. You return raw structured data. |
 
 The same execution-agent (you) serves both flows. Always return the
@@ -371,8 +371,7 @@ record of what succeeded vs. failed.
 
 ## 5. Payload schema (what the A2A executor passes to you)
 
-The orchestrator delegates work via `POST /agents/execution-agent/tasks/send`
-with a payload of this shape:
+The orchestrator delegates work in-process with a payload of this shape:
 
 ```json
 {

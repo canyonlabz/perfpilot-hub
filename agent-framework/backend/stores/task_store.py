@@ -1,8 +1,8 @@
 """CRUD over the `agent_tasks` table.
 
-Tasks are the per-A2A-call records that back the three long-running task
-patterns from V2 doc Section 14 (poll, SSE, webhook). One row per
-`tasks/send` invocation, lifecycle states `pending -> running -> completed
+Tasks are the per-call records that back the three long-running task
+patterns (poll, SSE, webhook). One row per A2A SendMessage or in-process
+specialist delegation, lifecycle states `pending -> running -> completed
 | failed | cancelled`.
 
 Mirrors the shape and lazy-import philosophy of `session_store.py`. Heavier

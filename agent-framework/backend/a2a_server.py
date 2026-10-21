@@ -1,19 +1,16 @@
-"""A2A FastAPI server for PerfPilot Agents (V2 doc Section 9, port 8101).
+"""A2A FastAPI server for PerfPilot Agents (port 8101).
 
-One ASGI app exposing all seven agents through path-based routing under
-`/agents/{name}/...`. Endpoints follow the A2A protocol exactly (no
-PerfPilot branding) so off-the-shelf A2A clients integrate without
-adapters. Branding lives only on port 8102 (the AG-UI bridge, F3.6).
+Public A2A traffic uses the JSON-RPC and REST bindings below so
+standards-compliant clients can talk to PerfPilot without adapters.
+Agent catalog discovery under ``/agents/{name}/...`` remains for the
+Web UI catalog proxy; specialist work is not submitted on those paths.
+Branding lives only on port 8102 (the AG-UI bridge).
 
-Legacy PerfPilot endpoints (V2 Section 9.2):
+Discovery / liveness (used by the Web UI catalog proxy):
 
     GET  /health                                            - liveness probe
     GET  /agents                                            - list discoverable agents
     GET  /agents/{name}/.well-known/agent.json              - agent card (RFC 8615)
-    POST /agents/{name}/tasks/send                          - submit task (poll/webhook)
-    POST /agents/{name}/tasks/sendSubscribe                 - submit task + SSE stream
-    GET  /agents/{name}/tasks/{task_id}                     - poll task state
-    POST /agents/{name}/tasks/{task_id}/cancel              - cancel a running task
 
 A2A v1.0.0 HTTP+JSON/REST binding (Spec Section 11):
 
@@ -36,12 +33,14 @@ Route registration for A2A v1 is delegated to sub-modules:
     a2a.shared.errors      — google.rpc.Status error builders (HTTP binding)
     a2a.shared.jsonrpc     — JSON-RPC 2.0 envelope, error helpers
 
-Long-running task model (V2 Section 14):
+Long-running task model:
 
-    Pattern 1 - Polling: caller submits via tasks/send, polls GET tasks/{id}.
-    Pattern 2 - SSE:     caller submits via tasks/sendSubscribe, holds open
-                         the SSE stream until the task reaches terminal state.
-    Pattern 3 - Webhook: caller submits with `subscriber_endpoints`; server
+    Pattern 1 - Polling: caller submits via SendMessage / POST /message:send,
+                         then polls GET /tasks/{id} (or JSON-RPC GetTask).
+    Pattern 2 - SSE:     caller submits via SendStreamingMessage /
+                         POST /message:stream and holds the SSE stream until
+                         the task reaches a terminal state.
+    Pattern 3 - Webhook: caller submits with ``subscriber_endpoints``; server
                          POSTs the final body to each URL on completion.
 
 Run locally:
@@ -56,14 +55,12 @@ Or via uvicorn from the agent-framework folder:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 if __package__ is None:
@@ -72,7 +69,6 @@ if __package__ is None:
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sse_starlette.sse import EventSourceResponse
 
 from utils import agents_config
 from services import task_executor
@@ -178,7 +174,6 @@ def _register_routes(app: FastAPI) -> None:
                 {
                     "name": name,
                     "agent_card_url": f"/agents/{name}/.well-known/agent.json",
-                    "tasks_send_url": f"/agents/{name}/tasks/send",
                 }
                 for name in names
             ],
@@ -199,128 +194,6 @@ def _register_routes(app: FastAPI) -> None:
             fallback_framework_version=SERVER_VERSION,
         )
         return JSONResponse(card)
-
-    # -- Task endpoints ----------------------------------------------------------
-    @app.post("/agents/{agent_name}/tasks/send", status_code=202, tags=["tasks"])
-    async def tasks_send(agent_name: str, request: Request) -> JSONResponse:
-        await _require_enabled_agent(agent_name)
-        session_id = _require_session(request)
-        body = await _read_json_body(request)
-
-        thread = await _resolve_a2a_thread(request, agent_name)
-        body["_perfpilot_thread"] = {
-            "thread_id": thread.thread_id,
-            "external_thread_id": thread.external_thread_id,
-        }
-        body.setdefault("metadata", {})["request_mode"] = "send"
-
-        task = await task_store.create_task(
-            session_id=session_id,
-            external_session_id=getattr(request.state, "external_session_id", None),
-            agent_name=agent_name,
-            payload=body,
-            test_run_id=body.get("test_run_id"),
-            thread_id=thread.thread_id,
-            subscriber_endpoints=_extract_subscriber_endpoints(body),
-        )
-        asyncio.create_task(task_executor.execute_task(task.task_id))
-
-        return JSONResponse(
-            content={
-                "task_id": str(task.task_id),
-                "session_id": str(task.session_id),
-                "agent_name": task.agent_name,
-                "status": task.status,
-                "thread_id": thread.thread_id,
-                "external_thread_id": thread.external_thread_id,
-                "submitted_at": task.submitted_at.isoformat(),
-            },
-            status_code=202,
-            headers=_thread_response_headers(thread),
-        )
-
-    @app.post("/agents/{agent_name}/tasks/sendSubscribe", tags=["tasks"])
-    async def tasks_send_subscribe(agent_name: str, request: Request) -> EventSourceResponse:
-        await _require_enabled_agent(agent_name)
-        session_id = _require_session(request)
-        body = await _read_json_body(request)
-
-        thread = await _resolve_a2a_thread(request, agent_name)
-        body["_perfpilot_thread"] = {
-            "thread_id": thread.thread_id,
-            "external_thread_id": thread.external_thread_id,
-        }
-        body.setdefault("metadata", {})["request_mode"] = "streaming"
-
-        task = await task_store.create_task(
-            session_id=session_id,
-            external_session_id=getattr(request.state, "external_session_id", None),
-            agent_name=agent_name,
-            payload=body,
-            test_run_id=body.get("test_run_id"),
-            thread_id=thread.thread_id,
-            subscriber_endpoints=_extract_subscriber_endpoints(body),
-        )
-        queue = await task_executor.subscribe(task.task_id)
-        asyncio.create_task(task_executor.execute_task(task.task_id))
-
-        async def _stream():
-            yield {
-                "event": "snapshot",
-                "data": json.dumps({
-                    "task_id": str(task.task_id),
-                    "session_id": str(task.session_id),
-                    "agent_name": task.agent_name,
-                    "status": task.status,
-                    "submitted_at": task.submitted_at.isoformat(),
-                }),
-            }
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    except asyncio.TimeoutError:
-                        # Heartbeat keeps proxies from killing the connection.
-                        yield {"event": "ping", "data": "{}"}
-                        continue
-                    yield {"event": "state", "data": event.to_sse_data()}
-                    if event.status in task_store.TERMINAL_STATUSES:
-                        break
-            finally:
-                await task_executor.unsubscribe(task.task_id, queue)
-
-        return EventSourceResponse(_stream(), headers=_thread_response_headers(thread))
-
-    @app.get("/agents/{agent_name}/tasks/{task_id}", tags=["tasks"])
-    async def tasks_get(agent_name: str, task_id: str, request: Request) -> dict:
-        await _require_enabled_agent(agent_name)
-        try:
-            task_uuid = UUID(task_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
-
-        task = await task_store.get_task(task_uuid)
-        if task is None or task.agent_name != agent_name:
-            raise HTTPException(status_code=404, detail="Task not found for this agent")
-
-        return _task_to_dict(task)
-
-    @app.post("/agents/{agent_name}/tasks/{task_id}/cancel", tags=["tasks"])
-    async def tasks_cancel(agent_name: str, task_id: str) -> dict:
-        await _require_enabled_agent(agent_name)
-        try:
-            task_uuid = UUID(task_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Malformed task_id") from exc
-
-        task = await task_store.get_task(task_uuid)
-        if task is None or task.agent_name != agent_name:
-            raise HTTPException(status_code=404, detail="Task not found for this agent")
-
-        changed = await task_store.mark_cancelled(task_uuid, reason="cancelled via A2A")
-        return {"task_id": task_id, "cancelled": changed, "previous_status": task.status}
 
 
 # =============================================================================
@@ -374,27 +247,6 @@ def _extract_subscriber_endpoints(body: dict) -> list[str]:
     if isinstance(webhook, str) and webhook.strip() and webhook.strip() not in out:
         out.append(webhook.strip())
     return out
-
-
-_resolve_a2a_thread = context._resolve_a2a_thread
-_thread_response_headers = context._thread_response_headers
-
-
-def _task_to_dict(task: task_store.AgentTask) -> dict:
-    return {
-        "task_id": str(task.task_id),
-        "session_id": str(task.session_id) if task.session_id else None,
-        "external_session_id": task.external_session_id,
-        "agent_name": task.agent_name,
-        "status": task.status,
-        "test_run_id": task.test_run_id,
-        "result": task.result,
-        "error": task.error,
-        "subscriber_endpoints": task.subscriber_endpoints,
-        "submitted_at": task.submitted_at.isoformat() if task.submitted_at else None,
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-    }
 
 
 # =============================================================================

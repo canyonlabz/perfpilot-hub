@@ -37,8 +37,9 @@ log = logging.getLogger(__name__)
 def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     """Register A2A v1.0.0 HTTP+JSON/REST binding routes.
 
-    All routes implicitly target the orchestrator agent. These are
-    additive alongside the existing legacy ``/agents/{name}/...`` routes.
+    All routes implicitly target the orchestrator agent. Catalog
+    discovery under ``/agents/{name}/.well-known/agent.json`` remains
+    registered separately by ``a2a_server._register_routes``.
 
     Args:
         app: The FastAPI application instance.

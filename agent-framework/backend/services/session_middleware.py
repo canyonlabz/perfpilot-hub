@@ -4,7 +4,7 @@ Implements V2 doc Section 4.3:
 
     external_session_id  (optional)  inbound from upstream SDLC, opaque
     session_id           (required)  one UI tab / Cursor connection / A2A peer
-    task_id              (required)  one A2A `tasks/send` call
+    task_id              (required)  one A2A SendMessage / in-process specialist task
 
 For every inbound request to the A2A server (port 8101) and the AG-UI bridge
 (port 8102), this middleware:

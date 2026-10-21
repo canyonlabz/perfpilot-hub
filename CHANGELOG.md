@@ -18,6 +18,7 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [📄 6. A2A server data contract](#6-a2a-server-data-contract)
 - [✨ 7. Files created](#7-files-created)
 - [🔧 8. Files modified](#8-files-modified)
+- [🚫 9. Removed custom A2A task routes](#9-removed-custom-a2a-task-routes)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -135,6 +136,20 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 
 ---
 
+## 🚫 9. Removed custom A2A task routes
+
+Custom PerfPilot task URLs under `/agents/{name}/tasks/*` are retired.
+JSON-RPC (`POST /a2a/v1`) is the primary A2A binding; REST
+(`/message:send`, `/message:stream`, `/tasks/{id}`) remains supported.
+The Web UI catalog (`GET /agents`, `GET /agents/{name}/.well-known/agent.json`)
+and AG-UI (port 8102) are unchanged. Orchestrator specialist
+delegation is in-process; it no longer HTTP-POSTs the deleted routes.
+
+See [A2A server data contract §12](docs/a2a/a2a-server-data-contracts.md#12-removed-api)
+for the replacement table.
+
+---
+
 ## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
@@ -151,4 +166,4 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 
 ---
 
-*Last Updated: October 11, 2026* ✨
+*Last Updated: October 20, 2026* ✨
