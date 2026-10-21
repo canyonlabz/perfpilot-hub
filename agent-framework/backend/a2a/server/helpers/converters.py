@@ -44,9 +44,7 @@ def _task_to_a2a_v1(task: task_store.AgentTask) -> dict:
 
     task_status = TaskStatus(state=a2a_state, timestamp=status_timestamp)
 
-    context_id = None
-    if isinstance(task.payload, dict):
-        context_id = task.payload.get("_a2a_v1_context_id")
+    context_id = _payload_context_id(task.payload)
 
     artifacts = None
     artifact = _reply_text_artifact(str(task.task_id), task.result)
@@ -93,14 +91,18 @@ def _context_id_from_task_or_event(
     context_id: Optional[str] = None,
     task: Optional[task_store.AgentTask] = None,
 ) -> str:
-    """Resolve A2A ``contextId`` for streaming events (required by spec)."""
-    if isinstance(context_id, str) and context_id:
-        return context_id
-    if task is not None and isinstance(task.payload, dict):
-        cid = task.payload.get("_a2a_v1_context_id")
-        if isinstance(cid, str) and cid:
+    """Resolve A2A ``contextId`` for streaming events (required by spec).
+
+    Never returns an empty string. Callers must have a real conversation
+    id from the inbound message or the stored task payload.
+    """
+    if isinstance(context_id, str) and context_id.strip():
+        return context_id.strip()
+    if task is not None:
+        cid = _payload_context_id(task.payload)
+        if cid is not None:
             return cid
-    return ""
+    raise ValueError("contextId is required on A2A Task and StreamResponse events")
 
 
 def _payload_context_id(payload: Any) -> Optional[str]:

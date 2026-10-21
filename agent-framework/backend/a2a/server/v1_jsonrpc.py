@@ -27,6 +27,7 @@ from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
 )
+from a2a.server.utils.context import ContextResolutionError
 from a2a.server.utils.headers import A2A_V1_AGENT_NAME, _a2a_v1_response_headers
 
 log = logging.getLogger(__name__)
@@ -116,6 +117,16 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             a2a_error_data("INVALID_PARAMS", metadata=metadata),
         )
 
+    def _context_error_to_jsonrpc(
+        exc: ContextResolutionError, rpc_id,
+    ) -> dict:
+        return jsonrpc_error(
+            rpc_id,
+            JSONRPC_INVALID_PARAMS,
+            "Invalid parameters",
+            a2a_error_data("INVALID_PARAMS", metadata=exc.metadata),
+        )
+
     async def _handle_send_message(
         rpc: JsonRpcRequest, request: Request,
     ) -> dict:
@@ -127,7 +138,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         body = rpc.params
         body = _normalize_a2a_v1_body(body)
 
-        thread = await _resolve_a2a_thread(request, agent_name)
+        try:
+            thread = await _resolve_a2a_thread(request, agent_name, body)
+        except ContextResolutionError as exc:
+            return _context_error_to_jsonrpc(exc, rpc.id)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
@@ -233,7 +247,13 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         body = rpc.params
         body = _normalize_a2a_v1_body(body)
 
-        thread = await _resolve_a2a_thread(request, agent_name)
+        try:
+            thread = await _resolve_a2a_thread(request, agent_name, body)
+        except ContextResolutionError as exc:
+            return JSONResponse(
+                content=_context_error_to_jsonrpc(exc, rpc.id),
+                headers=_v1_headers(),
+            )
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
@@ -341,10 +361,24 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
                 headers=_v1_headers(),
             )
 
+        context_id = _payload_context_id(task.payload)
+        if context_id is None:
+            return JSONResponse(
+                content=jsonrpc_error(
+                    rpc.id,
+                    JSONRPC_INVALID_PARAMS,
+                    "Invalid parameters",
+                    a2a_error_data("INVALID_PARAMS", metadata={
+                        "detail": "Task has no contextId",
+                        "taskId": task_id,
+                    }),
+                ),
+                headers=_v1_headers(),
+            )
+
         queue = await task_executor.subscribe(task.task_id)
 
         async def _sse():
-            context_id = _payload_context_id(task.payload)
             yield {
                 "event": "task",
                 "data": jsonrpc_sse_event(rpc.id, {"task": _task_to_a2a_v1(task)}),

@@ -20,6 +20,7 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [🔧 8. Files modified](#8-files-modified)
 - [🚫 9. Removed custom A2A task routes](#9-removed-custom-a2a-task-routes)
 - [🔌 10. A2A wire-format compliance](#10-a2a-wire-format-compliance)
+- [🧵 11. Required `contextId`](#11-required-contextid)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -161,6 +162,16 @@ switch. `INPUT_REQUIRED` emits a single text part with
 `metadata.reasonCode`. Agent cards advertise `pushNotifications: false`;
 push methods return `-32003`. REST gained `GET /tasks/{id}:subscribe`
 and `GET /tasks` (list is still unimplemented).
+
+---
+
+## 🧵 11. Required `contextId`
+
+Every A2A `SendMessage` / `SendStreamingMessage` must include
+`message.contextId`. The server no longer auto-mints a conversation
+id. Optional `X-External-Thread-Id` must match `contextId` when
+present. Responses always include `X-Thread-Id` and echo `contextId`
+on the Task and SSE events.
 
 ---
 

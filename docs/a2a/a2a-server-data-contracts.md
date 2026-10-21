@@ -76,15 +76,22 @@ clients should always use the A2A v1 shape described above.
 
 ## 🧵 2. Context, thread, session, and task hierarchy
 
-The server tracks four correlation IDs. Clients only need to supply
-`contextId`; everything else is minted and persisted server-side.
+The server tracks four correlation IDs. Clients **must** supply
+`message.contextId` on every `SendMessage` / `SendStreamingMessage`.
+The server never mints a conversation id. Everything else is minted
+and persisted server-side.
 
 | ID | Who sets it | Scope | Purpose |
 |----|-------------|-------|---------|
-| `contextId` | **Client** (on `message.contextId`) | Conversation / thread | Links related turns across a multi-turn exchange; required for A2A §6.3 resume |
-| `X-External-Thread-Id` | Client (optional HTTP header) | Conversation / thread | External thread correlation when the upstream framework has its own thread ID |
+| `contextId` | **Client** (on `message.contextId`) | Conversation / thread | Links related turns across a multi-turn exchange; required. Missing = `InvalidParams` |
+| `X-External-Thread-Id` | Client (optional HTTP header) | Conversation / thread | Must equal `contextId` when present; not a substitute for `contextId` |
+| `X-Thread-Id` | Server (response header) | Internal thread row | Long-lived `agent_threads` id; always returned on task-creating responses |
 | `session_id` | Server | Caller session | Internal session row; derived from the authenticated caller |
-| `taskId` | Server | One request | Issued on `202 Accepted`; the client echoes it in the `Task.id` field and on resume (§6) |
+| `taskId` | Server | One request | Issued on the SendMessage response; the client echoes it in the `Task.id` field and on resume (§6) |
+
+Task objects and SSE events always echo the client `contextId` (never
+an empty string). The internal thread is looked up or created from
+that conversation id.
 
 ### 2.1 `contextId` matching rule (A2A §3.4.3)
 

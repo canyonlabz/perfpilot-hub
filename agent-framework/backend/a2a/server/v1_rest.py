@@ -28,6 +28,7 @@ from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
 )
+from a2a.server.utils.context import ContextResolutionError
 from a2a.server.utils.headers import (
     A2A_JSON_MEDIA_TYPE,
     A2A_V1_AGENT_NAME,
@@ -131,6 +132,13 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             metadata=metadata,
         )
 
+    def _context_error_to_rest(exc: ContextResolutionError) -> JSONResponse:
+        return http_bad_request(
+            exc.detail,
+            reason="INVALID_ARGUMENT",
+            metadata=exc.metadata,
+        )
+
     # -- Discovery (A2A v1) --------------------------------------------------
     @app.get("/.well-known/agent-card.json", tags=["a2a-v1", "discovery"])
     async def a2a_v1_agent_card() -> JSONResponse:
@@ -168,7 +176,10 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             return httpexception_to_a2a(exc.status_code, exc.detail)
         body = _normalize_a2a_v1_body(body)
 
-        thread = await _resolve_a2a_thread(request, agent_name)
+        try:
+            thread = await _resolve_a2a_thread(request, agent_name, body)
+        except ContextResolutionError as exc:
+            return _context_error_to_rest(exc)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
@@ -225,7 +236,10 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             return httpexception_to_a2a(exc.status_code, exc.detail)
         body = _normalize_a2a_v1_body(body)
 
-        thread = await _resolve_a2a_thread(request, agent_name)
+        try:
+            thread = await _resolve_a2a_thread(request, agent_name, body)
+        except ContextResolutionError as exc:
+            return _context_error_to_rest(exc)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
@@ -336,10 +350,17 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
                 detail=f"Task is already in terminal state: {task.status}",
             )
 
+        context_id = _payload_context_id(task.payload)
+        if context_id is None:
+            return http_bad_request(
+                "Task has no contextId",
+                reason="INVALID_ARGUMENT",
+                metadata={"taskId": task_id},
+            )
+
         queue = await task_executor.subscribe(task.task_id)
 
         async def _stream():
-            context_id = _payload_context_id(task.payload)
             yield {
                 "event": "task",
                 "data": json.dumps(_task_to_a2a_v1(task)),

@@ -240,11 +240,11 @@ and multiple concurrent AI frameworks calling the same backend safely:
   back tomorrow, pick up the conversation exactly where you left it —
   on the same device or a different one. State lives in
   `perfagent_state.conversation_messages`, not in browser memory.
-- **A2A external thread resumption.** An upstream framework can pass
-  `X-External-Thread-Id` to resume a prior conversation, or omit it
-  and let PerfPilot auto-mint a thread ID (returned in the response
-  header). Naive callers just work; sophisticated callers get explicit
-  control.
+- **A2A conversation resumption.** Upstream callers must send
+  `message.contextId` on every turn. Optional `X-External-Thread-Id`
+  must match that id when present. The server returns `X-Thread-Id`
+  (internal thread row) and echoes `contextId` on the Task and SSE
+  events. It never mints a conversation id for the client.
 - **Forward-compatible with cloud auth.** The identity resolver is a
   four-step chain (upstream-auth placeholder → `X-PerfPilot-Token` header →
   `perfpilot_token` cookie → freshly minted token). Epic 4 lights up the
