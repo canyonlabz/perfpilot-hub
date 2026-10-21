@@ -22,7 +22,10 @@ from a2a.server.helpers.converters import (
     _task_to_a2a_v1,
     _yield_task_event_sse,
 )
-from a2a.server.helpers.normalize import _normalize_a2a_v1_body
+from a2a.server.helpers.normalize import (
+    IngressValidationError,
+    _normalize_a2a_v1_body,
+)
 from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
@@ -118,7 +121,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         )
 
     def _context_error_to_jsonrpc(
-        exc: ContextResolutionError, rpc_id,
+        exc: IngressValidationError | ContextResolutionError, rpc_id,
     ) -> dict:
         return jsonrpc_error(
             rpc_id,
@@ -136,11 +139,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         session_id = _require_session(request)
 
         body = rpc.params
-        body = _normalize_a2a_v1_body(body)
-
         try:
+            body = _normalize_a2a_v1_body(body)
             thread = await _resolve_a2a_thread(request, agent_name, body)
-        except ContextResolutionError as exc:
+        except (IngressValidationError, ContextResolutionError) as exc:
             return _context_error_to_jsonrpc(exc, rpc.id)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
@@ -245,11 +247,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         session_id = _require_session(request)
 
         body = rpc.params
-        body = _normalize_a2a_v1_body(body)
-
         try:
+            body = _normalize_a2a_v1_body(body)
             thread = await _resolve_a2a_thread(request, agent_name, body)
-        except ContextResolutionError as exc:
+        except (IngressValidationError, ContextResolutionError) as exc:
             return JSONResponse(
                 content=_context_error_to_jsonrpc(exc, rpc.id),
                 headers=_v1_headers(),

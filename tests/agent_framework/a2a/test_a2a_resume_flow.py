@@ -170,6 +170,7 @@ def test_resume_message_lifted_from_v1_envelope_during_normalization() -> None:
     §6.3 resume signal before ``create_task``."""
     envelope = {
         "message": {
+            "messageId": "msg-resume-1",
             "role": "ROLE_USER",
             "parts": [{"text": "Here is my test_run_id: 2026-10-07-14-00-00"}],
             "contextId": "ctx-001",
@@ -190,6 +191,7 @@ def test_normalize_v1_body_omits_resume_task_id_when_absent() -> None:
     circuits on absence, so an empty-string sentinel would mis-fire."""
     envelope = {
         "message": {
+            "messageId": "msg-fresh-1",
             "role": "ROLE_USER",
             "parts": [{"text": "fresh task"}],
             "contextId": "ctx-999",
@@ -204,6 +206,7 @@ def test_normalize_v1_body_strips_whitespace_only_task_id() -> None:
     resume path should not engage for malformed envelopes."""
     envelope = {
         "message": {
+            "messageId": "msg-ws-1",
             "role": "ROLE_USER",
             "parts": [{"text": "x"}],
             "contextId": "c",

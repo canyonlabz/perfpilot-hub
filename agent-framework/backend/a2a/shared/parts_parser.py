@@ -9,9 +9,10 @@ Supported media types are defined in ``a2a.shared.media_types`` (the MIME type
 registry).  This module imports from that registry and uses it for media type
 resolution and validation.
 
-Message resolution order:
-
-    message > text > prompt > first text Part in parts[]
+A2A ingress stores the first text Part as ``message`` and the full
+``parts[]`` array on the normalized payload. This parser reads that
+shape. ``test_run_id`` and workflow fields come from ``metadata`` and
+``parts[].metadata`` (not from a ``data`` part body).
 
 Security notes:
 
@@ -54,10 +55,12 @@ class ParsedRequest:
                            Includes all Parts content formatted for readability.
         parts_summary:     List of dicts summarising each parsed Part
                            (mediaType, has_text, has_data, has_url).
-        metadata:          Extracted top-level ``metadata`` block from the
-                           request body (upstream_framework, environment, etc.).
-        test_run_id:       Resolved test_run_id — top-level value takes
-                           precedence, then falls back to test-config Part.
+        metadata:          Merged request ``metadata`` plus any
+                           ``parts[].metadata`` keys not already set
+                           (environment, source_type, task, etc.).
+        test_run_id:       Resolved from ``body.test_run_id``, then
+                           ``metadata.test_run_id``, then
+                           ``parts[].metadata.test_run_id``.
         has_parts:         True when the request contained a non-empty
                            ``parts[]`` array.
         task_classifier:   Short task-type tag extracted from
@@ -81,8 +84,10 @@ class ParsedRequest:
 def parse_request_body(body: dict) -> ParsedRequest:
     """Parse an upstream A2A request body per the upstream data contract.
 
-    Handles both legacy payloads (just ``message``/``text``/``prompt``)
-    and enriched payloads (``parts[]`` + ``metadata``).
+    Reads the normalized A2A payload (``parts[]`` + merged ``metadata``).
+    Flat top-level ``text`` / ``prompt`` envelopes are rejected at
+    ingress; this helper still accepts a dict so executor-side callers
+    can parse an already-normalized body.
 
     Args:
         body: The raw JSON-decoded request body dict.
@@ -96,7 +101,6 @@ def parse_request_body(body: dict) -> ParsedRequest:
 
     result = ParsedRequest()
 
-    # ── Extract metadata ──
     raw_meta = body.get("metadata")
     if isinstance(raw_meta, dict):
         result.metadata = {
@@ -104,13 +108,22 @@ def parse_request_body(body: dict) -> ParsedRequest:
             if isinstance(k, str) and v is not None
         }
 
-    # ── Resolve test_run_id (top-level wins) ──
-    result.test_run_id = body.get("test_run_id") if isinstance(
-        body.get("test_run_id"), str
-    ) else None
-
-    # ── Parse parts[] ──
     raw_parts = body.get("parts")
+    if isinstance(raw_parts, list):
+        for part in raw_parts:
+            if not isinstance(part, dict):
+                continue
+            part_meta = part.get("metadata")
+            if not isinstance(part_meta, dict):
+                continue
+            for key, value in part_meta.items():
+                if not isinstance(key, str) or value is None:
+                    continue
+                if key not in result.metadata:
+                    result.metadata[key] = value
+
+    result.test_run_id = _resolve_test_run_id(body, result.metadata, raw_parts)
+
     if not isinstance(raw_parts, list) or not raw_parts:
         return result
 
@@ -152,12 +165,6 @@ def parse_request_body(body: dict) -> ParsedRequest:
             section = _format_data_part(data_content, media_type, idx)
             if section:
                 prompt_sections.append(section)
-
-            # Extract test_run_id from any data Part if not set at top level
-            if result.test_run_id is None:
-                part_trid = data_content.get("test_run_id")
-                if isinstance(part_trid, str) and part_trid.strip():
-                    result.test_run_id = part_trid.strip()
 
         # ── URL Part ──
         elif isinstance(part.get("url"), str):
@@ -213,6 +220,31 @@ def resolve_user_message(body: dict) -> Optional[str]:
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────
+
+def _resolve_test_run_id(
+    body: dict,
+    metadata: dict,
+    raw_parts: Any,
+) -> Optional[str]:
+    """Resolve ``test_run_id`` from metadata sources, never from ``data``."""
+    top = body.get("test_run_id")
+    if isinstance(top, str) and top.strip():
+        return top.strip()
+    meta = metadata.get("test_run_id")
+    if isinstance(meta, str) and meta.strip():
+        return meta.strip()
+    if isinstance(raw_parts, list):
+        for part in raw_parts:
+            if not isinstance(part, dict):
+                continue
+            part_meta = part.get("metadata")
+            if not isinstance(part_meta, dict):
+                continue
+            value = part_meta.get("test_run_id")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
 
 def _resolve_media_type(part: dict) -> str:
     """Determine the effective mediaType for a Part.

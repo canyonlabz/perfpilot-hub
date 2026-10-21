@@ -21,6 +21,7 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [🚫 9. Removed custom A2A task routes](#9-removed-custom-a2a-task-routes)
 - [🔌 10. A2A wire-format compliance](#10-a2a-wire-format-compliance)
 - [🧵 11. Required `contextId`](#11-required-contextid)
+- [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -172,6 +173,17 @@ Every A2A `SendMessage` / `SendStreamingMessage` must include
 id. Optional `X-External-Thread-Id` must match `contextId` when
 present. Responses always include `X-Thread-Id` and echo `contextId`
 on the Task and SSE events.
+
+---
+
+## 📥 12. Strict A2A ingress
+
+A2A `SendMessage` / `SendStreamingMessage` now require a validated
+`message` object (`messageId`, `ROLE_USER`, non-empty `parts`,
+`contextId`). Flat bodies (`text`, `prompt`, or a string `message`)
+are rejected. PerfPilot fields such as `test_run_id` are read from
+`message.metadata` and `parts[].metadata` (`message.metadata` wins
+over envelope `metadata`).
 
 ---
 

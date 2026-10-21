@@ -23,7 +23,10 @@ from a2a.server.helpers.converters import (
     _task_to_a2a_v1,
     _yield_task_event_sse,
 )
-from a2a.server.helpers.normalize import _normalize_a2a_v1_body
+from a2a.server.helpers.normalize import (
+    IngressValidationError,
+    _normalize_a2a_v1_body,
+)
 from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
@@ -132,7 +135,9 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             metadata=metadata,
         )
 
-    def _context_error_to_rest(exc: ContextResolutionError) -> JSONResponse:
+    def _context_error_to_rest(
+        exc: IngressValidationError | ContextResolutionError,
+    ) -> JSONResponse:
         return http_bad_request(
             exc.detail,
             reason="INVALID_ARGUMENT",
@@ -174,11 +179,10 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             body = await _read_json_body(request)
         except HTTPException as exc:
             return httpexception_to_a2a(exc.status_code, exc.detail)
-        body = _normalize_a2a_v1_body(body)
-
         try:
+            body = _normalize_a2a_v1_body(body)
             thread = await _resolve_a2a_thread(request, agent_name, body)
-        except ContextResolutionError as exc:
+        except (IngressValidationError, ContextResolutionError) as exc:
             return _context_error_to_rest(exc)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
@@ -234,11 +238,10 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             body = await _read_json_body(request)
         except HTTPException as exc:
             return httpexception_to_a2a(exc.status_code, exc.detail)
-        body = _normalize_a2a_v1_body(body)
-
         try:
+            body = _normalize_a2a_v1_body(body)
             thread = await _resolve_a2a_thread(request, agent_name, body)
-        except ContextResolutionError as exc:
+        except (IngressValidationError, ContextResolutionError) as exc:
             return _context_error_to_rest(exc)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,

@@ -68,9 +68,10 @@ preference; the data contract is identical.
 - `metadata` is a free-form dict merged with `message.metadata` on
   ingress; see §3.4.
 
-The server also accepts a **legacy flat payload** for backwards
-compatibility (top-level `message` string, `text`, or `prompt`). New
-clients should always use the A2A v1 shape described above.
+The server **rejects** flat legacy payloads (top-level `message` string,
+`text`, or `prompt`) with `InvalidParams` / `INVALID_ARGUMENT`. Clients
+must send the A2A v1 `message` object with `messageId`, `role`
+(`ROLE_USER`), non-empty `parts`, and `contextId`.
 
 ---
 
@@ -293,7 +294,7 @@ request into one of four outcomes:
 
 | Outcome | Trigger | Server behavior |
 |---------|---------|-----------------|
-| **reuse** | Request carries a valid `test_run_id` on `test_run_id`, `metadata.test_run_id`, or inline in the user prose (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Use the value verbatim; never override |
+| **reuse** | Request carries a valid `test_run_id` on `message.metadata.test_run_id`, `parts[].metadata.test_run_id`, or inline in the user prose (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Use the value verbatim; never override |
 | **skip_mint** | `parts[1].metadata.task_type == "comparison_report"` with a non-empty `test_run_ids` list | Defer to the PerfReport MCP's own `comparison_id`; no mint |
 | **mint** | `parts[1].metadata.source_type` is in `{playwright, har, openapi}`, **or** the Web-UI prose heuristic matches a script-creation intent | Mint a fresh UTC timestamp `YYYY-MM-DD-HH-MM-SS`; write it back to the payload so downstream code sees it |
 | **reject** | None of the above matches | Task transitions to `TASK_STATE_INPUT_REQUIRED` with `reasonCode: "missing_test_run_id"`; client resumes per §6 |

@@ -397,9 +397,10 @@ def a2a_timestamp() -> str:
 def is_a2a_v1_request(body: dict) -> bool:
     """Detect whether a request body is an A2A v1 ``SendMessageRequest``.
 
-    A2A v1 envelopes have ``body.message.role`` and ``body.message.parts``
-    (both required by the spec). Legacy PerfPilot bodies have a top-level
-    ``message`` string, ``text`` string, or ``prompt`` string.
+    A2A v1 envelopes have ``body.message.role`` and ``body.message.parts``.
+    Ingress validation additionally requires ``messageId`` and
+    ``contextId`` and rejects flat PerfPilot bodies (top-level
+    ``message`` string, ``text``, or ``prompt``).
 
     Args:
         body: The JSON-decoded request body dict.
