@@ -193,7 +193,7 @@ def _register_routes(app: FastAPI) -> None:
             AGENTS_DIR / agent_name,
             fallback_framework_version=SERVER_VERSION,
         )
-        return JSONResponse(card)
+        return JSONResponse(base_agent.with_catalog_aliases(card))
 
 
 # =============================================================================

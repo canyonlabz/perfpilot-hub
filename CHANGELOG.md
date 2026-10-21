@@ -22,6 +22,7 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [🔌 10. A2A wire-format compliance](#10-a2a-wire-format-compliance)
 - [🧵 11. Required `contextId`](#11-required-contextid)
 - [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
+- [🪪 13. A2A Agent Cards](#13-a2a-agent-cards)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -184,6 +185,18 @@ A2A `SendMessage` / `SendStreamingMessage` now require a validated
 are rejected. PerfPilot fields such as `test_run_id` are read from
 `message.metadata` and `parts[].metadata` (`message.metadata` wins
 over envelope `metadata`).
+
+---
+
+## 🪪 13. A2A Agent Cards
+
+On-disk Agent Cards and the stub synthesizer now use official A2A
+`capabilities` only (`streaming`, `pushNotifications`,
+`extendedAgentCard`). PerfPilot flags live under
+`metadata.perfpilot_capabilities`. `displayName`, `status`, and `tags`
+moved into `metadata`. `provider.url` is the `{host}:{port}`
+placeholder (hostname auto-injection stays backlog-only).
+`list_available_specialists` reads those metadata fields.
 
 ---
 

@@ -450,10 +450,10 @@ def list_available_specialists() -> str:
 
         {
             "name": "execution-agent",
-            "display_name": "PerfPilot Execution Agent",
+            "display_name": "PerfPilot Execution Agent",  # metadata.displayName
             "description": "...",
-            "status": "available" | "in_development" | "stub",
-            "tags": [...],
+            "status": "available" | "in_development" | "stub",  # metadata.status
+            "tags": [...],  # metadata.tags
             "url": "/agents/execution-agent",
             "mcp_namespaces": ["blazemeter_*"],
         }
@@ -505,10 +505,10 @@ def list_available_specialists() -> str:
         specialists.append(
             {
                 "name": card.get("name", name),
-                "display_name": card.get("display_name") or card.get("name", name),
+                "display_name": _card_display_name(card, name),
                 "description": card.get("description", ""),
-                "status": card.get("status", "stub"),
-                "tags": list(card.get("tags") or []),
+                "status": _card_status(card),
+                "tags": _card_tags(card),
                 "url": card.get("url", f"/agents/{name}"),
                 "mcp_namespaces": mcp_namespaces,
             }
@@ -521,6 +521,24 @@ def _safe_read_agent_card(agent_folder: Path) -> dict:
     from core.base_agent import read_agent_card
 
     return read_agent_card(agent_folder)
+
+
+def _card_display_name(card: dict, fallback: str) -> str:
+    from core.base_agent import card_display_name
+
+    return card_display_name(card, fallback=fallback)
+
+
+def _card_status(card: dict) -> str:
+    from core.base_agent import card_status
+
+    return card_status(card)
+
+
+def _card_tags(card: dict) -> list[str]:
+    from core.base_agent import card_tags
+
+    return card_tags(card)
 
 
 def _read_mcp_namespaces(agent_folder: Path) -> list[str]:

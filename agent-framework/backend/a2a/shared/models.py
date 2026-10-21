@@ -288,10 +288,15 @@ class AgentCapabilities(A2ABaseModel):
 
 
 class AgentProvider(A2ABaseModel):
-    """Provider metadata for an Agent Card."""
+    """Provider metadata for an Agent Card.
+
+    Both ``organization`` and ``url`` are required when ``provider`` is
+    present (A2A §8). Cards in this repo use the ``https://{host}:{port}``
+    placeholder until hostname auto-injection lands.
+    """
 
     organization: str
-    url: Optional[str] = None
+    url: str
 
 
 # =============================================================================
