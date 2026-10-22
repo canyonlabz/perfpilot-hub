@@ -210,10 +210,15 @@ class TaskArtifactUpdateEvent(A2ABaseModel):
 
 
 class SendMessageConfiguration(A2ABaseModel):
-    """Client-specified configuration for a SendMessage request."""
+    """Client-specified configuration for a SendMessage request.
+
+    ``return_immediately`` defaults to ``False`` (blocking): the server
+    waits until the task is terminal or interrupted before responding.
+    """
 
     accepted_output_modes: Optional[list[str]] = None
-    blocking: Optional[bool] = None
+    history_length: Optional[int] = None
+    return_immediately: bool = False
 
 
 class SendMessageRequest(A2ABaseModel):
@@ -222,6 +227,13 @@ class SendMessageRequest(A2ABaseModel):
     message: Message
     configuration: Optional[SendMessageConfiguration] = None
     metadata: Optional[dict[str, Any]] = None
+
+
+class SendMessageResponse(A2ABaseModel):
+    """A2A ``SendMessage`` result: exactly one of ``task`` or ``message``."""
+
+    task: Optional[Task] = None
+    message: Optional[Message] = None
 
 
 class StreamResponse(A2ABaseModel):
@@ -276,10 +288,15 @@ class AgentCapabilities(A2ABaseModel):
 
 
 class AgentProvider(A2ABaseModel):
-    """Provider metadata for an Agent Card."""
+    """Provider metadata for an Agent Card.
+
+    Both ``organization`` and ``url`` are required when ``provider`` is
+    present (A2A §8). Cards in this repo use the ``https://{host}:{port}``
+    placeholder until hostname auto-injection lands.
+    """
 
     organization: str
-    url: Optional[str] = None
+    url: str
 
 
 # =============================================================================
@@ -385,9 +402,10 @@ def a2a_timestamp() -> str:
 def is_a2a_v1_request(body: dict) -> bool:
     """Detect whether a request body is an A2A v1 ``SendMessageRequest``.
 
-    A2A v1 envelopes have ``body.message.role`` and ``body.message.parts``
-    (both required by the spec). Legacy PerfPilot bodies have a top-level
-    ``message`` string, ``text`` string, or ``prompt`` string.
+    A2A v1 envelopes have ``body.message.role`` and ``body.message.parts``.
+    Ingress validation additionally requires ``messageId`` and
+    ``contextId`` and rejects flat PerfPilot bodies (top-level
+    ``message`` string, ``text``, or ``prompt``).
 
     Args:
         body: The JSON-decoded request body dict.

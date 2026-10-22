@@ -673,8 +673,8 @@ def _register_routes(app: FastAPI) -> None:
     # Browser clients (typically CopilotKit's React UI) follow a task they
     # already started elsewhere by subscribing to this endpoint with the
     # `task_id`. The same `task_executor` broadcast bus that powers the
-    # A2A server's `tasks/sendSubscribe` is reused here - we just translate
-    # to the AG-UI envelope and add CORS-friendly heartbeats.
+    # A2A server's `/message:stream` broadcast bus is reused here - we just
+    # translate to the AG-UI envelope and add CORS-friendly heartbeats.
     @app.get("/api/events", tags=["agui"])
     async def stream_events(request: Request, task_id: str) -> EventSourceResponse:
         try:
@@ -880,9 +880,9 @@ def _register_routes(app: FastAPI) -> None:
         }
 
     # -- Single task retrieval -----------------------------------------
-    # The orchestrator's `check_task_status` tool queries this endpoint for
-    # Web UI-originated tasks. Mirrors A2A's `GET /agents/{name}/tasks/{id}`
-    # but runs on the AG-UI surface so the Web UI never touches A2A.
+    # The orchestrator's `check_task_status` tool historically queried this
+    # endpoint for Web UI-originated tasks. It remains on the AG-UI surface
+    # so the Web UI never touches A2A.
     @app.get("/api/tasks/{task_id}", tags=["tasks"])
     async def get_task_route(task_id: str, request: Request) -> dict:
         """Return a single task by ID (owner-filtered).
@@ -909,11 +909,10 @@ def _register_routes(app: FastAPI) -> None:
         return _task_to_snapshot_payload(task)
 
     # -- Internal delegation ----------------------------------------
-    # The orchestrator's `delegate_to_specialist` tool POSTs here for Web
-    # UI-originated requests. Mirrors A2A's `POST /agents/{name}/tasks/send`
-    # but uses the CopilotKit thread_id directly (no external thread
-    # resolution), keeping the delegated task visible in the same
-    # conversation the browser user is watching.
+    # Specialist delegation for Web UI-originated requests. Uses the
+    # CopilotKit thread_id directly (no external thread resolution),
+    # keeping the delegated task visible in the same conversation the
+    # browser user is watching.
     @app.post("/api/delegate", tags=["delegation"], status_code=202)
     async def delegate_task_route(request: Request) -> dict:
         """Create and dispatch a specialist task for Web UI delegation.

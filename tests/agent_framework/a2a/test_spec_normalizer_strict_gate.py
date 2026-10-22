@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from a2a.server import spec_normalizer
+from a2a.server.helpers import spec_normalizer
 
 
 # =============================================================================

@@ -259,7 +259,6 @@ CORS allowlist** must be updated to accept the new origin (see below).
 | # | File | What to change |
 |---|------|----------------|
 | 1 | `.env` | Set `A2A_PORT=8081` (or your chosen port) |
-| 2 | `agents/orchestrator/agent.py` | The default is overridden via env var `PERFPILOT_A2A_BASE_URL`. Set it in `.env`: `PERFPILOT_A2A_BASE_URL=http://127.0.0.1:8081` |
 
 ### CORS (when frontend port changes)
 
@@ -277,7 +276,7 @@ AGUI_CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
 |---------|---------|---------|--------------------------------|
 | Frontend dev server | 3000 | (CLI `--port`) | — |
 | AG-UI backend | 8102 | `AGUI_PORT` | `next.config.js`, `route.ts` |
-| A2A server | 8101 | `A2A_PORT` | `orchestrator/agent.py` (overridable via `PERFPILOT_A2A_BASE_URL`) |
+| A2A server | 8101 | `A2A_PORT` | Orchestrator specialist delegation is in-process |
 | CORS origins | localhost:3000 | `AGUI_CORS_ORIGINS` | `agui_server.py` (fallback list) |
 | Gateway MCP | 8000 | `GATEWAY_MCP_URL` | `.env` |
 | PostgreSQL | 5432 | `PERFAGENT_STATE_PORT` | `.env` |

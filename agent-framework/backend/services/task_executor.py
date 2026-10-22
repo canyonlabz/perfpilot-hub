@@ -23,8 +23,8 @@ implemented here:
          A2A thread (Decision 14), runs `generate_reply` with the full
          history, then persists the new user + assistant turns. The
          orchestrator's four registered tools (PBIs 3.7.3-3.7.6) are
-         available; tool calls back into the local A2A surface use the
-         `PERFPILOT_A2A_BASE_URL` env var.
+         available; specialist delegation is in-process via
+         `task_store` + `task_executor` (no HTTP hop to the A2A surface).
        - `"execution-agent"` (PBI 3.8.6): runs `_run_execution_agent()`,
          which reads the task payload's `tool` field as an EXPLICIT
          dispatch key (no LLM loop) and routes to one of the three F3.8
@@ -357,7 +357,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     specialist tasks via ContextVars (``agent_session_id_var``,
     ``agent_thread_id_var``, ``agent_user_id_var``).
     """
-    from a2a.server.v1_payload import (
+    from a2a.server.helpers.payload import (
         extract_resume_messages_from_payload,
         extract_thread_id_from_payload,
         extract_user_message_from_payload,

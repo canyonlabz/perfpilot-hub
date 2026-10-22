@@ -15,7 +15,8 @@ supply is the correct **A2A metadata block** on their initial task.
 
 | Surface | Endpoint | Metadata delivery |
 |---------|----------|-------------------|
-| **A2A** (server-to-server) | `POST http://<host>:8101/agents/orchestrator/tasks/send` | JSON `metadata` field inside the task payload |
+| **A2A JSON-RPC** (server-to-server) | `POST http://<host>:8101/a2a/v1` (`SendMessage`) | JSON `metadata` field inside the request envelope |
+| **A2A REST** (server-to-server) | `POST http://<host>:8101/message:send` | JSON `metadata` field inside the request envelope |
 | **Web UI** (CopilotKit) | Browser → `POST /api/copilotkit` | Populated automatically from the [`GitHubCredsCard`](../../agent-framework/frontend/ui/components/github/github-creds-card.tsx) session state via `useCopilotReadable` |
 | **Cursor / MCP** | Existing MCP tool calls | Not applicable — Cursor uses per-tool arguments, not framework metadata |
 
@@ -119,7 +120,8 @@ server (port 8101) to kick off a full new-JMX pipeline:
 The orchestrator will respond with a `task_id`. Downstream steps
 (`script-agent` delegation, `provision_performance_test`, and any HITL
 gates) all happen asynchronously; monitor them via
-`GET /agents/orchestrator/tasks/get?task_id=...` or the SSE stream.
+`GET /tasks/{task_id}`, JSON-RPC `GetTask`, or the SSE stream
+(`POST /message:stream` / `SendStreamingMessage`).
 
 ---
 

@@ -16,19 +16,48 @@ All examples use sanitized placeholder values (`example.com`,
 `example-org`, synthetic UUIDs, UTC timestamps). Nothing in this doc
 depends on any private hostname, workspace, or API key.
 
+**JSON-RPC is the primary binding** (`POST /a2a/v1`). HTTP+JSON/REST
+is supported with the same contract. Custom PerfPilot task routes and
+flat `text` / `prompt` bodies are retired (see §12). Envelope
+`metadata` is an official A2A `SendMessageRequest` field (spec §3.2.1),
+not a PerfPilot extension.
+
+## 📑 Contents
+
+- [1. Protocol envelope](#1-protocol-envelope)
+- [2. Context, thread, session, and task hierarchy](#2-context-thread-session-and-task-hierarchy)
+- [3. The three-part message layout](#3-the-three-part-message-layout)
+- [4. `test_run_id` behavior](#4-test_run_id-behavior)
+- [5. Script-creation use cases](#5-script-creation-use-cases)
+- [6. Comparison-report use case](#6-comparison-report-use-case)
+- [7. Multi-turn interaction](#7-multi-turn-interaction-a2a-63)
+- [8. `reasonCode` taxonomy](#8-reasoncode-taxonomy)
+- [9. Successful response shape](#9-successful-response-shape)
+- [10. Out-of-scope / future work](#10-out-of-scope--future-work)
+- [11. Spec cross-reference](#11-spec-cross-reference)
+- [12. Removed API](#12-removed-api)
+
 ---
 
 ## 📬 1. Protocol envelope
 
 | Binding | Endpoint | Method | Response |
 |---------|----------|--------|----------|
-| **REST — send** | `POST /message:send` | HTTP | `202 Accepted` with an A2A v1 `Task` object |
+| **REST — send** | `POST /message:send` | HTTP | `SendMessageResponse` `{ "task": Task }` (`Content-Type: application/a2a+json`). `200` when the server waited; `202` when `returnImmediately` is true |
 | **REST — stream** | `POST /message:stream` | HTTP (`Accept: text/event-stream`) | Server-Sent Events stream of `StreamResponse` frames |
-| **JSON-RPC — send** | `POST /a2a/v1` | `"method": "SendMessage"` | JSON-RPC success envelope wrapping a `Task` object |
+| **REST — subscribe** | `GET /tasks/{task_id}:subscribe` | HTTP (`Accept: text/event-stream`) | SSE stream for an existing non-terminal task |
+| **JSON-RPC — send** | `POST /a2a/v1` | `"method": "SendMessage"` | JSON-RPC `result` is `{ "task": Task }` (or `{ "message": Message }`) |
 | **JSON-RPC — stream** | `POST /a2a/v1` | `"method": "SendStreamingMessage"` | JSON-RPC success envelope wrapping an SSE stream |
+| **JSON-RPC — get / cancel** | `POST /a2a/v1` | `"method": "GetTask"` / `"CancelTask"` | JSON-RPC `result` is a **bare** `Task` (not `{ "task": ... }`) |
 | **Discovery** | `GET /.well-known/agent-card.json` | HTTP | Public agent card (A2A §8) |
-| **Task fetch** | `GET /tasks/{task_id}` | HTTP | `Task` object |
-| **Task cancel** | `POST /tasks/{task_id}:cancel` | HTTP | Updated `Task` object |
+| **Task fetch** | `GET /tasks/{task_id}` | HTTP | Bare `Task` object |
+| **Task cancel** | `POST /tasks/{task_id}:cancel` | HTTP | Bare updated `Task` object |
+| **Task list** | `GET /tasks` | HTTP | Not implemented (`UnsupportedOperationError`) |
+
+`SendMessageConfiguration.returnImmediately` defaults to `false` (blocking):
+the server waits until the task is terminal or interrupted
+(`INPUT_REQUIRED` / `AUTH_REQUIRED`) before returning. Set
+`returnImmediately: true` to get the submitted task back immediately.
 
 The same server accepts the same `message` body on all four of the send
 paths. Clients pick the binding that matches their transport
@@ -52,31 +81,41 @@ preference; the data contract is identical.
 
 - `message.role` is always `ROLE_USER` on inbound (the server replies
   with `ROLE_AGENT` on streamed `TaskStatusUpdateEvent.status.message`).
-- `message.contextId` is required for every request that participates
-  in a multi-turn conversation (see §2). First-turn clients that have
-  no `contextId` yet should mint one (any opaque string) and reuse it
-  for subsequent turns.
+- `message.contextId` is **required** on every `SendMessage` /
+  `SendStreamingMessage` (see §2). The server never mints one.
+  First-turn clients that have no conversation id yet should mint one
+  themselves (any opaque string) and reuse it for subsequent turns.
+- `message.messageId` and a non-empty `message.parts[]` are required.
 - `message.parts[]` is the primary data channel; see §3.
-- `metadata` is a free-form dict merged with `message.metadata` on
-  ingress; see §3.4.
+- Top-level envelope `metadata` is the official A2A optional field on
+  `SendMessageRequest`. It is merged with `message.metadata` on
+  ingress; `message.metadata` wins (see §3.4).
 
-The server also accepts a **legacy flat payload** for backwards
-compatibility (top-level `message` string, `text`, or `prompt`). New
-clients should always use the A2A v1 shape described above.
+The server **rejects** flat legacy payloads (top-level `message` string,
+`text`, or `prompt`) with `InvalidParams` / `INVALID_ARGUMENT`. Clients
+must send the A2A v1 `message` object with `messageId`, `role`
+(`ROLE_USER`), non-empty `parts`, and `contextId`.
 
 ---
 
 ## 🧵 2. Context, thread, session, and task hierarchy
 
-The server tracks four correlation IDs. Clients only need to supply
-`contextId`; everything else is minted and persisted server-side.
+The server tracks four correlation IDs. Clients **must** supply
+`message.contextId` on every `SendMessage` / `SendStreamingMessage`.
+The server never mints a conversation id. Everything else is minted
+and persisted server-side.
 
 | ID | Who sets it | Scope | Purpose |
 |----|-------------|-------|---------|
-| `contextId` | **Client** (on `message.contextId`) | Conversation / thread | Links related turns across a multi-turn exchange; required for A2A §6.3 resume |
-| `X-External-Thread-Id` | Client (optional HTTP header) | Conversation / thread | External thread correlation when the upstream framework has its own thread ID |
+| `contextId` | **Client** (on `message.contextId`) | Conversation / thread | Links related turns across a multi-turn exchange; required. Missing = `InvalidParams` |
+| `X-External-Thread-Id` | Client (optional HTTP header) | Conversation / thread | Must equal `contextId` when present; not a substitute for `contextId` |
+| `X-Thread-Id` | Server (response header) | Internal thread row | Long-lived `agent_threads` id; always returned on task-creating responses |
 | `session_id` | Server | Caller session | Internal session row; derived from the authenticated caller |
-| `taskId` | Server | One request | Issued on `202 Accepted`; the client echoes it in the `Task.id` field and on resume (§6) |
+| `taskId` | Server | One request | Issued on the SendMessage response; the client echoes it in the `Task.id` field and on resume (§6) |
+
+Task objects and SSE events always echo the client `contextId` (never
+an empty string). The internal thread is looked up or created from
+that conversation id.
 
 ### 2.1 `contextId` matching rule (A2A §3.4.3)
 
@@ -87,14 +126,35 @@ task. Mismatches are rejected with a `UnsupportedOperation` error
 `contextId` on the task row at ingress and compares byte-for-byte on
 resume.
 
-### 2.2 Discovery
+### 2.2 Discovery and Agent Cards
 
 ```
 GET /.well-known/agent-card.json
 ```
 
-Returns the orchestrator's public agent card (A2A §8) describing the
-agent's name, version, and capabilities. Clients can cache this.
+Returns the orchestrator's public Agent Card (A2A §8). Clients can
+cache this. The card uses official A2A `capabilities` only
+(`streaming`, `pushNotifications`, `extendedAgentCard`).
+`pushNotifications` is `false` until A2A push APIs exist.
+
+PerfPilot-only catalog fields live in `metadata`:
+
+| Metadata key | Meaning |
+|--------------|---------|
+| `displayName` | Human label (e.g. `PerfPilot Orchestrator`) |
+| `status` | `available` / `in_development` / `stub` |
+| `tags` | Discovery tags (not an A2A root field) |
+| `perfpilot_capabilities` | `long_running_tasks`, `webhook_subscribers`, `human_in_the_loop` |
+
+When `provider` is present it includes both `organization` and `url`.
+Interface and provider URLs use the `https://{host}:{port}` placeholder;
+hostname auto-injection is not implemented (see §10).
+
+The Web UI catalog still uses `GET /agents` and
+`GET /agents/{name}/.well-known/agent.json`. That per-agent path
+echoes `display_name` and `status` at the root so the existing catalog
+panel keeps working. A2A clients should read
+`GET /.well-known/agent-card.json` and ignore those aliases.
 
 ---
 
@@ -256,15 +316,21 @@ Field reference:
 
 ### 3.4 `metadata` precedence
 
-The server merges `metadata` from two sources on ingress:
+Envelope `metadata` is official A2A (`SendMessageRequest.metadata`).
+The server merges sources on ingress:
 
 ```
-message.metadata  (overrides)
-envelope.metadata (base)
+parts[].metadata   (fill gaps only)
+envelope.metadata  (base)
+message.metadata   (overrides)
 ```
 
-Keys present in both — `message.metadata` wins. The merged dict is
-exposed to the orchestrator via `ParsedRequest.metadata`.
+Keys present on both envelope and message — `message.metadata` wins.
+`parts[].metadata` keys are added only when the merged dict does not
+already have that key. The result is exposed to the orchestrator via
+`ParsedRequest.metadata`. `test_run_id` is resolved from
+`message.metadata.test_run_id` or `parts[].metadata.test_run_id`
+(see §4), never from a `data` part body.
 
 ---
 
@@ -278,7 +344,7 @@ request into one of four outcomes:
 
 | Outcome | Trigger | Server behavior |
 |---------|---------|-----------------|
-| **reuse** | Request carries a valid `test_run_id` on `test_run_id`, `metadata.test_run_id`, or inline in the user prose (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Use the value verbatim; never override |
+| **reuse** | Request carries a valid `test_run_id` on `message.metadata.test_run_id`, `parts[].metadata.test_run_id`, or inline in the user prose (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Use the value verbatim; never override |
 | **skip_mint** | `parts[1].metadata.task_type == "comparison_report"` with a non-empty `test_run_ids` list | Defer to the PerfReport MCP's own `comparison_id`; no mint |
 | **mint** | `parts[1].metadata.source_type` is in `{playwright, har, openapi}`, **or** the Web-UI prose heuristic matches a script-creation intent | Mint a fresh UTC timestamp `YYYY-MM-DD-HH-MM-SS`; write it back to the payload so downstream code sees it |
 | **reject** | None of the above matches | Task transitions to `TASK_STATE_INPUT_REQUIRED` with `reasonCode: "missing_test_run_id"`; client resumes per §6 |
@@ -600,8 +666,8 @@ follow-up may be a single-part reply:
 Server behavior:
 
 1. Ingress lifts `message.taskId` into
-   `_a2a_v1_resume_task_id`; the resume classifier (`v1_resume.py`)
-   runs before any new-task creation.
+   `_a2a_v1_resume_task_id`; the resume classifier
+   (`a2a/server/helpers/resume.py`) runs before any new-task creation.
 2. The server validates:
    - Task exists → otherwise `TaskNotFound` (`-32001` JSON-RPC / 404 REST).
    - Task is in `TASK_STATE_INPUT_REQUIRED` → otherwise
@@ -713,7 +779,15 @@ retrieval via `GET /tasks/{task_id}`.
 - **Push notifications.** A2A §9 push-notification configuration is
   not implemented; the server returns
   `PushNotificationNotSupportedError` (`-32003`) for the related
-  JSON-RPC methods.
+  JSON-RPC methods. Agent cards advertise `pushNotifications: false`.
+- **Agent Card hostname auto-injection.** `{host}:{port}` placeholders
+  stay on `supportedInterfaces` and `provider.url`. Replacing them
+  with the request host at serve time is backlog-only.
+- **`a2a/client/`.** Not built. This document is the inbound server
+  contract for an upstream A2A client.
+- **AG-UI (port 8102).** Out of scope. The Web UI keeps `/api/delegate`,
+  `/api/tasks`, `/api/events`, and `/copilotkit/`. It does not call
+  A2A task routes.
 
 ---
 
@@ -721,17 +795,50 @@ retrieval via `GET /tasks/{task_id}`.
 
 | A2A §      | What it covers                               | Where in PerfPilot                                      |
 |------------|----------------------------------------------|---------------------------------------------------------|
-| §3.4.3     | `contextId` matching rule                    | `v1_resume.py` validation step                          |
-| §4.1.3     | `TASK_STATE_INPUT_REQUIRED` lifecycle        | `task_store.mark_input_required`; SSE emit in `v1_helpers._task_event_to_a2a_v1_sse` |
+| §3.2.1     | Envelope `metadata` on `SendMessageRequest`  | Optional; merged with `message.metadata` (§3.4)         |
+| §3.4.3     | `contextId` matching rule                    | `a2a/server/helpers/resume.py`                          |
+| §4.1.3     | `TASK_STATE_INPUT_REQUIRED` lifecycle        | `task_store.mark_input_required`; SSE emit in `a2a/server/helpers/converters.py` |
 | §4.1.6     | Message `parts[]` constraints                | `a2a.shared.parts_parser.parse_request_body`             |
-| §6.3       | Multi-turn interaction (resume)              | `v1_resume.try_handle_resume` + ingress hook            |
+| §6.3       | Multi-turn interaction (resume)              | `a2a/server/helpers/resume.py` + ingress hook           |
 | §8         | Agent discovery                              | `GET /.well-known/agent-card.json`                      |
-| §11        | `SendMessage` / `SendStreamingMessage` RPCs  | `/message:send`, `/message:stream`, `/a2a/v1`           |
+| §11        | `SendMessage` / `SendStreamingMessage` RPCs  | JSON-RPC `POST /a2a/v1`; REST `/message:send`, `/message:stream` |
 
 Standard A2A error codes used by PerfPilot:
 
 | Code    | Name                            | When emitted                                       |
 |---------|---------------------------------|----------------------------------------------------|
 | `-32001`| `TaskNotFoundError`             | Resume targeted a `taskId` that does not exist     |
-| `-32004`| `UnsupportedOperationError`     | Resume targeted a non-paused task, or `contextId` mismatch |
-| `-32602`| `InvalidParams` (JSON-RPC std.) | Request body is missing required fields            |
+| `-32003`| `PushNotificationNotSupportedError` | Any A2A push-config method                     |
+| `-32004`| `UnsupportedOperationError`     | Resume targeted a non-paused task, or `contextId` mismatch; `GET /tasks` list |
+| `-32602`| `InvalidParams` (JSON-RPC std.) | Missing `contextId` / `messageId` / `parts`, flat legacy body, or header mismatch |
+
+---
+
+## 🚫 12. Removed API
+
+The following custom PerfPilot task routes are **gone**. They are not
+aliased, rewritten, or dual-maintained. Callers must use the A2A v1
+bindings in §1.
+
+| Removed | Replacement |
+|---------|-------------|
+| `POST /agents/{name}/tasks/send` | JSON-RPC `POST /a2a/v1` (`SendMessage`) or REST `POST /message:send` |
+| `POST /agents/{name}/tasks/sendSubscribe` | JSON-RPC `POST /a2a/v1` (`SendStreamingMessage`) or REST `POST /message:stream` |
+| `GET /agents/{name}/tasks/{task_id}` | JSON-RPC `GetTask` or REST `GET /tasks/{task_id}` |
+| `POST /agents/{name}/tasks/{task_id}/cancel` | JSON-RPC `CancelTask` or REST `POST /tasks/{task_id}:cancel` |
+| `GET /agents/{name}/tasks/get?task_id=...` | REST `GET /tasks/{task_id}` |
+| Catalog field `tasks_send_url` on `GET /agents` | Dropped. Catalog still returns `name` and `agent_card_url` |
+
+Public A2A traffic is orchestrator-centric. Specialist work is created
+in-process by the orchestrator's `delegate_to_specialist` tool; it is
+not submitted over `/agents/{name}/tasks/*`.
+
+Kept (not A2A task routes):
+
+- `GET /health`
+- `GET /agents` (Web UI catalog)
+- `GET /agents/{name}/.well-known/agent.json` (Web UI catalog)
+- AG-UI port 8102 (`/api/delegate`, `/api/tasks`, `/api/events`, `/copilotkit/`) — unchanged
+
+Snake-case flat task bodies on the retired paths are not accepted on
+the v1 bindings. New clients send the A2A Message envelope in §1.1.

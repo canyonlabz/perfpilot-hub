@@ -2,11 +2,11 @@
 
 Covers two layers:
 
-  1. ``a2a.server.v1_helpers._normalize_a2a_v1_body`` — must lift
+  1. ``a2a.server.helpers.normalize._normalize_a2a_v1_body`` — must lift
      ``message.taskId`` from the inbound envelope to the top-level
      ``_a2a_v1_resume_task_id`` field so ingress handlers can detect
      the resume signal.
-  2. ``a2a.server.v1_resume.try_handle_resume`` — the classifier that
+  2. ``a2a.server.helpers.resume.try_handle_resume`` — the classifier that
      validates the resume request against the stored task row, appends
      the follow-up message, and returns a discriminated
      ``ResumeResult`` for the ingress handlers to translate.
@@ -24,8 +24,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from a2a.server.v1_helpers import _normalize_a2a_v1_body
-from a2a.server.v1_resume import (
+from a2a.server.helpers.normalize import _normalize_a2a_v1_body
+from a2a.server.helpers.resume import (
     RESUME_ERROR_INVALID_PARAMS,
     RESUME_ERROR_TASK_NOT_FOUND,
     RESUME_ERROR_UNSUPPORTED_OPERATION,
@@ -110,10 +110,10 @@ class _FakeStore:
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     """Monkeypatch ``stores.task_store.get_task`` + ``append_resume_message``.
 
-    Also patches the names re-imported into the ``a2a.server.v1_resume``
+    Also patches the names re-imported into the ``a2a.server.helpers.resume``
     module namespace so the classifier sees the fakes.
     """
-    import a2a.server.v1_resume as v1_resume_mod
+    import a2a.server.helpers.resume as v1_resume_mod
 
     store = _FakeStore()
     monkeypatch.setattr(task_store, "get_task", store.get_task)
@@ -170,6 +170,7 @@ def test_resume_message_lifted_from_v1_envelope_during_normalization() -> None:
     §6.3 resume signal before ``create_task``."""
     envelope = {
         "message": {
+            "messageId": "msg-resume-1",
             "role": "ROLE_USER",
             "parts": [{"text": "Here is my test_run_id: 2026-10-07-14-00-00"}],
             "contextId": "ctx-001",
@@ -190,6 +191,7 @@ def test_normalize_v1_body_omits_resume_task_id_when_absent() -> None:
     circuits on absence, so an empty-string sentinel would mis-fire."""
     envelope = {
         "message": {
+            "messageId": "msg-fresh-1",
             "role": "ROLE_USER",
             "parts": [{"text": "fresh task"}],
             "contextId": "ctx-999",
@@ -204,6 +206,7 @@ def test_normalize_v1_body_strips_whitespace_only_task_id() -> None:
     resume path should not engage for malformed envelopes."""
     envelope = {
         "message": {
+            "messageId": "msg-ws-1",
             "role": "ROLE_USER",
             "parts": [{"text": "x"}],
             "contextId": "c",
@@ -466,7 +469,7 @@ def test_resume_message_text_contains_test_run_id_reaches_resolver() -> None:
     orchestrator's effective_user_text (passed to the resolver) contains
     the test_run_id supplied in the resume turn — this is the critical
     behaviour that lets a REJECT outcome succeed on the next pass."""
-    from a2a.server.v1_payload import (
+    from a2a.server.helpers.payload import (
         extract_resume_messages_from_payload,
         resume_message_to_text,
     )
@@ -492,7 +495,7 @@ def test_resume_message_text_falls_back_to_first_text_part() -> None:
     """When a resume message carries only ``parts`` (no top-level
     ``message_text``), ``resume_message_to_text`` returns the first
     text Part so the resolver still sees the content."""
-    from a2a.server.v1_payload import resume_message_to_text
+    from a2a.server.helpers.payload import resume_message_to_text
 
     rm = {
         "role": "ROLE_USER",
@@ -510,7 +513,7 @@ def test_resume_message_text_returns_none_for_empty_message() -> None:
     """A resume message with neither ``message_text`` nor text Parts
     returns ``None`` so the executor skips the empty turn rather than
     appending a blank user message to the LLM context."""
-    from a2a.server.v1_payload import resume_message_to_text
+    from a2a.server.helpers.payload import resume_message_to_text
 
     rm = {"role": "ROLE_USER", "parts": [{"data": {"k": "v"}}]}
     assert resume_message_to_text(rm) is None
@@ -519,7 +522,7 @@ def test_resume_message_text_returns_none_for_empty_message() -> None:
 def test_extract_resume_messages_from_non_dict_payload_returns_empty() -> None:
     """Guard: a non-dict payload must not crash the executor; the
     extractor returns ``[]`` so the resume branch cleanly skips."""
-    from a2a.server.v1_payload import extract_resume_messages_from_payload
+    from a2a.server.helpers.payload import extract_resume_messages_from_payload
 
     assert extract_resume_messages_from_payload(None) == []
     assert extract_resume_messages_from_payload("string") == []
@@ -528,6 +531,6 @@ def test_extract_resume_messages_from_non_dict_payload_returns_empty() -> None:
 
 def test_extract_resume_messages_from_payload_without_field_returns_empty() -> None:
     """Guard: a payload without ``resume_messages`` returns ``[]``."""
-    from a2a.server.v1_payload import extract_resume_messages_from_payload
+    from a2a.server.helpers.payload import extract_resume_messages_from_payload
 
     assert extract_resume_messages_from_payload({"message": "x"}) == []

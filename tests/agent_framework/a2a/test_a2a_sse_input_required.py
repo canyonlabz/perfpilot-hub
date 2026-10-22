@@ -1,7 +1,7 @@
 """Tests for the A2A v1 SSE ``TaskStatusUpdateEvent`` emission on
 ``input_required`` status.
 
-Covers ``a2a.server.v1_helpers._task_event_to_a2a_v1_sse``. The function
+Covers ``a2a.server.helpers.converters._task_event_to_a2a_v1_sse``. The function
 converts a ``TaskEvent`` into an A2A v1 SSE ``StreamResponse`` payload:
 
   * Non-``input_required`` events render as a plain
@@ -10,7 +10,7 @@ converts a ``TaskEvent`` into an A2A v1 SSE ``StreamResponse`` payload:
     terminal or progress events.)
   * ``input_required`` events render with ``TaskStatus.state ==
     "TASK_STATE_INPUT_REQUIRED"`` and ``TaskStatus.message`` carrying
-    a two-part A2A ``Message`` (text + data) with ``role=ROLE_AGENT``.
+    a single text part whose ``metadata.reasonCode`` clients switch on.
 
 The function is pure (no I/O, no DB); tests feed a crafted
 ``TaskEvent`` and inspect the returned dict directly.
@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from a2a.server.v1_helpers import _task_event_to_a2a_v1_sse
+from a2a.server.helpers.converters import _task_event_to_a2a_v1_sse
 from services.task_executor import TaskEvent
 
 
@@ -84,10 +84,10 @@ def test_sse_status_update_includes_task_and_context_ids() -> None:
     assert status_update["contextId"] == "ctx-1"
 
 
-def test_sse_status_message_contains_text_and_data_parts() -> None:
-    """TaskStatus.message carries a two-part A2A Message:
-      * parts[0]: text (text/plain) — human-readable prompt
-      * parts[1]: data (application/json) — machine-readable reason
+def test_sse_status_message_is_single_text_part_with_reason_code_metadata() -> None:
+    """TaskStatus.message carries one text part:
+      * parts[0].text — human-readable prompt
+      * parts[0].metadata.reasonCode — machine-readable switch
     """
     event = _make_event(
         status="input_required",
@@ -98,16 +98,16 @@ def test_sse_status_message_contains_text_and_data_parts() -> None:
 
     message = _task_status(payload)["message"]
     assert message["role"] == "ROLE_AGENT"
-    assert len(message["parts"]) == 2
+    assert len(message["parts"]) == 1
 
-    text_part, data_part = message["parts"]
+    text_part = message["parts"][0]
     assert text_part["text"] == "Please share your test_run_id."
-    assert text_part["mediaType"] == "text/plain"
-    assert "data" in data_part
-    assert data_part["mediaType"] == "application/json"
+    assert text_part["mediaType"] == "text/markdown"
+    assert text_part["metadata"]["reasonCode"] == "missing_test_run_id"
+    assert "data" not in text_part
 
 
-def test_sse_data_part_contains_reason_code() -> None:
+def test_sse_text_part_metadata_contains_reason_code() -> None:
     event = _make_event(
         status="input_required",
         input_required_text="q",
@@ -115,13 +115,13 @@ def test_sse_data_part_contains_reason_code() -> None:
     )
     payload = _task_event_to_a2a_v1_sse(event, context_id="ctx-1")
 
-    data_part = _task_status(payload)["message"]["parts"][1]
-    assert data_part["data"]["reasonCode"] == "missing_test_run_id"
+    metadata = _task_status(payload)["message"]["parts"][0]["metadata"]
+    assert metadata["reasonCode"] == "missing_test_run_id"
 
 
-def test_sse_data_part_merges_input_required_data() -> None:
+def test_sse_text_part_metadata_merges_input_required_data() -> None:
     """Any extra keys on ``input_required_data`` are merged into the
-    data part alongside ``reasonCode`` (e.g. candidate IDs for the UI)."""
+    text part metadata alongside ``reasonCode``."""
     event = _make_event(
         status="input_required",
         input_required_text="q",
@@ -135,15 +135,15 @@ def test_sse_data_part_merges_input_required_data() -> None:
     )
     payload = _task_event_to_a2a_v1_sse(event, context_id="ctx-1")
 
-    data = _task_status(payload)["message"]["parts"][1]["data"]
-    assert data["reasonCode"] == "missing_test_run_id"
-    assert data["candidate_test_run_ids"] == [
+    metadata = _task_status(payload)["message"]["parts"][0]["metadata"]
+    assert metadata["reasonCode"] == "missing_test_run_id"
+    assert metadata["candidate_test_run_ids"] == [
         "2026-10-05-10-00-00",
         "2026-10-06-10-00-00",
     ]
 
 
-def test_sse_data_part_reason_code_cannot_be_shadowed_by_input_required_data() -> None:
+def test_sse_reason_code_cannot_be_shadowed_by_input_required_data() -> None:
     """A malicious / buggy caller putting ``reasonCode`` into
     ``input_required_data`` must not be able to overwrite the
     authoritative value coming from ``input_required_reason_code``."""
@@ -155,8 +155,8 @@ def test_sse_data_part_reason_code_cannot_be_shadowed_by_input_required_data() -
     )
     payload = _task_event_to_a2a_v1_sse(event, context_id="ctx-1")
 
-    data = _task_status(payload)["message"]["parts"][1]["data"]
-    assert data["reasonCode"] == "missing_test_run_id"
+    metadata = _task_status(payload)["message"]["parts"][0]["metadata"]
+    assert metadata["reasonCode"] == "missing_test_run_id"
 
 
 def test_sse_message_carries_task_and_context_ids() -> None:

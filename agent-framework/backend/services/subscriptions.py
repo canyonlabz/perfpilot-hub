@@ -33,9 +33,9 @@ log = logging.getLogger(__name__)
 class TaskEvent:
     """One state-transition snapshot delivered to in-process subscribers.
 
-    Mirrors the shape we will send over SSE in the A2A
-    ``tasks/sendSubscribe`` endpoint. Includes both IDs from V2 Section 4.3
-    so SSE consumers can correlate to the broader session.
+    Mirrors the shape we send over SSE on A2A ``POST /message:stream``
+    (and JSON-RPC ``SendStreamingMessage``). Includes both IDs from the
+    three-ID model so SSE consumers can correlate to the broader session.
 
     When ``status == "input_required"``, the three ``input_required_*``
     fields carry the question text and machine-readable reason code

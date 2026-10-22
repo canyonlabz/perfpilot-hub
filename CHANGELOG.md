@@ -2,9 +2,11 @@
 
 This document summarizes the enhancements added to PerfPilot-Hub during October 2026.
 
-> **Branch:** `feat/test-run-id-resolution-and-persistence`
-
 The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three ways the Script Agent receives the source. After that, validation, execution, monitoring, analysis, and reporting follow the same path and share one `test_run_id`.
+
+This changelog also covers the A2A server compliance pass: JSON-RPC is
+the primary binding, REST stays supported, custom PerfPilot task routes
+are retired, and inbound messages follow A2A v1.0.0.
 
 ---
 
@@ -18,6 +20,12 @@ The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three 
 - [📄 6. A2A server data contract](#6-a2a-server-data-contract)
 - [✨ 7. Files created](#7-files-created)
 - [🔧 8. Files modified](#8-files-modified)
+- [🚫 9. Removed custom A2A task routes](#9-removed-custom-a2a-task-routes)
+- [🔌 10. A2A wire-format compliance](#10-a2a-wire-format-compliance)
+- [🧵 11. Required `contextId`](#11-required-contextid)
+- [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
+- [🪪 13. A2A Agent Cards](#13-a2a-agent-cards)
+- [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -84,7 +92,8 @@ A comparison report names the runs to compare. The framework does not mint a new
 
 ## 📄 6. A2A server data contract
 
-New public reference: [`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md).
+Public reference: [`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md)
+(rewritten after the A2A compliance pass; see §14).
 
 It describes what an upstream framework sends on an inbound A2A request:
 
@@ -111,6 +120,11 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 | `tests/agent_framework/a2a/test_a2a_sse_input_required.py` | Pause-event coverage |
 | `tests/agent_framework/a2a/test_a2a_resume_flow.py` | Resume-path coverage |
 | `tests/agent_framework/a2a/test_spec_normalizer_strict_gate.py` | Playwright source gate |
+| `tests/agent_framework/a2a/test_retired_task_routes.py` | Retired `/agents/{name}/tasks/*` routes are unregistered |
+| `tests/agent_framework/a2a/test_wire_format.py` | JSON-RPC/REST wrappers, `returnImmediately`, push `-32003` |
+| `tests/agent_framework/a2a/test_context_enforcement.py` | Required `contextId`; optional matching `X-External-Thread-Id` |
+| `tests/agent_framework/a2a/test_ingress_validation.py` | Strict Message validation; metadata-sourced `test_run_id` |
+| `tests/agent_framework/a2a/test_agent_cards.py` | Official card capabilities, `provider.url`, metadata catalog fields |
 | `tests/agent_framework/agui/test_webui_context_load.py` | Web UI thread-context coverage |
 | `tests/agent_framework/services/test_orchestrator_input_required.py` | Orchestrator pause coverage |
 | `tests/agent_framework/services/test_specialist_envelope_reuse.py` | Specialist reuse and `comparison_id` capture |
@@ -125,13 +139,89 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 | `agent-framework/backend/core/test_run_id.py` | Reuse, mint, skip-mint, and ask outcomes |
 | `agent-framework/backend/a2a/shared/parts_parser.py` | Read an optional task tag from the prompt part |
 | `agent-framework/backend/services/task_executor.py` | Pause when an id is missing; specialists reuse the id; capture `comparison_id`; persist Playwright specs from step text |
-| `agent-framework/backend/a2a/server/v1_helpers.py` | Lift a resume task id; include the pause message on the status event |
-| `agent-framework/backend/a2a/server/v1_routes.py` | Resume an existing paused task when the inbound message names it |
-| `agent-framework/backend/a2a/server/spec_normalizer.py` | Playwright extraction requires `source_type: playwright` |
+| `agent-framework/backend/a2a/server/v1_jsonrpc.py` | JSON-RPC binding (`POST /a2a/v1`) |
+| `agent-framework/backend/a2a/server/v1_rest.py` | REST binding + official Agent Card discovery |
+| `agent-framework/backend/a2a/server/helpers/normalize.py` | Strict SendMessage validation; metadata-centric flatten |
+| `agent-framework/backend/a2a/server/helpers/converters.py` | Task / StreamResponse shapes; `reasonCode` on one text part |
+| `agent-framework/backend/a2a/server/helpers/resume.py` | Resume an existing paused task when the inbound message names it |
+| `agent-framework/backend/a2a/server/helpers/spec_normalizer.py` | Playwright extraction requires `source_type: playwright` |
+| `agent-framework/backend/a2a/server/utils/context.py` | Required `contextId`; optional header match; never mint |
 | `agent-framework/backend/agui_server.py` | Load prior `test_run_id` values for the Web UI thread |
 | `agent-framework/backend/agents/orchestrator/agent.py` | Delegation accepts `source_type` for the Script Agent and passes comparison run ids through |
 | `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | The framework assigns `test_run_id`; the model asks when more than one run is in play |
 | `agent-framework/backend/agents/script-agent/INSTRUCTIONS.md` | Use the `test_run_id` already on the payload |
+
+---
+
+## 🚫 9. Removed custom A2A task routes
+
+Custom PerfPilot task URLs under `/agents/{name}/tasks/*` are retired.
+JSON-RPC (`POST /a2a/v1`) is the primary A2A binding; REST
+(`/message:send`, `/message:stream`, `/tasks/{id}`) remains supported.
+The Web UI catalog (`GET /agents`, `GET /agents/{name}/.well-known/agent.json`)
+and AG-UI (port 8102) are unchanged. Orchestrator specialist
+delegation is in-process; it no longer HTTP-POSTs the deleted routes.
+
+See [A2A server data contract §12](docs/a2a/a2a-server-data-contracts.md#12-removed-api)
+for the replacement table.
+
+---
+
+## 🔌 10. A2A wire-format compliance
+
+JSON-RPC `GetTask` / `CancelTask` now return a bare `Task` in `result`.
+`SendMessage` (both bindings) returns `{ "task": Task }`. REST success
+and error bodies use `Content-Type: application/a2a+json`.
+`configuration.returnImmediately` (default `false`) is the blocking
+switch. `INPUT_REQUIRED` emits a single text part with
+`metadata.reasonCode`. Agent cards advertise `pushNotifications: false`;
+push methods return `-32003`. REST gained `GET /tasks/{id}:subscribe`
+and `GET /tasks` (list is still unimplemented).
+
+---
+
+## 🧵 11. Required `contextId`
+
+Every A2A `SendMessage` / `SendStreamingMessage` must include
+`message.contextId`. The server no longer auto-mints a conversation
+id. Optional `X-External-Thread-Id` must match `contextId` when
+present. Task objects and SSE events echo `contextId` (never an empty
+string). Emitting `X-Thread-Id` on every success response is a
+follow-up (Yaak smokes confirmed `A2A-Version` and `X-Session-Id`).
+
+---
+
+## 📥 12. Strict A2A ingress
+
+A2A `SendMessage` / `SendStreamingMessage` now require a validated
+`message` object (`messageId`, `ROLE_USER`, non-empty `parts`,
+`contextId`). Flat bodies (`text`, `prompt`, or a string `message`)
+are rejected. PerfPilot fields such as `test_run_id` are read from
+`message.metadata` and `parts[].metadata` (`message.metadata` wins
+over envelope `metadata`).
+
+---
+
+## 🪪 13. A2A Agent Cards
+
+On-disk Agent Cards and the stub synthesizer now use official A2A
+`capabilities` only (`streaming`, `pushNotifications`,
+`extendedAgentCard`). PerfPilot flags live under
+`metadata.perfpilot_capabilities`. `displayName`, `status`, and `tags`
+moved into `metadata`. `provider.url` is the `{host}:{port}`
+placeholder (hostname auto-injection stays backlog-only).
+`list_available_specialists` reads those metadata fields.
+
+---
+
+## 📘 14. A2A data-contract rewrite
+
+[`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md)
+is the post-compliance inbound contract: required `contextId` (never
+minted), optional matching `X-External-Thread-Id`, official envelope
+`metadata`, no flat legacy payload, correct JSON-RPC / REST wrappers,
+Removed API, and Agent Card metadata. Unit coverage for those rules
+lives under `tests/agent_framework/a2a/`.
 
 ---
 
@@ -151,4 +241,4 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 
 ---
 
-*Last Updated: October 11, 2026* ✨
+*Last Updated: October 21, 2026* ✨

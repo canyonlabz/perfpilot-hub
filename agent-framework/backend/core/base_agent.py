@@ -61,35 +61,88 @@ def resolve_agent_config_path(agent_folder: Path) -> Path | None:
     return None
 
 
+_PLACEHOLDER_URL = "https://{host}:{port}"
+
+
+def card_display_name(card: dict, fallback: str = "") -> str:
+    """Return ``metadata.displayName``, then ``name``, then ``fallback``."""
+    meta = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+    for value in (meta.get("displayName"), card.get("name"), fallback):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return fallback
+
+
+def card_status(card: dict, fallback: str = "stub") -> str:
+    """Return ``metadata.status``, or ``fallback`` when unset."""
+    meta = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+    value = meta.get("status")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return fallback
+
+
+def card_tags(card: dict) -> list[str]:
+    """Return ``metadata.tags`` as a list of strings."""
+    meta = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+    tags = meta.get("tags")
+    if not isinstance(tags, list):
+        return []
+    return [tag for tag in tags if isinstance(tag, str)]
+
+
+def with_catalog_aliases(card: dict) -> dict:
+    """Copy catalog fields the Web UI still reads from the card root.
+
+    Official A2A cards keep ``displayName`` and ``status`` in
+    ``metadata``. ``GET /agents/{name}/.well-known/agent.json`` adds
+    ``display_name`` and ``status`` so the existing catalog panel
+    keeps working without an AG-UI rewrite.
+    """
+    view = dict(card)
+    view["display_name"] = card_display_name(card, fallback=str(card.get("name") or ""))
+    view["status"] = card_status(card)
+    return view
+
+
 def synthesize_stub_card(agent_name: str, framework_version: str = "0.1.0") -> dict:
-    """Return a truthful stub `agent_card.json` for an agent with no on-disk card.
+    """Return a truthful stub Agent Card for an agent with no on-disk card.
 
-    V2 doc §7.4 requires stub cards to advertise empty `skills[]` and a
-    clear `status: "stub"` rather than promising capabilities the agent
-    does not yet have. Used by:
-
-    - `a2a_server._register_routes` when serving `/.well-known/agent.json`
-      for an enabled agent whose folder has not yet been scaffolded with
-      a real `agent_card.json` (most specialists today).
-    - `agents/orchestrator/agent.py::list_available_specialists()` when
-      enumerating the catalog for the orchestrator's discovery tool.
+    Advertises empty ``skills[]`` and ``metadata.status: "stub"`` rather
+    than promising capabilities the agent does not yet have. Used by
+    discovery routes and ``list_available_specialists()``.
     """
     return {
         "name": agent_name,
         "description": (
-            f"PerfPilot {agent_name} (Epic 3 stub). Real capabilities ship in a later "
-            "Feature; this card is published only so external A2A clients can discover "
-            "the agent today."
+            f"PerfPilot {agent_name} stub. Real capabilities ship later; "
+            "this card is published so A2A clients can discover the agent."
         ),
         "url": f"/agents/{agent_name}",
         "version": framework_version,
-        "status": "stub",
-        "skills": [],
-        "tags": ["stub", "epic-3"],
+        "supportedInterfaces": [
+            {
+                "url": _PLACEHOLDER_URL,
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0",
+            }
+        ],
+        "provider": {
+            "organization": "PerfPilot",
+            "url": _PLACEHOLDER_URL,
+        },
         "capabilities": {
             "streaming": True,
-            "long_running_tasks": True,
-            "webhook_subscribers": True,
+            "pushNotifications": False,
+            "extendedAgentCard": False,
+        },
+        "defaultInputModes": ["text/plain"],
+        "defaultOutputModes": ["text/plain", "application/json"],
+        "skills": [],
+        "metadata": {
+            "displayName": f"PerfPilot {agent_name}",
+            "status": "stub",
+            "tags": ["stub"],
         },
     }
 

@@ -23,9 +23,9 @@ subscribe-before-enqueue sequencing (which matters for the streaming
 ingress paths where the SSE subscription must register before the task
 re-starts executing).
 
-Dependency direction: this module imports from ``stores/``, ``a2a/shared/``,
-and ``a2a/server/v1_helpers``. It is not imported by any ``core/``,
-``stores/``, or ``services/`` module.
+Dependency direction: this module imports from ``stores/`` and
+``a2a/shared/``. It is not imported by any ``core/``, ``stores/``, or
+``services/`` module.
 """
 
 from __future__ import annotations
