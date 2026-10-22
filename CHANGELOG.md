@@ -2,9 +2,11 @@
 
 This document summarizes the enhancements added to PerfPilot-Hub during October 2026.
 
-> **Branch:** `feat/test-run-id-resolution-and-persistence`
-
 The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three ways the Script Agent receives the source. After that, validation, execution, monitoring, analysis, and reporting follow the same path and share one `test_run_id`.
+
+This changelog also covers the A2A server compliance pass: JSON-RPC is
+the primary binding, REST stays supported, custom PerfPilot task routes
+are retired, and inbound messages follow A2A v1.0.0.
 
 ---
 
@@ -118,6 +120,11 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 | `tests/agent_framework/a2a/test_a2a_sse_input_required.py` | Pause-event coverage |
 | `tests/agent_framework/a2a/test_a2a_resume_flow.py` | Resume-path coverage |
 | `tests/agent_framework/a2a/test_spec_normalizer_strict_gate.py` | Playwright source gate |
+| `tests/agent_framework/a2a/test_retired_task_routes.py` | Retired `/agents/{name}/tasks/*` routes are unregistered |
+| `tests/agent_framework/a2a/test_wire_format.py` | JSON-RPC/REST wrappers, `returnImmediately`, push `-32003` |
+| `tests/agent_framework/a2a/test_context_enforcement.py` | Required `contextId`; optional matching `X-External-Thread-Id` |
+| `tests/agent_framework/a2a/test_ingress_validation.py` | Strict Message validation; metadata-sourced `test_run_id` |
+| `tests/agent_framework/a2a/test_agent_cards.py` | Official card capabilities, `provider.url`, metadata catalog fields |
 | `tests/agent_framework/agui/test_webui_context_load.py` | Web UI thread-context coverage |
 | `tests/agent_framework/services/test_orchestrator_input_required.py` | Orchestrator pause coverage |
 | `tests/agent_framework/services/test_specialist_envelope_reuse.py` | Specialist reuse and `comparison_id` capture |
@@ -132,9 +139,13 @@ Examples use placeholder hosts (`example.com`, `example-org`).
 | `agent-framework/backend/core/test_run_id.py` | Reuse, mint, skip-mint, and ask outcomes |
 | `agent-framework/backend/a2a/shared/parts_parser.py` | Read an optional task tag from the prompt part |
 | `agent-framework/backend/services/task_executor.py` | Pause when an id is missing; specialists reuse the id; capture `comparison_id`; persist Playwright specs from step text |
-| `agent-framework/backend/a2a/server/v1_helpers.py` | Lift a resume task id; include the pause message on the status event |
-| `agent-framework/backend/a2a/server/v1_routes.py` | Resume an existing paused task when the inbound message names it |
-| `agent-framework/backend/a2a/server/spec_normalizer.py` | Playwright extraction requires `source_type: playwright` |
+| `agent-framework/backend/a2a/server/v1_jsonrpc.py` | JSON-RPC binding (`POST /a2a/v1`) |
+| `agent-framework/backend/a2a/server/v1_rest.py` | REST binding + official Agent Card discovery |
+| `agent-framework/backend/a2a/server/helpers/normalize.py` | Strict SendMessage validation; metadata-centric flatten |
+| `agent-framework/backend/a2a/server/helpers/converters.py` | Task / StreamResponse shapes; `reasonCode` on one text part |
+| `agent-framework/backend/a2a/server/helpers/resume.py` | Resume an existing paused task when the inbound message names it |
+| `agent-framework/backend/a2a/server/helpers/spec_normalizer.py` | Playwright extraction requires `source_type: playwright` |
+| `agent-framework/backend/a2a/server/utils/context.py` | Required `contextId`; optional header match; never mint |
 | `agent-framework/backend/agui_server.py` | Load prior `test_run_id` values for the Web UI thread |
 | `agent-framework/backend/agents/orchestrator/agent.py` | Delegation accepts `source_type` for the Script Agent and passes comparison run ids through |
 | `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | The framework assigns `test_run_id`; the model asks when more than one run is in play |
@@ -174,8 +185,9 @@ and `GET /tasks` (list is still unimplemented).
 Every A2A `SendMessage` / `SendStreamingMessage` must include
 `message.contextId`. The server no longer auto-mints a conversation
 id. Optional `X-External-Thread-Id` must match `contextId` when
-present. Responses always include `X-Thread-Id` and echo `contextId`
-on the Task and SSE events.
+present. Task objects and SSE events echo `contextId` (never an empty
+string). Emitting `X-Thread-Id` on every success response is a
+follow-up (Yaak smokes confirmed `A2A-Version` and `X-Session-Id`).
 
 ---
 
@@ -229,4 +241,4 @@ lives under `tests/agent_framework/a2a/`.
 
 ---
 
-*Last Updated: October 20, 2026* ✨
+*Last Updated: October 21, 2026* ✨
