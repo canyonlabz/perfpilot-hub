@@ -215,6 +215,10 @@ async def execute_task(task_id: UUID) -> None:
             return
 
         result = await _dispatch_agent(task, common)
+        from services.helpers.input_required_msgs import (
+            raise_if_specialist_asks_for_input,
+        )
+        raise_if_specialist_asks_for_input(result)
         await task_store.mark_completed(task.task_id, result)
         await _broadcast(task.task_id, TaskEvent(status="completed", result=result, **common))
     except asyncio.CancelledError:
