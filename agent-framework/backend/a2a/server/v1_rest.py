@@ -32,11 +32,11 @@ from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
 )
-from a2a.server.utils.context import ContextResolutionError
+from a2a.server.utils.context import ContextResolutionError, load_thread_for_task
 from a2a.server.utils.headers import (
     A2A_JSON_MEDIA_TYPE,
     A2A_V1_AGENT_NAME,
-    _a2a_v1_response_headers,
+    v1_response_headers,
 )
 
 log = logging.getLogger(__name__)
@@ -70,7 +70,6 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     _read_json_body = ctx["read_json_body"]
     _resolve_a2a_thread = ctx["resolve_a2a_thread"]
     _extract_subscriber_endpoints = ctx["extract_subscriber_endpoints"]
-    _thread_response_headers = ctx["thread_response_headers"]
 
     from a2a.shared.errors import (
         http_bad_request,
@@ -92,8 +91,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     )
 
     def _v1_headers(thread=None):
-        th = _thread_response_headers(thread) if thread is not None else None
-        return _a2a_v1_response_headers(th)
+        return v1_response_headers(thread)
 
     def _rest_json(content: dict, *, status_code: int = 200, thread=None) -> JSONResponse:
         return JSONResponse(
@@ -320,7 +318,8 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         if task is None:
             return http_task_not_found(task_id)
 
-        return _rest_json(_task_to_a2a_v1(task))
+        thread = await load_thread_for_task(task)
+        return _rest_json(_task_to_a2a_v1(task), thread=thread)
 
     # -- ListTasks (A2A v1 Section 11) ---------------------------------------
     @app.get("/tasks", tags=["a2a-v1", "tasks"])
@@ -387,9 +386,10 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             finally:
                 await task_executor.unsubscribe(task.task_id, queue)
 
+        subscribe_thread = await load_thread_for_task(task)
         return EventSourceResponse(
             _stream(),
-            headers=_v1_headers(),
+            headers=_v1_headers(subscribe_thread),
         )
 
     # -- CancelTask (A2A v1 Section 11) --------------------------------------
@@ -415,7 +415,8 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         if refreshed is None:
             refreshed = task
 
-        return _rest_json(_task_to_a2a_v1(refreshed))
+        thread = await load_thread_for_task(refreshed)
+        return _rest_json(_task_to_a2a_v1(refreshed), thread=thread)
 
     # -- Push notifications (advertised as unsupported) ----------------------
     @app.post("/tasks/{task_id}/pushNotificationConfigs", tags=["a2a-v1", "push"])

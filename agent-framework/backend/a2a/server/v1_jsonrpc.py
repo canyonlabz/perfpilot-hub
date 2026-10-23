@@ -31,8 +31,13 @@ from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
 )
-from a2a.server.utils.context import ContextResolutionError
-from a2a.server.utils.headers import A2A_V1_AGENT_NAME, _a2a_v1_response_headers
+from a2a.server.utils.context import (
+    ContextResolutionError,
+    bind_resolved_thread,
+    load_thread_for_task,
+    resolved_thread_from_request,
+)
+from a2a.server.utils.headers import A2A_V1_AGENT_NAME, v1_response_headers
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +59,6 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
     _require_session = ctx["require_session"]
     _resolve_a2a_thread = ctx["resolve_a2a_thread"]
     _extract_subscriber_endpoints = ctx["extract_subscriber_endpoints"]
-    _thread_response_headers = ctx["thread_response_headers"]
 
     from a2a.shared.jsonrpc import (
         JsonRpcError,
@@ -85,8 +89,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
     )
 
     def _v1_headers(thread=None):
-        th = _thread_response_headers(thread) if thread is not None else None
-        return _a2a_v1_response_headers(th)
+        return v1_response_headers(thread)
 
     def _resume_error_to_jsonrpc_response(
         result: ResumeResult, rpc_id,
@@ -145,6 +148,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             thread = await _resolve_a2a_thread(request, agent_name, body)
         except (IngressValidationError, ContextResolutionError) as exc:
             return _context_error_to_jsonrpc(exc, rpc.id)
+        bind_resolved_thread(request, thread)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
             "external_thread_id": thread.external_thread_id,
@@ -178,7 +182,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         task = await start_task_and_maybe_wait(task, task_executor, immediate)
         return jsonrpc_success(rpc.id, {"task": _task_to_a2a_v1(task)})
 
-    async def _handle_get_task(rpc: JsonRpcRequest) -> dict:
+    async def _handle_get_task(rpc: JsonRpcRequest, request: Request) -> dict:
         """Dispatch ``GetTask`` — returns a JSON-RPC success with Task."""
         task_id = rpc.params.get("id")
         if not isinstance(task_id, str) or not task_id:
@@ -204,9 +208,10 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         task = await task_store.get_task(task_uuid)
         if task is None:
             return task_not_found_error(rpc.id, task_id)
+        bind_resolved_thread(request, await load_thread_for_task(task))
         return jsonrpc_success(rpc.id, _task_to_a2a_v1(task))
 
-    async def _handle_cancel_task(rpc: JsonRpcRequest) -> dict:
+    async def _handle_cancel_task(rpc: JsonRpcRequest, request: Request) -> dict:
         """Dispatch ``CancelTask`` — cancels and returns updated Task."""
         task_id = rpc.params.get("id")
         if not isinstance(task_id, str) or not task_id:
@@ -237,6 +242,7 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
         refreshed = await task_store.get_task(task_uuid)
         if refreshed is None:
             refreshed = task
+        bind_resolved_thread(request, await load_thread_for_task(refreshed))
         return jsonrpc_success(rpc.id, _task_to_a2a_v1(refreshed))
 
     async def _stream_send_message(
@@ -403,8 +409,9 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
             finally:
                 await task_executor.unsubscribe(task.task_id, queue)
 
+        subscribe_thread = await load_thread_for_task(task)
         return EventSourceResponse(
-            _sse(), headers=_v1_headers(),
+            _sse(), headers=_v1_headers(subscribe_thread),
         )
 
     # -- Route handler --------------------------------------------------------
@@ -443,24 +450,24 @@ def register_a2a_v1_jsonrpc_route(app: FastAPI, ctx: dict) -> None:
                 result = await _handle_send_message(rpc, request)
                 return JSONResponse(
                     content=result,
-                    headers=_v1_headers(),
+                    headers=_v1_headers(resolved_thread_from_request(request)),
                 )
 
             if method == "SendStreamingMessage":
                 return await _stream_send_message(rpc, request)
 
             if method == "GetTask":
-                result = await _handle_get_task(rpc)
+                result = await _handle_get_task(rpc, request)
                 return JSONResponse(
                     content=result,
-                    headers=_v1_headers(),
+                    headers=_v1_headers(resolved_thread_from_request(request)),
                 )
 
             if method == "CancelTask":
-                result = await _handle_cancel_task(rpc)
+                result = await _handle_cancel_task(rpc, request)
                 return JSONResponse(
                     content=result,
-                    headers=_v1_headers(),
+                    headers=_v1_headers(resolved_thread_from_request(request)),
                 )
 
             if method == "SubscribeToTask":
