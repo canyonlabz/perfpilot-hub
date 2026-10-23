@@ -23,6 +23,7 @@ from a2a.server.helpers.converters import (
     _task_to_a2a_v1,
     _yield_task_event_sse,
 )
+from a2a.server.helpers.sse import sse_event_closes_stream
 from a2a.server.helpers.normalize import (
     IngressValidationError,
     _normalize_a2a_v1_body,
@@ -289,7 +290,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
                         event, context_id=context_id,
                     ):
                         yield frame
-                    if event.status in task_store.TERMINAL_STATUSES:
+                    if sse_event_closes_stream(event, task.task_id):
                         break
             finally:
                 await task_executor.unsubscribe(task.task_id, queue)
@@ -381,7 +382,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
                         event, context_id=context_id,
                     ):
                         yield frame
-                    if event.status in task_store.TERMINAL_STATUSES:
+                    if sse_event_closes_stream(event, task.task_id):
                         break
             finally:
                 await task_executor.unsubscribe(task.task_id, queue)
