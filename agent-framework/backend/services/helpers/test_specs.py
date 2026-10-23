@@ -5,14 +5,19 @@ Markdown under ``artifacts/{test_run_id}/test-specs/``. Propagates the
 saved path and ``test_run_id`` through orchestrator ContextVars so
 ``delegate_to_specialist`` can inject them into child payloads.
 
+Also owns the orchestrator ingress order: resolve/mint ``test_run_id``
+first, then persist. ``persist_test_spec_from_parts`` is reuse-only.
+
 Dependency direction: this module imports from ``core/``,
-``a2a.server.helpers.spec_normalizer``, ``utils.paths``, and orchestrator
-ContextVars. It must NOT import ``services.task_executor``.
+``a2a.server.helpers.spec_normalizer``, ``utils.paths``, the
+``test_run_id`` resolver, and orchestrator ContextVars. It must NOT
+import ``services.task_executor``.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from stores import task_store
 
@@ -184,3 +189,36 @@ def persist_test_spec_from_parts(task: task_store.AgentTask) -> None:
                 "spec_dir": str(spec_dir),
             },
         )
+
+
+async def resolve_test_run_id_then_persist_spec(
+    task: task_store.AgentTask,
+    user_message: Optional[str],
+    thread_id: Optional[str],
+) -> Optional[str]:
+    """Resolve ``test_run_id``, then persist a Playwright spec if present.
+
+    On mint the classifier writes the new ID onto ``task.payload``
+    before this function calls persist, so the reuse-only writer can
+    find it. Raises ``TaskInputRequiredSignal`` when the resolver
+    rejects (persist is skipped).
+
+    Args:
+        task: Orchestrator task currently executing.
+        user_message: Effective user text for this turn (including
+            resume answers).
+        thread_id: Conversation thread id, or ``None``.
+
+    Returns:
+        The resolved ``test_run_id``, or ``None`` for skip_mint /
+        start-test allow-null.
+    """
+    from services.helpers.test_run_id_resolver import (
+        resolve_test_run_id_or_signal_input_required,
+    )
+
+    test_run_id = await resolve_test_run_id_or_signal_input_required(
+        task, user_message, thread_id,
+    )
+    persist_test_spec_from_parts(task)
+    return test_run_id

@@ -442,15 +442,6 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
-    # ── Normalize and persist test spec from A2A parts ──────────────
-    # If the incoming payload contains parts[] with test case content,
-    # normalize it to the step-based Markdown format and save it under
-    # artifacts/{test_run_id}/test-specs/. The file path is propagated
-    # to specialist agents via the agent_spec_file_var ContextVar so
-    # delegate_to_specialist auto-injects it into child task payloads.
-    from services.helpers.test_specs import persist_test_spec_from_parts
-    persist_test_spec_from_parts(task)
-
     # Propagate the task owner's user_id, session_id, thread_id, and
     # request source into the orchestrator's tool execution context so
     # `delegate_to_specialist` can create child tasks with the correct
@@ -467,18 +458,12 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     agent_request_source_var.set("a2a")
     agent_task_id_var.set(str(task.task_id))
 
-    # Shared A2A + Web UI ingress: three-outcome resolver with
-    # INPUT_REQUIRED signalling. REUSE returns the existing ID, MINT
-    # mints + persists a fresh UTC timestamp (script-creation flows),
-    # SKIP_MINT returns None for comparison reports (PerfReport MCP
-    # mints its own comparison_id), and REJECT raises
-    # TaskInputRequiredSignal which execute_task catches to transition
-    # the task row to input_required (A2A §4.1.3) rather than failing.
-    from services.helpers.test_run_id_resolver import (
-        resolve_test_run_id_or_signal_input_required,
-    )
+    # Mint/reuse test_run_id first, then persist Playwright specs.
+    # persist_test_spec_from_parts is reuse-only and will skip if the
+    # ID is not yet on the task or payload.
+    from services.helpers.test_specs import resolve_test_run_id_then_persist_spec
 
-    ensured_test_run_id = await resolve_test_run_id_or_signal_input_required(
+    ensured_test_run_id = await resolve_test_run_id_then_persist_spec(
         task, effective_user_text, thread_id,
     )
     if ensured_test_run_id:

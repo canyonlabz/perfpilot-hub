@@ -157,5 +157,8 @@ async def resolve_test_run_id_or_signal_input_required(
                     "test_run_id": outcome.id,
                 },
             )
+        # Keep the in-memory row aligned with the DB write so reuse-only
+        # helpers in this same turn (spec persist) can read the ID.
+        task.test_run_id = outcome.id
 
     return outcome.id
