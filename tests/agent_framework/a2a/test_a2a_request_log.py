@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pytest
 
@@ -14,6 +15,12 @@ from a2a.server.utils.request_log import (
     log_jsonrpc_envelope,
 )
 from a2a.shared.jsonrpc import a2a_error_data, jsonrpc_error, jsonrpc_success
+from utils.logging_config import log_event, otel_span_id, otel_trace_id
+
+
+def _attrs(record: logging.LogRecord) -> dict[str, Any]:
+    raw = getattr(record, "attributes", None)
+    return raw if isinstance(raw, dict) else {}
 
 
 @pytest.fixture
@@ -42,13 +49,16 @@ def test_missing_context_id_reject_is_warning(
     records = [r for r in request_log_caplog.records if r.name == "a2a.server.request"]
     assert len(records) == 1
     rec = records[0]
+    attrs = _attrs(rec)
     assert rec.levelno == logging.WARNING
     assert rec.getMessage() == "a2a.request.reject"
-    assert rec.rpc_method == "SendMessage"
-    assert rec.rpc_id == "yaak-1"
-    assert rec.error_reason == "INVALID_PARAMS"
-    assert rec.error_field == "message.contextId"
-    assert "contextId" in rec.error_detail
+    assert attrs["rpc_method"] == "SendMessage"
+    assert attrs["rpc_id"] == "yaak-1"
+    assert attrs["error_reason"] == "INVALID_PARAMS"
+    assert attrs["error_field"] == "message.contextId"
+    assert "contextId" in attrs["error_detail"]
+    assert rec.trace_id == ""
+    assert rec.span_id == ""
 
 
 def test_get_task_poll_is_debug_not_info(
@@ -62,10 +72,11 @@ def test_get_task_poll_is_debug_not_info(
 
     records = [r for r in request_log_caplog.records if r.name == "a2a.server.request"]
     assert len(records) == 1
+    attrs = _attrs(records[0])
     assert records[0].levelno == logging.DEBUG
     assert records[0].getMessage() == "a2a.request.poll"
-    assert records[0].task_id == "task-1"
-    assert records[0].context_id == "ctx-1"
+    assert attrs["task_id"] == "task-1"
+    assert attrs["context_id"] == "ctx-1"
 
 
 def test_send_accept_is_info(
@@ -79,10 +90,11 @@ def test_send_accept_is_info(
 
     records = [r for r in request_log_caplog.records if r.name == "a2a.server.request"]
     assert len(records) == 1
+    attrs = _attrs(records[0])
     assert records[0].levelno == logging.INFO
     assert records[0].getMessage() == "a2a.request.accept"
-    assert records[0].task_id == "task-9"
-    assert records[0].context_id == "ctx-9"
+    assert attrs["task_id"] == "task-9"
+    assert attrs["context_id"] == "ctx-9"
 
 
 def test_error_fields_from_jsonrpc_reads_metadata() -> None:
@@ -118,3 +130,25 @@ def test_direct_reject_and_accept_helpers(
     messages = [r.getMessage() for r in request_log_caplog.records if r.name == "a2a.server.request"]
     assert "a2a.request.reject" in messages
     assert "a2a.request.accept" in messages
+
+
+def test_log_event_nests_fields_and_binds_span_context(
+    request_log_caplog: pytest.LogCaptureFixture,
+) -> None:
+    token_trace = otel_trace_id.set("a" * 32)
+    token_span = otel_span_id.set("b" * 16)
+    try:
+        log_event(
+            "a2a.server.request",
+            logging.INFO,
+            "probe",
+            attributes={"rpc_method": "SendMessage"},
+        )
+    finally:
+        otel_trace_id.reset(token_trace)
+        otel_span_id.reset(token_span)
+
+    rec = [r for r in request_log_caplog.records if r.getMessage() == "probe"][-1]
+    assert _attrs(rec)["rpc_method"] == "SendMessage"
+    assert rec.trace_id == "a" * 32
+    assert rec.span_id == "b" * 16

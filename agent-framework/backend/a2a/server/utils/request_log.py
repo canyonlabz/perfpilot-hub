@@ -1,8 +1,9 @@
-"""Inbound A2A request logs (stdlib logger; format from logging_config).
+"""Inbound A2A request classification; emit via ``utils.logging_config``.
 
-``configure_logging()`` already wires local console vs cloud OTEL JSON.
-This module only classifies A2A events so bindings do not grow a log
-block in every handler. Do not log cookies, tokens, or message bodies.
+This module only names A2A events and their attributes. ``log_event``
+owns OTEL-shaped emit (body, severity, attributes, trace_id, span_id)
+so spans/traces can be added later without rewriting these helpers.
+Do not log cookies, tokens, or message bodies.
 """
 
 from __future__ import annotations
@@ -10,8 +11,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-log = logging.getLogger("a2a.server.request")
+from utils.logging_config import log_event
 
+_LOGGER_NAME = "a2a.server.request"
 _GET_METHODS = frozenset({"GetTask"})
 
 
@@ -48,9 +50,11 @@ def log_a2a_reject(
     context_id: Optional[str] = None,
 ) -> None:
     """Warning for client rejects (missing contextId, flat body, resume)."""
-    log.warning(
+    log_event(
+        _LOGGER_NAME,
+        logging.WARNING,
         "a2a.request.reject",
-        extra=_extra(
+        attributes=_extra(
             rpc_method=method,
             rpc_id=rpc_id,
             task_id=task_id,
@@ -73,16 +77,26 @@ def log_a2a_accept(
 
     GetTask is debug so polling does not INFO-spam.
     """
-    extra = _extra(
+    attributes = _extra(
         rpc_method=method,
         rpc_id=rpc_id,
         task_id=task_id,
         context_id=context_id,
     )
     if method in _GET_METHODS:
-        log.debug("a2a.request.poll", extra=extra)
+        log_event(
+            _LOGGER_NAME,
+            logging.DEBUG,
+            "a2a.request.poll",
+            attributes=attributes,
+        )
         return
-    log.info("a2a.request.accept", extra=extra)
+    log_event(
+        _LOGGER_NAME,
+        logging.INFO,
+        "a2a.request.accept",
+        attributes=attributes,
+    )
 
 
 def error_fields_from_jsonrpc(content: dict) -> dict[str, Optional[str]]:
