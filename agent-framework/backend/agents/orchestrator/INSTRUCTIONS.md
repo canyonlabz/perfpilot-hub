@@ -665,7 +665,11 @@ Always delegate provisioning even when smoke failed — the HITL gate
 
 ### 9.9 List available specialists
 
-Trigger: User says "what can you do?" or "which agents are available?"
+Trigger: User says "what can you do?", "which agents are available?",
+or "what specialists can you delegate to?"
+
+This is catalog discovery. Do not ask for a `test_run_id`. Call the
+tool and answer.
 
 ```
 1. list_available_specialists()

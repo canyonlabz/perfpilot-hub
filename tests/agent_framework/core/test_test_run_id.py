@@ -9,8 +9,8 @@ Outcome taxonomy (A2A v1 aligned, see module docstring):
 
   * ``reuse``     — ID is already present on the payload or in prose.
   * ``mint``      — script-creation signal present and no ID yet.
-  * ``skip_mint`` — comparison-report request; PerfReport MCP mints
-                    its own ``comparison_id`` so the framework defers.
+  * ``skip_mint`` — comparison-report request, or catalog / list-
+                    specialists discovery (no ID required).
   * ``reject``    — none of the above; the ingress layer transitions
                     the task to A2A TASK_STATE_INPUT_REQUIRED.
 
@@ -348,6 +348,60 @@ def test_skip_mint_does_not_write_payload() -> None:
     }
     trid.resolve_test_run_id_outcome(payload=payload)
     assert "test_run_id" not in payload
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "What specialists can you delegate to?",
+        "what can you do?",
+        "which agents are available?",
+        "which specialists are available",
+        "Please list the available specialists",
+        "who can you delegate to?",
+    ],
+)
+def test_skip_mint_for_catalog_discovery_prose(user_text: str) -> None:
+    result = trid.resolve_test_run_id_outcome(user_text=user_text)
+    assert result.outcome == trid.OUTCOME_SKIP_MINT
+    assert result.id is None
+    assert result.reason_code is None
+
+
+def test_skip_mint_for_catalog_metadata_task() -> None:
+    payload = {
+        "parts": [
+            {"text": "show the team", "metadata": {"task": "list_specialists"}},
+        ]
+    }
+    result = trid.resolve_test_run_id_outcome(payload=payload)
+    assert result.outcome == trid.OUTCOME_SKIP_MINT
+    assert result.id is None
+
+
+def test_script_creation_mint_wins_over_catalog_prose() -> None:
+    result = trid.resolve_test_run_id_outcome(
+        user_text="what specialists can you delegate to? generate a script from this HAR",
+    )
+    assert result.outcome == trid.OUTCOME_MINT
+    assert result.id is not None
+
+
+def test_extract_prose_still_rejects() -> None:
+    result = trid.resolve_test_run_id_outcome(
+        user_text="extract results from the last BlazeMeter run",
+    )
+    assert result.outcome == trid.OUTCOME_REJECT
+    assert result.reason_code == trid.REASON_MISSING_TEST_RUN_ID
+
+
+def test_is_discovery_request_false_for_extract_and_start() -> None:
+    assert not trid.is_discovery_request(
+        user_text="extract results from the last BlazeMeter run",
+    )
+    assert not trid.is_discovery_request(
+        user_text="start BlazeMeter test 14493190",
+    )
 
 
 def test_reuse_wins_over_skip_mint_for_comparison_with_existing_id() -> None:

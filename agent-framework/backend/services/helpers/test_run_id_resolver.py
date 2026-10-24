@@ -56,9 +56,10 @@ async def resolve_test_run_id_or_signal_input_required(
       * ``mint``      — return the minted ID; persist it to the task
                         row so later turns see it via
                         ``list_tasks_for_thread``.
-      * ``skip_mint`` — return ``None``; the comparison-report path
-                        receives its ID later from the MCP tool result
-                        and persists it via ``set_test_run_id``.
+      * ``skip_mint`` — return ``None``. Comparison-report receives
+                        its ID later from the MCP tool result.
+                        Catalog / list-specialists questions stay
+                        ``None`` for the whole turn.
       * ``reject``    — raise ``TaskInputRequiredSignal`` with the
                         composed question text and reasonCode, **unless**
                         this is a performance-test *start* request
