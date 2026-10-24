@@ -26,6 +26,7 @@ are retired, and inbound messages follow A2A v1.0.0.
 - [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
 - [🪪 13. A2A Agent Cards](#13-a2a-agent-cards)
 - [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
+- [🚀 15. A2A post-smoke enhancements](#15-a2a-post-smoke-enhancements)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -40,8 +41,8 @@ Every inbound request is classified into one of four outcomes:
 |---------|------|----------------------|
 | **Reuse** | An id is already on the task, in the payload, or in the user's message (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Keep that id |
 | **Mint** | The request creates a JMeter script (Playwright, HAR, or OpenAPI) and no id exists yet | Mint `YYYY-MM-DD-HH-MM-SS` in UTC and store it on the task |
-| **Skip mint** | The request is a comparison report and names two or more existing run ids | Do not mint. The reporting tools mint `comparison_id`, and the framework stores that value on the reporting task |
-| **Ask** | No id exists and the request is not script creation | Pause the task and ask the user which run to use |
+| **Skip mint** | The request is a comparison report and names two or more existing run ids, **or** a catalog / list-specialists question | Do not mint. Comparison reports later store `comparison_id`. Catalog questions need no id |
+| **Ask** | No id exists and the request is not script creation, start-test, or catalog discovery | Pause the task and ask the user which run to use |
 
 Artifacts for a single run stay under `artifacts/{test_run_id}/`.
 
@@ -69,6 +70,7 @@ When the server needs more input, the task moves to `TASK_STATE_INPUT_REQUIRED`.
 |--------------|------|
 | `missing_test_run_id` | The request needs a run id and none was supplied |
 | `malformed_playwright_test_spec` | Playwright was declared and the task context has no recognizable steps |
+| `agent_input_required` | A specialist asked the client to choose (for example A/B/C) instead of producing the objective |
 
 The caller continues the same task by sending another message with the same task id and the same `contextId`. The follow-up can be a short answer. The original request stays on the task. A mismatched `contextId`, an unknown task id, or a task that is not paused is rejected.
 
@@ -186,8 +188,8 @@ Every A2A `SendMessage` / `SendStreamingMessage` must include
 `message.contextId`. The server no longer auto-mints a conversation
 id. Optional `X-External-Thread-Id` must match `contextId` when
 present. Task objects and SSE events echo `contextId` (never an empty
-string). Emitting `X-Thread-Id` on every success response is a
-follow-up (Yaak smokes confirmed `A2A-Version` and `X-Session-Id`).
+string). Successful Send / Stream / Get / Cancel / Subscribe responses
+now also return `X-Thread-Id` (see §15).
 
 ---
 
@@ -225,6 +227,34 @@ lives under `tests/agent_framework/a2a/`.
 
 ---
 
+## 🚀 15. A2A post-smoke enhancements
+
+Smoke follow-ups on `feature/update-a2a-server-compliance` after the
+compliance pass. Public contract:
+[`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md).
+
+- Parent SSE stays open until the **subscribed** task is terminal.
+  Proxied child `COMPLETED` frames do not close the parent stream.
+- Playwright specs persist **after** `test_run_id` mint or reuse.
+- Specialist A/B/C “please choose” replies settle as
+  `TASK_STATE_INPUT_REQUIRED` (`reasonCode: agent_input_required`),
+  not `COMPLETED`.
+- `X-Thread-Id` is returned on successful JSON-RPC and REST Send / Get /
+  Cancel / Subscribe, not only on SSE.
+- A2A request logs go through `logging_config.log_event` (warning on
+  client rejects, debug on `GetTask` polls).
+- A2A orchestrator replies name child `taskId`s and `GetTask` /
+  `SubscribeToTask`. They do not mention the Tasks panel.
+- Catalog / “list specialists” questions `skip_mint` and do not pause
+  for `missing_test_run_id`.
+- `archive_playwright_traces` returns `DEGRADED` with `archived_path`
+  when source cleanup hits a permission error; a new capture can still run.
+
+Intent classifiers (catalog vs script vs start-test) remain heuristics
+in the `test_run_id` resolver and are tracked as later cleanup.
+
+---
+
 ## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
@@ -241,4 +271,4 @@ lives under `tests/agent_framework/a2a/`.
 
 ---
 
-*Last Updated: October 21, 2026* ✨
+*Last Updated: October 23, 2026* ✨
