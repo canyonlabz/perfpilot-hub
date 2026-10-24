@@ -444,6 +444,10 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     for rm_text in resume_texts:
         messages_for_llm.append({"role": "user", "content": rm_text})
 
+    from services.helpers.a2a_surface import prepend_a2a_surface_briefing
+
+    messages_for_llm = prepend_a2a_surface_briefing(messages_for_llm)
+
     await _broadcast(task.task_id, TaskEvent(status="running", progress="invoking_llm", **common))
 
     # Propagate the task owner's user_id, session_id, thread_id, and
