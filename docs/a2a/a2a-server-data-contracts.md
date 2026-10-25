@@ -63,23 +63,6 @@ The same server accepts the same `message` body on all four of the send
 paths. Clients pick the binding that matches their transport
 preference; the data contract is identical.
 
-**Prefer `SendStreamingMessage` (or REST `/message:stream`) for
-performance-testing work that takes seconds to minutes.**
-`SendMessage` remains valid. After the orchestrator delegates, A2A
-replies name child `taskId`s and tell the caller to `GetTask` or
-`SubscribeToTask`. They never mention the Tasks panel, CopilotKit, or
-the Web UI.
-
-On a parent stream, child `WORKING` / `COMPLETED` / artifact frames
-are forwarded. The SSE connection closes only when the **subscribed**
-(parent) task is terminal or interrupted — not when a proxied child
-completes.
-
-Successful Send / Stream / Get / Cancel / Subscribe responses include
-`X-Thread-Id` once a thread exists (ingress rejects such as a missing
-`contextId` may omit it). If the client sent a matching
-`X-External-Thread-Id`, it is echoed.
-
 ### 1.1 Minimum request envelope
 
 ```jsonc
@@ -126,7 +109,7 @@ and persisted server-side.
 |----|-------------|-------|---------|
 | `contextId` | **Client** (on `message.contextId`) | Conversation / thread | Links related turns across a multi-turn exchange; required. Missing = `InvalidParams` |
 | `X-External-Thread-Id` | Client (optional HTTP header) | Conversation / thread | Must equal `contextId` when present; not a substitute for `contextId` |
-| `X-Thread-Id` | Server (response header) | Internal thread row | Long-lived `agent_threads` id; returned on every successful Send / Stream / Get / Cancel / Subscribe once a thread exists |
+| `X-Thread-Id` | Server (response header) | Internal thread row | Long-lived `agent_threads` id; always returned on task-creating responses |
 | `session_id` | Server | Caller session | Internal session row; derived from the authenticated caller |
 | `taskId` | Server | One request | Issued on the SendMessage response; the client echoes it in the `Task.id` field and on resume (§6) |
 
@@ -362,7 +345,7 @@ request into one of four outcomes:
 | Outcome | Trigger | Server behavior |
 |---------|---------|-----------------|
 | **reuse** | Request carries a valid `test_run_id` on `message.metadata.test_run_id`, `parts[].metadata.test_run_id`, or inline in the user prose (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Use the value verbatim; never override |
-| **skip_mint** | Comparison report (`parts[1].metadata.task_type == "comparison_report"` with a non-empty `test_run_ids` list), **or** a catalog / list-specialists discovery question (for example “What specialists can you delegate to?”) | No `test_run_id` is minted or requested. Comparison reports later store the PerfReport `comparison_id`. Catalog questions complete without an ID |
+| **skip_mint** | `parts[1].metadata.task_type == "comparison_report"` with a non-empty `test_run_ids` list | Defer to the PerfReport MCP's own `comparison_id`; no mint |
 | **mint** | `parts[1].metadata.source_type` is in `{playwright, har, openapi}`, **or** the Web-UI prose heuristic matches a script-creation intent | Mint a fresh UTC timestamp `YYYY-MM-DD-HH-MM-SS`; write it back to the payload so downstream code sees it |
 | **reject** | None of the above matches | Task transitions to `TASK_STATE_INPUT_REQUIRED` with `reasonCode: "missing_test_run_id"`; client resumes per §6 |
 
@@ -437,9 +420,8 @@ Server behavior:
    markdown (lines starting with `Step 1:`, `TC01:`, `Test Case 1:`,
    etc.). Missing content triggers `TASK_STATE_INPUT_REQUIRED` with
    `reasonCode: "malformed_playwright_test_spec"` (§7).
-3. After mint (or reuse), the spec is persisted to
+3. Spec persisted to
    `artifacts/{test_run_id}/test-specs/{test_run_id}_test_spec.md`.
-   Persist is reuse-only and runs only once an ID exists.
 4. Script agent delegated with the minted `test_run_id` and the
    full three-part context on its payload.
 
@@ -720,7 +702,6 @@ Current `reasonCode` values emitted on
 |--------------|---------|---------------------------------|
 | `missing_test_run_id` | Resolver returned the `reject` outcome (§4) | `candidate_test_run_ids`: array of known IDs from the same thread (newest-first, max 5 rendered in the prompt text) |
 | `malformed_playwright_test_spec` | `parts[1].metadata.source_type == "playwright"` but no recognizable step pattern was found in `parts[1].text` | `parts_count`: integer count of `parts[]` entries received |
-| `agent_input_required` | A specialist finished talking but is asking the client to choose (for example A/B/C) instead of producing the objective | Optional `reason_data` from the pause signal |
 
 Clients SHOULD switch on `reasonCode` for UX decisions and treat the
 text message as display-only. Unknown `reasonCode` values should fall
@@ -777,24 +758,10 @@ summary of the failure plus any error context the specialist agent
 provided. The task row's result column is also populated for later
 retrieval via `GET /tasks/{task_id}`.
 
-When a specialist asks the client to pick among options instead of
-producing the objective, the task settles as `TASK_STATE_INPUT_REQUIRED`
-with `reasonCode: "agent_input_required"` (not `TASK_STATE_COMPLETED`).
-Resume uses the same `taskId` and `contextId` as §7.
-
-Orchestrator text on the A2A surface names child `taskId`s and the
-`GetTask` / `SubscribeToTask` methods. It does not tell callers to
-use the Tasks panel.
-
 ---
 
 ## 🚧 10. Out-of-scope / future work
 
-- **Dedicated request classifiers.** Catalog, script-creation, start-test,
-  and comparison detection currently live as heuristics in the
-  `test_run_id` resolver. A later pass should split those into
-  sub-modules with an explicit taxonomy so contributors are not
-  maintaining one growing regex list.
 - **`parts[0].metadata.task` reserved values.** The taxonomy is open
   today. A future release will reserve specific tags
   (e.g. `comparison_report`, `generate_jmx_from_playwright`) so
