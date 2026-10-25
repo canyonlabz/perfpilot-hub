@@ -17,9 +17,13 @@ from a2a.server.utils.context import (
     ContextResolutionError,
     _resolve_a2a_thread,
     _thread_response_headers,
+    bind_resolved_thread,
+    load_thread_for_task,
     require_context_id,
     require_matching_external_thread_header,
+    resolved_thread_from_request,
 )
+from a2a.server.utils.headers import v1_response_headers
 from stores import task_store, thread_store
 
 
@@ -145,6 +149,60 @@ def test_thread_response_headers_always_include_internal_thread_id() -> None:
     headers = _thread_response_headers(thread)
     assert headers["X-Thread-Id"] == "tid-1"
     assert headers["X-External-Thread-Id"] == "ctx-001"
+
+
+def test_v1_response_headers_include_thread_on_success() -> None:
+    thread = SimpleNamespace(thread_id="tid-1", external_thread_id="ctx-001")
+    headers = v1_response_headers(thread)
+    assert headers["A2A-Version"] == "1.0"
+    assert headers["X-Thread-Id"] == "tid-1"
+    assert headers["X-External-Thread-Id"] == "ctx-001"
+
+
+def test_v1_response_headers_omit_thread_on_ingress_reject() -> None:
+    headers = v1_response_headers(None)
+    assert headers == {"A2A-Version": "1.0"}
+    assert "X-Thread-Id" not in headers
+
+
+def test_bind_and_read_resolved_thread_on_request() -> None:
+    request = _request()
+    thread = SimpleNamespace(thread_id="tid-9", external_thread_id="ctx-9")
+    assert resolved_thread_from_request(request) is None
+    bind_resolved_thread(request, thread)
+    assert resolved_thread_from_request(request) is thread
+    bind_resolved_thread(request, None)
+    assert resolved_thread_from_request(request) is thread
+
+
+@pytest.mark.asyncio
+async def test_load_thread_for_task_uses_stored_thread_id(monkeypatch) -> None:
+    expected = thread_store.AgentThread(
+        thread_id="tid-stored",
+        source="a2a_external",
+        status="active",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        external_thread_id="ctx-stored",
+    )
+
+    async def fake_get(thread_id: str):
+        assert thread_id == "tid-stored"
+        return expected
+
+    monkeypatch.setattr(thread_store, "get_thread", fake_get)
+    task = SimpleNamespace(thread_id="tid-stored")
+    assert await load_thread_for_task(task) is expected
+
+
+@pytest.mark.asyncio
+async def test_load_thread_for_task_skips_missing_id(monkeypatch) -> None:
+    async def fake_get(thread_id: str):
+        raise AssertionError("must not look up when thread_id is empty")
+
+    monkeypatch.setattr(thread_store, "get_thread", fake_get)
+    assert await load_thread_for_task(SimpleNamespace(thread_id=None)) is None
+    assert await load_thread_for_task(SimpleNamespace(thread_id="  ")) is None
 
 
 def test_task_converter_echoes_context_id() -> None:

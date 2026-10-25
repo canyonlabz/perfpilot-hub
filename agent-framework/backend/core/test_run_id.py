@@ -23,10 +23,10 @@ four outcome values aligned to the A2A §4.1.3 TaskState lifecycle:
 
   * ``"reuse"``     — an existing ``test_run_id`` was found.
   * ``"mint"``      — a fresh UTC timestamp was minted (script-creation).
-  * ``"skip_mint"`` — comparison-report requests, where the PerfReport
-                     MCP mints its own ``comparison_id``; the framework
-                     captures that value post-hoc via
-                     ``task_store.set_test_run_id``.
+  * ``"skip_mint"`` — no ``test_run_id`` is required. Comparison-report
+                     requests defer to the PerfReport MCP ``comparison_id``.
+                     Catalog / "list specialists" questions complete
+                     without minting or asking for an ID.
   * ``"reject"``    — no ID and no classification signal; the caller
                      must transition the task to ``input_required``
                      (A2A TASK_STATE_INPUT_REQUIRED) and surface the
@@ -114,7 +114,8 @@ class ResolveResult:
 
     Attributes:
         id: The resolved or minted ``test_run_id``. ``None`` for
-            ``skip_mint`` (comparison report) and ``reject`` outcomes.
+            ``skip_mint`` (comparison report or catalog discovery)
+            and ``reject`` outcomes.
         outcome: One of ``"reuse"``, ``"mint"``, ``"skip_mint"``,
             ``"reject"``. See module docstring for A2A mapping.
         reason_code: Short machine-readable code populated on ``reject``
@@ -437,6 +438,70 @@ def is_comparison_report_request(payload: Optional[Mapping[str, Any]]) -> bool:
     return False
 
 
+# Catalog / discovery questions do not need a test_run_id. Keep this
+# list narrow so extract / start-test / script-creation still classify
+# as they do today. Whole-message matches for the short §9.9 triggers;
+# longer smoke phrasing is allowed inline.
+_DISCOVERY_PROSE_RE = re.compile(
+    r"(?:"
+    r"^\s*what\s+can\s+you\s+do\s*[?.!]?\s*$"
+    r"|^\s*which\s+(?:specialists?|agents?)\s+(?:are\s+)?available\s*[?.!]?\s*$"
+    r"|what\s+specialists?\s+(?:can\s+you\s+)?(?:delegate\s+to|are\s+available)"
+    r"|list\s+(?:the\s+)?(?:available\s+)?specialists?"
+    r"|who\s+can\s+you\s+delegate\s+to"
+    r")",
+    re.IGNORECASE,
+)
+_DISCOVERY_METADATA_VALUES = frozenset({
+    "list_available_specialists",
+    "list_specialists",
+    "catalog",
+    "discovery",
+})
+
+
+def is_discovery_request(
+    *,
+    user_text: Optional[str] = None,
+    parts: Optional[Sequence[Any]] = None,
+    payload: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Return True when the inbound request is catalog / specialist discovery.
+
+    These turns complete without a ``test_run_id``. Signals (any one):
+
+      * Payload ``tool == "list_available_specialists"``
+      * A2A ``parts[0]`` / ``parts[1]`` metadata ``tool`` / ``task`` /
+        ``task_type`` naming the catalog
+      * User prose that is a catalog question (see ``_DISCOVERY_PROSE_RE``)
+    """
+    if isinstance(payload, Mapping):
+        tool = payload.get("tool")
+        if isinstance(tool, str) and tool.strip() == "list_available_specialists":
+            return True
+        nested_parts = payload.get("parts")
+        if parts is None and isinstance(nested_parts, list):
+            parts = nested_parts
+
+    if isinstance(parts, Sequence) and not isinstance(parts, (str, bytes)):
+        for part in parts[:2]:
+            meta = part.get("metadata") if isinstance(part, Mapping) else None
+            if not isinstance(meta, Mapping):
+                continue
+            for key in ("tool", "task", "task_type"):
+                val = meta.get(key)
+                if isinstance(val, str):
+                    normalized = val.strip().lower().replace("-", "_")
+                    if normalized in _DISCOVERY_METADATA_VALUES:
+                        return True
+
+    if isinstance(user_text, str) and user_text.strip():
+        if _DISCOVERY_PROSE_RE.search(user_text):
+            return True
+
+    return False
+
+
 def resolve_test_run_id_outcome(
     *,
     payload: Optional[Mapping[str, Any]] = None,
@@ -451,15 +516,15 @@ def resolve_test_run_id_outcome(
       1. ``reuse``      — an existing ``test_run_id`` is already present
                           on the payload or in the user's prose.
       2. ``skip_mint``  — comparison-report request (A2A ``task_type``
-                          or Web-UI ``comparison.test_run_ids``). The
-                          framework defers to the PerfReport MCP's own
-                          ``comparison_id`` instead of minting.
+                          or Web-UI ``comparison.test_run_ids``).
       3. ``mint``       — ``parts[1].metadata.source_type`` is in the
                           script-creation set, or the Web-UI prose
                           heuristic matches a script-creation intent.
                           A fresh UTC timestamp is written back to
                           ``payload["test_run_id"]`` for downstream use.
-      4. ``reject``     — none of the above; the caller must transition
+      4. ``skip_mint``  — catalog / list-specialists discovery. After
+                          mint so a script-creation signal still wins.
+      5. ``reject``     — none of the above; the caller must transition
                           the task to ``input_required`` and surface
                           ``reason_code="missing_test_run_id"`` to the
                           client (A2A §4.1.3 TASK_STATE_INPUT_REQUIRED).
@@ -548,6 +613,19 @@ def resolve_test_run_id_outcome(
             },
         )
         return ResolveResult(id=minted, outcome=OUTCOME_MINT)
+
+    # 3c. SKIP_MINT — catalog / list-specialists. After mint so a
+    # script-creation signal still wins. Do not mint a timestamp.
+    if is_discovery_request(
+        user_text=user_text,
+        parts=parts,
+        payload=payload,
+    ):
+        log.info(
+            "test_run_id.resolve.skip_mint",
+            extra={"classification": "catalog_discovery"},
+        )
+        return ResolveResult(id=None, outcome=OUTCOME_SKIP_MINT)
 
     # 4. REJECT — surface the question + reasonCode to the client.
     reason_data: dict[str, Any] = {}

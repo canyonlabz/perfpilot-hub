@@ -36,3 +36,17 @@ def _a2a_v1_response_headers(
     if thread_headers is not None:
         headers.update(thread_headers)
     return headers
+
+
+def v1_response_headers(thread=None) -> dict:
+    """``A2A-Version`` plus thread headers when a thread object is present.
+
+    Used by both bindings so JSON Send/Get/resume match the SSE path.
+    Ingress rejects pass ``thread=None`` and omit ``X-Thread-Id``.
+    """
+    from a2a.server.utils.context import _thread_response_headers
+
+    thread_headers = (
+        _thread_response_headers(thread) if thread is not None else None
+    )
+    return _a2a_v1_response_headers(thread_headers)

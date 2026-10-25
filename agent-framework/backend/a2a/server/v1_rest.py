@@ -23,6 +23,7 @@ from a2a.server.helpers.converters import (
     _task_to_a2a_v1,
     _yield_task_event_sse,
 )
+from a2a.server.helpers.sse import sse_event_closes_stream
 from a2a.server.helpers.normalize import (
     IngressValidationError,
     _normalize_a2a_v1_body,
@@ -31,11 +32,16 @@ from a2a.server.helpers.wait import (
     return_immediately_from_payload,
     start_task_and_maybe_wait,
 )
-from a2a.server.utils.context import ContextResolutionError
+from a2a.server.utils.context import ContextResolutionError, load_thread_for_task
 from a2a.server.utils.headers import (
     A2A_JSON_MEDIA_TYPE,
     A2A_V1_AGENT_NAME,
-    _a2a_v1_response_headers,
+    v1_response_headers,
+)
+from a2a.server.utils.request_log import (
+    log_a2a_accept,
+    log_a2a_reject,
+    log_a2a_reject_from_exc,
 )
 
 log = logging.getLogger(__name__)
@@ -69,7 +75,6 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     _read_json_body = ctx["read_json_body"]
     _resolve_a2a_thread = ctx["resolve_a2a_thread"]
     _extract_subscriber_endpoints = ctx["extract_subscriber_endpoints"]
-    _thread_response_headers = ctx["thread_response_headers"]
 
     from a2a.shared.errors import (
         http_bad_request,
@@ -91,8 +96,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
     )
 
     def _v1_headers(thread=None):
-        th = _thread_response_headers(thread) if thread is not None else None
-        return _a2a_v1_response_headers(th)
+        return v1_response_headers(thread)
 
     def _rest_json(content: dict, *, status_code: int = 200, thread=None) -> JSONResponse:
         return JSONResponse(
@@ -162,6 +166,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             AGENTS_DIR / A2A_V1_AGENT_NAME,
             fallback_framework_version=SERVER_VERSION,
         )
+        log_a2a_accept(method="GetAgentCard")
         return _rest_json(card)
 
     # -- SendMessage (A2A v1 Section 11) -------------------------------------
@@ -183,6 +188,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             body = _normalize_a2a_v1_body(body)
             thread = await _resolve_a2a_thread(request, agent_name, body)
         except (IngressValidationError, ContextResolutionError) as exc:
+            log_a2a_reject_from_exc(exc, method="SendMessage")
             return _context_error_to_rest(exc)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
@@ -195,12 +201,22 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         # input_required task rather than minting a new one.
         resume = await try_handle_resume(body)
         if resume.kind == RESUME_KIND_ERROR:
+            log_a2a_reject(
+                method="SendMessage",
+                reason=resume.error_code,
+                detail=resume.error_message,
+            )
             return _resume_error_to_rest_response(resume, thread=thread)
 
         immediate = return_immediately_from_payload(body)
         if resume.kind == RESUME_KIND_RESUMED:
             resumed_task = await start_task_and_maybe_wait(
                 resume.task, task_executor, immediate,
+            )
+            log_a2a_accept(
+                method="SendMessage",
+                task_id=str(resumed_task.task_id),
+                context_id=_payload_context_id(resumed_task.payload),
             )
             return _rest_json(
                 {"task": _task_to_a2a_v1(resumed_task)},
@@ -218,6 +234,11 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             subscriber_endpoints=_extract_subscriber_endpoints(body),
         )
         task = await start_task_and_maybe_wait(task, task_executor, immediate)
+        log_a2a_accept(
+            method="SendMessage",
+            task_id=str(task.task_id),
+            context_id=_payload_context_id(task.payload),
+        )
         return _rest_json(
             {"task": _task_to_a2a_v1(task)},
             status_code=202 if immediate else 200,
@@ -242,6 +263,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             body = _normalize_a2a_v1_body(body)
             thread = await _resolve_a2a_thread(request, agent_name, body)
         except (IngressValidationError, ContextResolutionError) as exc:
+            log_a2a_reject_from_exc(exc, method="SendStreamingMessage")
             return _context_error_to_rest(exc)
         body["_perfpilot_thread"] = {
             "thread_id": thread.thread_id,
@@ -253,6 +275,11 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         # subscription + re-enqueue happens after the resume validates.
         resume = await try_handle_resume(body)
         if resume.kind == RESUME_KIND_ERROR:
+            log_a2a_reject(
+                method="SendStreamingMessage",
+                reason=resume.error_code,
+                detail=resume.error_message,
+            )
             return _resume_error_to_rest_response(resume, thread=thread)
 
         if resume.kind == RESUME_KIND_RESUMED:
@@ -269,6 +296,11 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
             )
         queue = await task_executor.subscribe(task.task_id)
         asyncio.create_task(task_executor.execute_task(task.task_id))
+        log_a2a_accept(
+            method="SendStreamingMessage",
+            task_id=str(task.task_id),
+            context_id=_payload_context_id(task.payload),
+        )
 
         async def _stream():
             context_id = _payload_context_id(task.payload)
@@ -289,7 +321,7 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
                         event, context_id=context_id,
                     ):
                         yield frame
-                    if event.status in task_store.TERMINAL_STATUSES:
+                    if sse_event_closes_stream(event, task.task_id):
                         break
             finally:
                 await task_executor.unsubscribe(task.task_id, queue)
@@ -319,7 +351,13 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         if task is None:
             return http_task_not_found(task_id)
 
-        return _rest_json(_task_to_a2a_v1(task))
+        thread = await load_thread_for_task(task)
+        log_a2a_accept(
+            method="GetTask",
+            task_id=str(task.task_id),
+            context_id=_payload_context_id(task.payload),
+        )
+        return _rest_json(_task_to_a2a_v1(task), thread=thread)
 
     # -- ListTasks (A2A v1 Section 11) ---------------------------------------
     @app.get("/tasks", tags=["a2a-v1", "tasks"])
@@ -381,14 +419,15 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
                         event, context_id=context_id,
                     ):
                         yield frame
-                    if event.status in task_store.TERMINAL_STATUSES:
+                    if sse_event_closes_stream(event, task.task_id):
                         break
             finally:
                 await task_executor.unsubscribe(task.task_id, queue)
 
+        subscribe_thread = await load_thread_for_task(task)
         return EventSourceResponse(
             _stream(),
-            headers=_v1_headers(),
+            headers=_v1_headers(subscribe_thread),
         )
 
     # -- CancelTask (A2A v1 Section 11) --------------------------------------
@@ -414,7 +453,8 @@ def register_a2a_v1_routes(app: FastAPI, ctx: dict) -> None:
         if refreshed is None:
             refreshed = task
 
-        return _rest_json(_task_to_a2a_v1(refreshed))
+        thread = await load_thread_for_task(refreshed)
+        return _rest_json(_task_to_a2a_v1(refreshed), thread=thread)
 
     # -- Push notifications (advertised as unsupported) ----------------------
     @app.post("/tasks/{task_id}/pushNotificationConfigs", tags=["a2a-v1", "push"])

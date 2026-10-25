@@ -7,11 +7,13 @@ The client owns ``message.contextId``. The server never mints one.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Request
 
 from stores import thread_store
+
+_REQUEST_THREAD_ATTR = "a2a_resolved_thread"
 
 
 class ContextResolutionError(Exception):
@@ -134,3 +136,27 @@ def _thread_response_headers(thread: thread_store.AgentThread) -> dict:
     if thread.external_thread_id:
         headers["X-External-Thread-Id"] = thread.external_thread_id
     return headers
+
+
+def bind_resolved_thread(
+    request: Request, thread: Optional[thread_store.AgentThread],
+) -> None:
+    """Stash a resolved thread on ``request.state`` for the response headers."""
+    if thread is None:
+        return
+    setattr(request.state, _REQUEST_THREAD_ATTR, thread)
+
+
+def resolved_thread_from_request(
+    request: Request,
+) -> Optional[thread_store.AgentThread]:
+    """Return the thread bound by ``bind_resolved_thread``, if any."""
+    return getattr(request.state, _REQUEST_THREAD_ATTR, None)
+
+
+async def load_thread_for_task(task: Any) -> Optional[thread_store.AgentThread]:
+    """Load the stored thread for a task row, or ``None`` when absent."""
+    thread_id = getattr(task, "thread_id", None)
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        return None
+    return await thread_store.get_thread(thread_id.strip())

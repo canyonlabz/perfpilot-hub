@@ -76,7 +76,7 @@ async def archive_playwright_traces(ctx: Context, test_run_id: Optional[str] = N
     
     Returns:
         dict: {
-            "status": "OK" | "NO_ACTION" | "ERROR",
+            "status": "OK" | "DEGRADED" | "NO_ACTION" | "ERROR",
             "message": str,
             "archived_path": str | None,
             "test_run_id": str | None
@@ -84,9 +84,20 @@ async def archive_playwright_traces(ctx: Context, test_run_id: Optional[str] = N
     """
     _ = ctx  # reserved for future context usage
     try:
-        archived_path = archive_existing_traces()
+        result = archive_existing_traces()
+        archived_path = result.archived_path
         
         if archived_path:
+            if result.degraded:
+                return {
+                    "status": "DEGRADED",
+                    "message": (
+                        f"Traces copied to: {archived_path}; "
+                        f"source cleanup incomplete: {result.detail}"
+                    ),
+                    "archived_path": archived_path,
+                    "test_run_id": test_run_id
+                }
             return {
                 "status": "OK",
                 "message": f"Traces archived to: {archived_path}",

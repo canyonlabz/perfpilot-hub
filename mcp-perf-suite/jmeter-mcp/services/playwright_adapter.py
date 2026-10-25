@@ -17,13 +17,16 @@ High-level responsibilities:
 """
 
 import glob
+import logging
 import os
 import json
 import shutil
 import uuid
 from datetime import datetime
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, NamedTuple, Tuple, Any, Optional
 from urllib.parse import urlparse
+
+log = logging.getLogger(__name__)
 
 from utils.config import load_config
 from utils.browser_utils import extract_apex_domain_from_task
@@ -89,7 +92,32 @@ def run_playwright_capture_pipeline(spec_path: str, run_id: str) -> str:
 # Helper Functions
 # ============================================================
 
-def archive_existing_traces() -> Optional[str]:
+class ArchiveTracesResult(NamedTuple):
+    """Outcome of copying old Playwright traces aside before a new capture."""
+
+    archived_path: Optional[str]
+    degraded: bool = False
+    detail: str = ""
+
+
+def _remove_archived_source(item_path: str) -> Optional[str]:
+    """Delete one copied source path. Return an error string on permission/OS failure."""
+    try:
+        if os.path.isdir(item_path):
+            shutil.rmtree(item_path)
+        else:
+            os.remove(item_path)
+        return None
+    except (PermissionError, OSError) as exc:
+        log.warning(
+            "playwright.archive_traces.delete_degraded path=%s error=%s",
+            item_path,
+            exc,
+        )
+        return str(exc)
+
+
+def archive_existing_traces() -> ArchiveTracesResult:
     """
     If the Playwright MCP output directory contains previous run artifacts,
     copy trace contents to a timestamped backup folder, then delete the
@@ -98,6 +126,10 @@ def archive_existing_traces() -> Optional[str]:
 
     Uses copy + delete instead of os.rename() so that Docker named-volume
     mount points (which cannot be renamed) are preserved intact.
+
+    A permission error on delete (common when Playwright and JMeter share a
+    Windows bind mount) does not fail the archive: the backup path is still
+    returned with ``degraded=True`` so a new capture can proceed.
 
     Archived files:
       - traces/*          — network trace files and resources (copied, then deleted)
@@ -108,7 +140,8 @@ def archive_existing_traces() -> Optional[str]:
       .playwright-mcp/traces_<YYYYMMDD_HHMMSS>/
 
     Returns:
-        The path to the archived backup directory, or None if nothing was archived.
+        ArchiveTracesResult with the backup directory, or archived_path None
+        if nothing was archived.
 
     NOTE: This is intended to be called *before* a new Playwright MCP run,
     e.g., from the MCP tool that prepares the environment. The main parser
@@ -125,12 +158,14 @@ def archive_existing_traces() -> Optional[str]:
     traces_exist = os.path.isdir(traces_dir) and any(os.scandir(traces_dir))
 
     if not traces_exist and not verbose_files:
-        return None
+        return ArchiveTracesResult(archived_path=None)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = os.path.basename(traces_dir.rstrip(os.sep))
     archived_dir = os.path.join(parent_dir, f"{base_name}_{timestamp}")
     os.makedirs(archived_dir, exist_ok=True)
+
+    delete_errors: list[str] = []
 
     if traces_exist:
         for item in os.listdir(traces_dir):
@@ -143,16 +178,28 @@ def archive_existing_traces() -> Optional[str]:
 
         for item in os.listdir(traces_dir):
             item_path = os.path.join(traces_dir, item)
-            if os.path.isdir(item_path):
-                shutil.rmtree(item_path)
-            else:
-                os.remove(item_path)
+            error = _remove_archived_source(item_path)
+            if error:
+                delete_errors.append(error)
 
     for file_path in verbose_files:
         dest = os.path.join(archived_dir, os.path.basename(file_path))
-        shutil.move(file_path, dest)
+        try:
+            shutil.move(file_path, dest)
+        except (PermissionError, OSError) as exc:
+            log.warning(
+                "playwright.archive_traces.move_degraded path=%s error=%s",
+                file_path,
+                exc,
+            )
+            delete_errors.append(str(exc))
 
-    return archived_dir
+    detail = "; ".join(delete_errors)
+    return ArchiveTracesResult(
+        archived_path=archived_dir,
+        degraded=bool(delete_errors),
+        detail=detail,
+    )
 
 def parse_network_trace_to_step_map(
     network_file: str,

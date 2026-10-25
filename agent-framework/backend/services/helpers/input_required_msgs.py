@@ -18,13 +18,81 @@ Adding a new INPUT_REQUIRED prompt
 Add a new ``reason_code`` branch in ``compose_input_required_question``
 and keep each branch pure (no I/O, no DB calls). Suggested reason-code
 convention: lowercase snake_case, scoped to the asking concern
-(e.g. ``missing_test_run_id``, ``awaiting_confirmation``,
-``awaiting_credentials``).
+(e.g. ``missing_test_run_id``, ``malformed_playwright_test_spec``,
+``agent_input_required``).
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
+
+REASON_AGENT_INPUT_REQUIRED = "agent_input_required"
+"""Specialist finished talking but is asking the client to choose."""
+
+# Line-start A./B./C. (or A) / A:) choices. Requires two distinct letters
+# so a passing mention of "option A" does not pause the task.
+_LETTERED_OPTION_RE = re.compile(
+    r"(?im)(?:^|\n)\s*(?:[-*]\s*)?([A-C])[.):]\s+\S"
+)
+
+_ASK_PHRASE_RE = re.compile(
+    r"(?i)(?:"
+    r"pick one|"
+    r"which option|"
+    r"what i need from you|"
+    r"please choose|"
+    r"please pick|"
+    r"which of the following|"
+    r"reply with (?:a|b|c)|"
+    r"let me know which"
+    r")"
+)
+
+
+def specialist_reply_asks_for_input(text: str) -> bool:
+    """Return True when the agent reply is an A/B/C (or similar) choice ask.
+
+    Requires both a pick/choose phrase and at least two lettered options
+    so a completed summary that mentions "option A" is not treated as a
+    pause.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    letters = set(_LETTERED_OPTION_RE.findall(text))
+    if len(letters) < 2:
+        return False
+    return _ASK_PHRASE_RE.search(text) is not None
+
+
+def raise_if_specialist_asks_for_input(result: Any) -> None:
+    """Raise ``TaskInputRequiredSignal`` when ``result`` is an A/B/C ask.
+
+    No-op for non-dicts, empty replies, or completed work that is not
+    asking the client to choose. The agent's own ``reply_text`` is the
+    question so the client still sees the options.
+
+    Raises:
+        TaskInputRequiredSignal: reason ``agent_input_required``.
+    """
+    if not isinstance(result, dict):
+        return
+    reply = result.get("reply_text")
+    if not isinstance(reply, str) or not specialist_reply_asks_for_input(reply):
+        return
+
+    from core.task_signals import TaskInputRequiredSignal
+
+    reason_data: dict[str, Any] = {}
+    exit_reason = result.get("exit_reason")
+    if isinstance(exit_reason, str) and exit_reason.strip():
+        reason_data["exit_reason"] = exit_reason.strip()
+
+    raise TaskInputRequiredSignal(
+        reason_code=REASON_AGENT_INPUT_REQUIRED,
+        question_text=reply.strip(),
+        reason_data=reason_data or None,
+    )
 
 
 def compose_input_required_question(
@@ -84,5 +152,15 @@ def compose_input_required_question(
             if isinstance(parts_count, int):
                 base += f"\n\nParts received: {parts_count}."
         return base
+
+    if reason_code == REASON_AGENT_INPUT_REQUIRED:
+        if isinstance(reason_data, dict):
+            agent_question = reason_data.get("question_text")
+            if isinstance(agent_question, str) and agent_question.strip():
+                return agent_question.strip()
+        return (
+            "The agent needs you to choose how to continue. "
+            "Reply on the same task with your choice."
+        )
 
     return f"Additional input required ({reason_code})."
