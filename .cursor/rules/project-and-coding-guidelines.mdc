@@ -1,0 +1,71 @@
+---
+alwaysApply: true
+---
+
+# Project & Coding Guidelines
+
+## Remember these Implementation Principles
+
+1. **Do NOT run any Git commands:** All Git commands must be approved by the user. Never try to commit, submit a PR, git merge, or anything that might cause conflicts.
+2. **Do NOT run any commands outside the repo:** Do not try to run any commands outside the repo root. Always ask the user if you need help.
+3. **No Refactoring:** All changes must be additions to existing code. Do not modify existing function signatures or restructure modules unless asked.
+4. **Consistent Coding Style:** Follow the existing patterns in the codebase (async functions, type hints, docstrings).
+5. **Use Existing Modules:** Leverage existing utility functions and patterns where available.
+6. **New Files When Necessary:** Create new files only when the enhancement requires a new module.
+7. **Backward Compatibility:** Ensure all changes are backward compatible with existing workflows.
+8. **Redact Real User Data:** Ensure we redact all references to user, company or corporate information that are private such as URLs, services, hostnames, etc. If unsure, always ask the end-user whether it should be redacted.
+9. **Smoke Testing:** Each enhancement should be tested individually before moving to the next.
+10. **Test Scripts:** For any test scripts, the requirement is to place them into the `scripts/` folder. This folder is gitignored.
+
+## Perplexity MCP — Ask Before Guessing
+
+1. **Use Perplexity when uncertain:** If you (Cursor) cannot answer a question confidently, need current/real-time web information, are unsure of the best implementation approach, or are limited by lack of live web access, always reach out to Perplexity via the installed MCP tools rather than guessing.
+2. **Available tools:**
+   - `perplexity_search` — quick web search for ranked results, titles, URLs, and snippets.
+   - `perplexity_ask` — fast conversational Q&A grounded in live web search (best for quick factual or how-to questions).
+   - `perplexity_research` — comprehensive, citation-backed research for complex or multi-source questions (e.g., comparing libraries, architecture patterns, best practices).
+   - `perplexity_reason` — structured reasoning/problem-solving for logic-heavy or multi-step technical decisions.
+3. **When to use which:** Prefer `perplexity_ask` for quick lookups, `perplexity_search` for raw source gathering, `perplexity_research` for deep/comparative investigation, and `perplexity_reason` for architecture or design-decision tradeoffs.
+4. **Always disclose usage:** When a Perplexity tool is used to inform a decision or code change, briefly note that in your response (e.g., "Verified via Perplexity MCP that...") so the user can trace the source of the recommendation.
+
+## Planning Workflow
+
+1. **Use Plan Mode or Plan documents:** Cursor may always create a Plan via Plan Mode, or generate a standalone Plan document, before implementing non-trivial changes.
+2. **Storage location:** Any Plan documents must be placed into `<repo-root>/.cursor/docs/plans/`. This folder is gitignored, so plan content is never pushed to the remote repo.
+3. **Plan lifecycle:**
+   - Create the implementation plan and task list first.
+   - Ask any clarifying questions before finalizing the plan.
+   - Present the plan to the end-user for review and approval.
+   - Wait for feedback; revise the plan as needed.
+   - Only begin code changes after final approval.
+
+## Security & Secrets Guardrail
+
+1. **Never expose secrets:** Do not write, print, log, or commit any real API keys, tokens, passwords, credentials, connection strings, or other secrets in code, comments, commit messages, or Plan documents.
+2. **Immediate notification required:** If Cursor encounters a secret, credential, or sensitive value that is not covered by `.gitignore` or is otherwise exposed in a public-facing or trackable file, it must immediately stop and notify the user so it can be remediated (e.g., moved to an env var, added to `.gitignore`, rotated) before proceeding.
+3. **Prefer environment variables / secret managers:** Any new configuration requiring sensitive values should default to environment variables or a secrets manager reference, never hardcoded values.
+4. **Redact in shared output:** When sharing logs, diffs, or examples with the user or in documentation, redact any secret-like values even if they appear to be placeholders.
+
+## Docstring & Comment Hygiene
+
+1. **No internal references in code:** Docstrings and inline comments must never reference internal planning artifacts such as PBI numbers, Feature IDs, Bug/ticket numbers, or filenames from Azure DevOps (ADO) or the gitignored `.cursor/docs/*` folder. These references are meaningless (or confusing) to anyone reading the code without access to that context — including other humans, other AI agents (e.g., Claude), and future contributors.
+2. **Write self-contained documentation:** Docstrings and comments should describe *what the code does and why*, in plain technical terms, as if the reader has zero access to ADO, planning docs, or prior conversation history.
+3. **Where tracking references belong instead:**
+   - PBI/Feature/Bug IDs belong only in the `.cursor/docs/plans/` documents or in ADO itself — never in source code, docstrings, or comments.
+   - If you (the user) want traceability between a code change and a PBI/Feature, that mapping should live in ADO or the plan doc, not in the codebase.
+4. **Self-check before writing docstrings/comments:** Before adding a docstring or comment, Cursor should ask: "Would this sentence make sense to a public reader with no access to our ADO instance or `.cursor/docs` folder?" If not, rewrite it without the internal reference.
+
+## Guardrails
+
+1. **NEVER** run any Git commands to push or pull from the branch repo.
+2. **NEVER** install any software. Always ask the user to manually install any software dependencies.
+3. **NEVER** commit or expose secrets, API keys, or credentials — see Security & Secrets Guardrail above.
+
+## Project Enhancement Next Steps
+
+1. Create an implementation plan and place it into the `.cursor/docs/plans/` folder.
+2. Start building a task list of action items.
+3. Ask any additional clarifying questions if any.
+4. After creating the implementation plan, ask the end-user to review and approve before any code updates.
+5. Wait for feedback. Based on feedback, revise the implementation plan accordingly.
+6. After final approval, begin code updates.
