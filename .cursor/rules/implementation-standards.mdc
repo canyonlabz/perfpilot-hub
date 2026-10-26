@@ -7,7 +7,9 @@ alwaysApply: false
 # PerfPilot Python Implementation Standards
 
 Apply the safety, approval, and workflow requirements in
-project-and-coding-guidelines.mdc. These rules do not authorize refactoring.
+project-and-coding-guidelines.mdc. Read the relevant sections of
+`docs/engineering/development-workflow.md` before non-trivial Python changes.
+These rules do not authorize refactoring or database operations.
 
 ## Function and module placement
 
@@ -71,4 +73,8 @@ Before adding a function or class:
 - Reuse fixtures and helpers; do not create standalone diagnostic scripts as a
   substitute for maintained regression tests.
 - Do not install dependencies or contact external targets without approval.
+- For database-backed tests, honor the global database safety policy: inspect
+  tests and fixtures for implicit migrations, writes, seeds, or resets before
+  execution. Propose disposable test databases for user-approved runs; do not
+  execute database-changing operations yourself.
 - Report executed checks, outcomes, and missing verification accurately.

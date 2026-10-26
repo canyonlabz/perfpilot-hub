@@ -11,10 +11,10 @@ Before non-trivial technology-specific implementation:
 1. Identify the affected component and inspect its existing implementation.
 2. Read relevant repository documentation, dependency declarations, lockfiles,
    Dockerfiles, runtime configuration, and existing tests.
-3. If present, consult docs/engineering/technology-stack.md and
-   docs/engineering/development-workflow.md. These are proposed shared-reference
-   locations, not files whose existence may be assumed. If absent, use existing
-   references and propose creating them; do not invent their contents.
+3. Consult `docs/engineering/technology-stack.md` (the maintained version and
+   official-source inventory) and the relevant sections of
+   `docs/engineering/development-workflow.md`. If either is missing from the
+   working tree, report the discrepancy; do not invent its contents.
 4. Consult authoritative documentation relevant to the proposed change, matched
    to the approved protocol and installed/resolved package versions.
 5. Record consequential URLs, versions, assumptions, and verification in the plan.
@@ -39,25 +39,23 @@ implementation and official sources; do not research unrelated technologies.
   merely because it appears in this file.
 - Use configured research tools under the project's disclosure/security rules.
 
-## Recorded baseline: verify against the working branch
+## Technology baseline and verification
 
-These values come from the user's supplied project information. They are not
-an automatically refreshed inventory. Do not change pins to make them match.
-
-- Python runtime target: 3.12.4 for the identified Python backend/MCP components.
-- AG2 installed: 0.13.3; declared constraint: ag2[ag-ui]>=0.13.3,<0.14.
-- ag-ui-protocol installed: 0.1.19. No separate approved pin has been supplied.
-- FastMCP declared constraint: >=3.4.2,<4. User reports a working 3.4.2 baseline;
-  verify the affected environment rather than treating the range as an exact pin.
-- No A2A SDK package is installed; inspect the existing server implementation.
-- Frontend runtime supplied by user: Node.js 25.2.1. Exact CopilotKit/React package
-  versions remain pending; inspect package manifests and lockfiles or ask.
-- Each approved PerfPilot component is containerized; preserve the established
-  A2A, AG-UI, MCP, and frontend service boundaries.
+- `docs/engineering/technology-stack.md` is the maintained inventory of
+  observed versions, declared constraints, components, and official references.
+  Do not duplicate its detailed version table in this Cursor Rule.
+- An observed local version is not proof of the container version or another
+  contributor's environment; inspect the affected manifests, lockfiles, runtime
+  output, and image definitions as appropriate and report what was verified.
+- If the public baseline conflicts with current branch evidence, report the
+  discrepancy and seek guidance rather than silently updating dependencies,
+  lockfiles, runtimes, or documentation.
+- Preserve AG2 orchestrator/specialist, AG-UI-to-web-UI, external A2A, and MCP
+  component boundaries. Do not assume an A2A SDK is installed.
 
 ## A2A
 
-- Approved protocol target: A2A v1. Confirm the exact release and binding needed
+- Approved protocol target: A2A v1.0.0. Confirm the binding needed
   for the affected work rather than inferring support from route names.
 - Official specification entry point:
   https://a2a-protocol.org/latest/specification/
@@ -83,9 +81,9 @@ an automatically refreshed inventory. Do not change pins to make them match.
 - Verify the component's package.json and lockfile before selecting APIs.
 - Match CopilotKit/React integration guidance to resolved frontend packages and
   the backend's supported contract. Do not infer package APIs from Node version.
-- No frontend test framework is established in the supplied project context.
-  Inspect current tooling before proposing a minimal setup; do not install one
-  or assume all frontend verification can be skipped.
+- The documented frontend baseline has no declared test script or explicit
+  test runner. Inspect current tooling before proposing a minimal setup; do not
+  install one or assume all frontend verification can be skipped.
 - Do not import Python logging code into frontend code. Propose frontend logging
   separately if needed, preserving sensitive-data restrictions.
 
@@ -106,6 +104,9 @@ an automatically refreshed inventory. Do not change pins to make them match.
 - Preserve approved per-component boundaries and declared runtime versions.
 - Keep container secrets out of source, build arguments, image layers, and logs.
 - Do not claim an image builds or a container is healthy without actual checks.
+- Before running build/start commands or tests, check for implicit migrations,
+  database writes, seed/reset operations, or volume modifications. The global
+  database safety policy applies even when changes occur indirectly.
 - Do not build, start, stop, or modify shared services without appropriate approval.
 
 ## Research traceability
