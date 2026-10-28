@@ -1,0 +1,80 @@
+---
+description: Python module design, reuse, size limits, structured logging, and automated tests
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# PerfPilot Python Implementation Standards
+
+Apply the safety, approval, and workflow requirements in
+project-and-coding-guidelines.mdc. Read the relevant sections of
+`docs/engineering/development-workflow.md` before non-trivial Python changes.
+These rules do not authorize refactoring or database operations.
+
+## Function and module placement
+
+Before adding a function or class:
+1. Search the repository for equivalent functionality and existing callers.
+2. Identify which component and module own the behavior.
+3. Reuse existing code when its responsibilities and dependencies fit.
+4. Decide whether the addition belongs in the service module, a nearby helper,
+   or a new focused module/subpackage. Explain non-obvious placement in the plan.
+
+- Keep service modules focused on their core functionality and coordination.
+- Put supporting reusable logic in a descriptively named module near its owner.
+- Small private helpers may remain local when they clarify the owning behavior;
+  do not create one-function modules solely to satisfy an artificial split.
+- Avoid generic utils.py dumping grounds, circular imports, and cross-component
+  coupling introduced merely to reuse a small helper.
+- Propose a new module when no existing one has the right responsibility.
+- Moving existing code, changing signatures, and extracting modules require the
+  existing project approval. Do not refactor automatically to meet these rules.
+
+## Python module size
+
+- Target fewer than 1,000 physical lines in each hand-maintained Python module.
+- Before growing a module beyond 1,000 lines, propose a responsibility-based
+  split or explain why keeping it together is appropriate.
+- Do not create or grow a module beyond 1,500 lines without explicit approval.
+- Exclude generated and vendored code. These are per-file limits, not limits on
+  package size or on the number of lines added in a change.
+- Flag existing oversized modules when relevant; do not perform unrelated cleanup.
+- Never compress code, remove useful docstrings, or hide logic to satisfy a limit.
+
+## OTEL-shaped structured logging
+
+- The existing Agent Framework backend logging implementation is:
+  agent-framework/backend/utils/logging_config.py
+- Inspect that module and existing call sites before adding logging.
+- Use its log_event(...) entry point for new structured application events,
+  following established import conventions.
+- Preserve DEPLOYMENT_MODE local/cloud behavior, structured attributes, severity,
+  and existing trace/span context handling.
+- Configure logging through the established startup path, not inside individual
+  service/helper modules. Do not introduce independent handlers or exporters.
+- This is OTEL-shaped logging, not an installed official OpenTelemetry SDK
+  integration. Do not claim exported traces or active span correlation without
+  verifying the implementation. Do not fabricate trace/span IDs to fill fields.
+- For MCP services, inspect their current implementation first. Do not import
+  Agent Framework internals or create a shared logging package automatically.
+  Propose a component-appropriate integration and obtain approval.
+- Do not log secrets or sensitive payloads. Follow existing redaction conventions.
+- Adding an official OpenTelemetry SDK is a separate approval-required change.
+
+## Tests
+
+- Add or update appropriate repeatable unit/regression coverage for changed
+  behavior under the component's tests/ directory.
+- Follow existing frameworks, fixtures, naming, async support, and CI conventions.
+- Use isolated unit tests where possible. Use integration/contract tests where
+  the behavior crosses a protocol, process, database, or service boundary.
+- Keep external dependencies mocked in unit tests. Mark/configure infrastructure
+  tests according to existing conventions; do not silently add them to fast CI.
+- Reuse fixtures and helpers; do not create standalone diagnostic scripts as a
+  substitute for maintained regression tests.
+- Do not install dependencies or contact external targets without approval.
+- For database-backed tests, honor the global database safety policy: inspect
+  tests and fixtures for implicit migrations, writes, seeds, or resets before
+  execution. Propose disposable test databases for user-approved runs; do not
+  execute database-changing operations yourself.
+- Report executed checks, outcomes, and missing verification accurately.

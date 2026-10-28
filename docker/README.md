@@ -1,5 +1,14 @@
 # 📦 PerfPilot Hub — Docker deployment guide
 
+> 🚀 **Recommended: use .NET Aspire instead of Docker Compose.**
+> Aspire starts the full stack with one command (`aspire run`), wires secrets
+> via `dotnet user-secrets`, and provides a live dashboard. See
+> [`aspire/README.md`](../aspire/README.md) and
+> [`docs/aspire/aspire-setup-guide.md`](../docs/aspire/aspire-setup-guide.md).
+>
+> Docker Compose remains a supported alternative for contributors who prefer
+> it or cannot run .NET Aspire.
+
 This folder contains everything needed to run PerfPilot Hub in containers on
 your local machine. Each MCP server ships as its own independent Docker image,
 each sub-folder ships its own `Dockerfile` + `docker-compose.yml` + `.env.example`,
@@ -8,8 +17,8 @@ the whole stack up together.
 
 > 📌 **Looking for the pre-refactor monolithic Docker setup?**
 >
-> The Phase 1 refactor (per-MCP images, baked-in configs, `DEPLOYMENT_MODE`
-> toggle) replaces the earlier monolithic gateway container. If you prefer the
+> The Docker refactor (per-MCP images, baked-in configs, `DEPLOYMENT_MODE`
+> toggle) replaced the earlier monolithic gateway container. If you prefer the
 > older single-image layout — or you need a stable checkpoint to compare
 > against — use the **[v1.1.0 release](https://github.com/canyonlabz/perfpilot-hub/releases/tag/v1.1.0)**
 > (FastMCP 3.4.x, last stable before the Docker refactor):
@@ -45,8 +54,8 @@ Confluence publishing, and a PostgreSQL-backed memory layer).
   plus the MCP source tree. Only three tightly-scoped cross-MCP config `COPY`s
   are allowed, all documented in §13.
 
-Local development runs Docker Compose from this folder. Cloud deployment (Azure /
-Aspire) is a Phase 2 concern — same images, different orchestration.
+Local development runs Docker Compose from this folder. .NET Aspire uses the
+same images with a different orchestrator — see the Aspire guide linked above.
 
 ---
 
@@ -122,7 +131,7 @@ Nothing is baked into images.
 ## 🏷️ 3. Canonical naming convention
 
 Every container, image, and compose service uses one of the following
-canonical names. There is no legacy `perf-*` or `perfmemory-db` after Phase 1.
+canonical names. There are no legacy `perf-*` or `perfmemory-db` names.
 
 | Component | Image / Container name | Sub-folder |
 |---|---|---|
@@ -273,9 +282,8 @@ Example log line:
 - OTel-shaped JSON emitted to stdout (fields per OpenTelemetry Logs Semantic
   Conventions: `timestamp`, `severity_text`, `severity_number`, `body`,
   `trace_id`, `span_id`, `attributes`, `resource.service.name`).
-- Secrets read from **injected env vars** (Vault / Azure Key Vault / Aspire user-secrets).
-  No `.env` file is loaded in cloud mode.
-- Used by the Phase 2 Aspire deployment on Azure.
+- Secrets read from **injected env vars** (set by the orchestrator or CI
+  pipeline). No `.env` file is loaded in cloud mode.
 
 Example log line:
 
@@ -427,11 +435,11 @@ authentication store.
 
 ## 🔄 12. Legacy → canonical migration
 
-Anyone who cloned or forked this repo before Phase 1's Docker restructure will
+Anyone who cloned or forked this repo before the Docker restructure will
 find their local workflows broken until they update to the new names. Here's
 the mapping:
 
-| Old (pre-Phase 1) | New (Phase 1+) |
+| Old (pre-restructure) | New (current) |
 |---|---|
 | `perf-gateway:8888` (monolithic image) | `perfpilot-mcp-gateway:8125` (aggregator) + 8 per-MCP images (`8110`–`8118`) |
 | `perfmemory-db:5432` (compose service) | `perfmem-pgvector-age:5432` |

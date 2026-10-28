@@ -1,0 +1,189 @@
+---
+description: PerfPilot safety, approvals, planning, branches, documentation, and delivery requirements
+alwaysApply: true
+---
+
+# PerfPilot Project and Coding Guidelines
+
+## Scope and conflicting instructions
+
+- Apply these rules to all PerfPilot components, including the Agent Framework,
+  A2A server, AG-UI server, MCP servers, frontend, and deployment files.
+- Companion rules supplement these requirements; they do not grant permission
+  to bypass approvals, run restricted commands, install software, or refactor.
+- If repository instructions conflict, explain the conflict and ask the user
+  before proceeding. Do not silently choose a less restrictive interpretation.
+
+## Rule precedence and engineering references
+
+- These global governance, security, execution, and approval restrictions apply
+  before component-specific guidance. Companion rules and engineering documents
+  supplement these restrictions but never grant permission to bypass them.
+- For Python work (including planning, refactoring, and testing), consult
+  `.cursor/rules/implementation-standards.mdc` and the relevant sections of
+  `docs/engineering/development-workflow.md`.
+- For technology-specific work, consult
+  `.cursor/rules/technology-reference-policy.mdc` and
+  `docs/engineering/technology-stack.md`.
+- Public engineering documents supply shared context and conventions; they do
+  not independently authorize commands or expand an approved change scope.
+- When applicable instructions conflict, identify the conflict and ask the
+  user before proceeding. Do not silently relax a restriction.
+
+## Implementation principles
+
+1. All Git commands require explicit user approval, including read-only commands.
+   Never push or pull. Do not commit, merge, create branches, or submit PRs.
+2. Run commands only from and within the repository root and its descendants.
+   Ask the user when an operation requires access outside this boundary.
+3. Do not install software or dependencies. Ask the user to install them manually.
+4. Do not refactor existing code, change existing function signatures, or
+   restructure modules unless explicitly approved. Keep approved changes scoped;
+   do not use a coding guideline as permission for unrelated cleanup.
+5. Follow existing async patterns, type hints, docstrings, and component style.
+6. Search for existing modules and equivalent behavior before adding code.
+   Create new files only when justified by a clear responsibility or enhancement.
+7. Preserve compatibility with existing workflows. Report a proposed breaking
+   change and obtain approval before implementing it.
+8. Redact private user, company, corporate, endpoint, hostname, and service data
+   from shared material. Ask when uncertain whether a value is private.
+9. Validate each enhancement before moving to the next. Run only approved tests
+   and report what was and was not verified.
+
+## Feature-branch requirement
+
+- Modify files only on a user-confirmed feature branch, never main.
+- Establish the branch through an explicitly approved read-only Git command or
+  ask the user to confirm the current branch before editing.
+- If the branch is main, unknown, detached, or otherwise unsuitable, stop before
+  editing and ask the user to create or switch to the intended feature branch.
+- This requirement does not authorize any Git command or branch operation.
+
+## Planning and approval
+
+- For non-trivial work, use Plan Mode or create a self-contained implementation
+  plan and task list in .cursor/docs/plans/ relative to the repository root.
+- Keep internal plans in that gitignored location; never publish them as public
+  documentation. If its ignored status is uncertain, ask before writing sensitive
+  planning material. Do not run Git to check without approval.
+- Ask clarifying questions, identify affected components and relevant references,
+  describe proposed files and tests, and state assumptions and scope exclusions.
+- Present the plan for review and obtain final approval before code changes.
+- Revise the plan when feedback or new evidence materially changes the work.
+- Do not expand a rules/documentation task into implementation fixes without
+  separate approval. Record discovered implementation gaps for follow-up.
+
+## Perplexity MCP: ask before guessing
+
+- Perplexity MCP is optional for contributors; it is not required to develop or
+  contribute to PerfPilot. When configured, prefer it for technical research.
+- When uncertain about an API, specification, current documentation, or approach,
+  research using available tools and official sources rather than inventing an answer.
+- If Perplexity MCP is configured, use perplexity_search for source discovery,
+  perplexity_ask for focused questions, perplexity_research for deeper multi-source
+  investigation, and perplexity_reason for architecture or design tradeoffs.
+- Tool names and availability may differ. Use only tools actually exposed by the
+  configured integration. Without Perplexity, use other available research tools
+  or official documentation. If essential information cannot be verified, disclose
+  the limitation and ask for the source or guidance; never pretend verification occurred.
+- Verify consequential technical details against the underlying official source.
+- Briefly disclose research-tool usage and record useful source URLs in the plan
+  or engineering reference material. Never send secrets or private repository
+  content to an external research service without explicit authorization.
+
+## Security and secrets
+
+- Never write, print, log, or expose real credentials, tokens, passwords, keys,
+  connection strings, or other secrets in code, comments, plans, or shared output.
+- If a secret appears exposed or present in a tracked/public-facing file, stop
+  and notify the user without reproducing its value. Request remediation before
+  continuing affected work. Gitignore alone does not establish secret safety.
+- Prefer environment-variable or secrets-manager references for configuration.
+- Redact secret-like values in logs, examples, and diffs even when they appear
+  to be placeholders. Do not remove or rotate credentials without authorization.
+- Keep secret-handling instructions portable across Windows and macOS. Do not
+  assume shell syntax, filesystem paths, or credential-store locations are the
+  same; follow the contributor's operating system and active deployment workflow.
+- For local Docker Compose workflows, environment variables and untracked `.env`
+  files may supply configuration. Treat `.env` values as sensitive, never commit
+  populated files, and do not mistake them for a production secrets manager.
+- For local Aspire workflows, follow the project's .NET `user-secrets` setup
+  instead of assuming Compose `.env` conventions. User secrets are intended for
+  local development, not production secret storage.
+- For deployed environments, use the approved secret provider or deployment
+  configuration (for example, an explicitly configured vault); never assume
+  local development secret stores are available in containers or the cloud.
+- Provide sanitized examples and platform-appropriate setup guidance rather
+  than imposing the maintainer's personal machine configuration on contributors.
+
+## Database access and data safety
+
+- Treat all persistent databases and their data as protected resources, whether
+  accessed locally or remotely, through `psql`, a VS Code extension, a Python
+  script, a migration framework, Docker/Aspire commands, or an MCP tool.
+- Coding agents must **not execute database-changing operations**. This includes
+  SQL DML/DDL writes, schema or data migrations, seed/reset scripts, TRUNCATE,
+  DELETE, DROP, bulk imports, restore operations, and modification of persistent
+  database files or volumes. The user/operator executes such operations.
+- Agents may draft database commands, migration SQL, and rollback instructions
+  for the user's review and manual execution. Clearly identify the target
+  environment, intended effects, prerequisites, backup considerations, and
+  irreversible risks. Never represent a draft as executed or verified.
+- Do not execute live database queries, including read-only inspection, without
+  explicit user approval for the target and purpose. Prefer reviewing repository
+  schemas, models, migration files, and documented contracts first.
+- Do not circumvent these restrictions by invoking commands indirectly through
+  shell scripts, application startup, tests, IDE integrations, containers,
+  CI jobs, or other tools. Inspect side effects before running such commands.
+- This is an **agent-operation policy** for this repository, not a prohibition
+  on the application's authorized runtime writes or on contributors operating
+  their own environments. Do not modify application behavior to enforce it.
+- If testing requires mutable database state, propose an isolated disposable
+  test environment and obtain authorization for the setup and execution plan;
+  do not autonomously run state-changing database operations.
+
+## Tests and diagnostic scripts
+
+- Maintained unit/regression tests belong under the relevant component's tests/
+  directory and must be version-controlled for CI.
+- Never place maintained CI tests in the gitignored scripts/ directory.
+- Before creating a standalone verification script, consider a repeatable test.
+- Unit tests cover isolated behavior; integration/contract tests cover service
+  or protocol boundaries. Follow existing test organization and distinguish
+  external/infrastructure-dependent checks from ordinary unit tests.
+- Reserve scripts/ for approved temporary diagnostics or operator utilities.
+- Do not install test tools or establish a frontend test framework without approval.
+- Never run load tests or tests against external, production, or production-like
+  targets without explicit authorization for the target and execution scope.
+
+## Documentation and monthly changelog
+
+- Review documentation affected by changes to behavior, configuration, APIs,
+  environment variables, architecture, deployment, tests, or developer workflows.
+- Update affected public documentation in the same change. If none is affected,
+  state why in the completion summary. Describe implemented behavior accurately;
+  distinguish planned capabilities from existing functionality.
+- Before PR handoff, update the repository-root CHANGELOG.md using the existing
+  entry format. Include relevant agent-rule and documentation changes.
+- Monthly archives live in docs/changelogs/ and use CHANGELOG-YYYY-MM.md.
+- Inspect the established rollover procedure before moving entries. If timing,
+  date basis, or entry ownership is ambiguous, ask rather than invent a policy.
+- Preserve history. Do not overwrite an existing archive or duplicate a month
+  without reviewing the contents and obtaining guidance where needed.
+- Changelog maintenance does not authorize Git operations or PR submission.
+
+## Docstring and comment hygiene
+
+- Write self-contained explanations of what the code does and why.
+- Do not reference PBI numbers, Feature IDs, Bug/ticket IDs, ADO artifacts, or
+  internal .cursor/docs/ planning filenames in source comments or docstrings.
+- Keep internal work-item mappings in ADO or private plans, not public code.
+- Ask: would a public contributor understand this without internal context?
+  If not, rewrite it.
+
+## Completion report
+
+- Summarize changes, documentation/changelog updates, and verification results.
+- Identify unresolved assumptions, blocked checks, and follow-up recommendations.
+- Never claim tests passed, documentation was read, or compliance was verified
+  unless those actions actually occurred.

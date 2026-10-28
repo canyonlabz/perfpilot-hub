@@ -384,6 +384,9 @@ agent-framework/backend/sql/drop_perfagent_state.py
 !.cursor/rules/jmeter-script-guardrails.mdc
 !.cursor/rules/mcp-error-handling.mdc
 !.cursor/rules/skill-execution-rules.mdc
+!.cursor/rules/project-and-coding-guidelines.mdc
+!.cursor/rules/implementation-standards.mdc
+!.cursor/rules/technology-reference-policy.mdc
 
 # Ignore all custom Cursor Skills files, except the below
 .cursor/skills/*

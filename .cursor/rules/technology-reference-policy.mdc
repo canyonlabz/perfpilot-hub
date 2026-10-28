@@ -1,0 +1,119 @@
+---
+description: PerfPilot version-aware technical documentation and protocol verification
+alwaysApply: true
+---
+
+# PerfPilot Technology Reference Policy
+
+## Required reference workflow
+
+Before non-trivial technology-specific implementation:
+1. Identify the affected component and inspect its existing implementation.
+2. Read relevant repository documentation, dependency declarations, lockfiles,
+   Dockerfiles, runtime configuration, and existing tests.
+3. Consult `docs/engineering/technology-stack.md` (the maintained version and
+   official-source inventory) and the relevant sections of
+   `docs/engineering/development-workflow.md`. If either is missing from the
+   working tree, report the discrepancy; do not invent its contents.
+4. Consult authoritative documentation relevant to the proposed change, matched
+   to the approved protocol and installed/resolved package versions.
+5. Record consequential URLs, versions, assumptions, and verification in the plan.
+
+For a documentation-only change, verify the claims being edited against relevant
+implementation and official sources; do not research unrelated technologies.
+
+## Evidence and conflicts
+
+- Approved project policy defines intended architecture and supported versions.
+- Dependency constraints define allowed ranges, not exact installed versions.
+- Lockfiles, environment/package output, and image configuration provide separate
+  evidence about resolved packages and runtimes. State what was actually checked.
+- Report discrepancies before implementation; do not silently change dependencies,
+  requirements, lockfiles, runtime versions, or public contracts.
+- Normative protocol specifications govern wire behavior. Version-matched library
+  documentation governs library APIs. Framework examples and AI/search summaries
+  do not override the normative specification.
+- Do not assume a /latest/ page describes the project's approved release.
+- If a source is unavailable or a key version is unknown, disclose the gap and
+  ask when it blocks a grounded change. Do not claim to have consulted a URL
+  merely because it appears in this file.
+- Use configured research tools under the project's disclosure/security rules.
+
+## Technology baseline and verification
+
+- `docs/engineering/technology-stack.md` is the maintained inventory of
+  observed versions, declared constraints, components, and official references.
+  Do not duplicate its detailed version table in this Cursor Rule.
+- An observed local version is not proof of the container version or another
+  contributor's environment; inspect the affected manifests, lockfiles, runtime
+  output, and image definitions as appropriate and report what was verified.
+- If the public baseline conflicts with current branch evidence, report the
+  discrepancy and seek guidance rather than silently updating dependencies,
+  lockfiles, runtimes, or documentation.
+- Preserve AG2 orchestrator/specialist, AG-UI-to-web-UI, external A2A, and MCP
+  component boundaries. Do not assume an A2A SDK is installed.
+
+## A2A
+
+- Approved protocol target: A2A v1.0.0. Confirm the binding needed
+  for the affected work rather than inferring support from route names.
+- Official specification entry point:
+  https://a2a-protocol.org/latest/specification/
+- Identify a release-specific reference where available and record the release
+  consulted. Do not silently follow a future change to /latest/.
+- Verify affected message schemas, method names, errors, task states, streaming,
+  discovery, and authentication requirements against the applicable specification.
+- Do not assume an A2A SDK or SDK classes exist, or add an SDK without approval.
+- Do not infer A2A compliance from AG2 or AG-UI versions, requirements comments,
+  or a successful smoke test alone. Add/propose focused contract coverage.
+
+## AG2 and AG-UI
+
+- Follow the installed AG2 release and existing orchestrator/specialist design.
+- Treat AG2 and ag-ui-protocol as distinct packages with distinct version evidence.
+- Verify relevant agent lifecycle, tool execution, event ordering, streaming,
+  cancellation, and error behavior against version-appropriate official sources.
+- Preserve the backend/frontend integration contract. Do not invent events or
+  mix A2A and AG-UI protocol concepts.
+
+## CopilotKit and React
+
+- Verify the component's package.json and lockfile before selecting APIs.
+- Match CopilotKit/React integration guidance to resolved frontend packages and
+  the backend's supported contract. Do not infer package APIs from Node version.
+- The documented frontend baseline has no declared test script or explicit
+  test runner. Inspect current tooling before proposing a minimal setup; do not
+  install one or assume all frontend verification can be skipped.
+- Do not import Python logging code into frontend code. Propose frontend logging
+  separately if needed, preserving sensitive-data restrictions.
+
+## FastMCP
+
+- Target the approved version-3 implementation and >=3.4.2,<4 dependency range.
+- Consult version-3 documentation or matching source/release tags; do not use
+  current-major examples as proof that an API exists in the installed version.
+- Preserve established gateway, service, namespace, transport, and tool contracts.
+- Future-ready means isolating integration boundaries and recording verified
+  migration risks. It does not authorize v4 APIs, speculative compatibility
+  shims, dependency upgrades, or a migration.
+
+## Docker and deployment
+
+- Inspect the affected Dockerfile, Compose configuration, environment references,
+  build context, startup command, health checks, and documented ports.
+- Preserve approved per-component boundaries and declared runtime versions.
+- Keep container secrets out of source, build arguments, image layers, and logs.
+- Do not claim an image builds or a container is healthy without actual checks.
+- Before running build/start commands or tests, check for implicit migrations,
+  database writes, seed/reset operations, or volume modifications. The global
+  database safety policy applies even when changes occur indirectly.
+- Do not build, start, stop, or modify shared services without appropriate approval.
+
+## Research traceability
+
+- Keep useful source URLs, exact releases consulted, and unresolved questions in
+  approved plans or shared engineering documentation as appropriate.
+- Source comments/docstrings must remain self-contained and free of internal
+  work-item or private planning references.
+- Rules guide the agent; do not describe their presence as proof of CI enforcement
+  or protocol compliance.

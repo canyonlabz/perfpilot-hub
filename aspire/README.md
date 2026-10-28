@@ -89,7 +89,7 @@ aspire certs trust      # one-time trust of the Aspire dev HTTPS certificate
 
 ## 🧱 What's orchestrated
 
-Running `aspire run` brings up 13 resources:
+Running `aspire run` brings up **14 resources**:
 
 | Group | Resource | Port |
 |---|---|---|
