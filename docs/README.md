@@ -1,7 +1,7 @@
 # 📚 Documentation Overview
 
-Welcome to the **Documentation Hub** for **PerfPilot-Hub**!
-This folder contains all reference materials, specifications, templates, and technical guides used across the suite of MCP servers.
+Welcome to the **Documentation Hub** for **PerfPilot Hub**!
+This folder contains all reference materials, specifications, templates, and technical guides used across the suite of MCP servers and the agent framework.
 
 The goal of this directory is to help end-users, contributors, and performance engineers quickly understand:
 
@@ -9,249 +9,164 @@ The goal of this directory is to help end-users, contributors, and performance e
 * How to configure them
 * How to customize templates
 * How to use the available tools
-* How the MCP servers integrate across the ecosystem
+* How the MCP servers and agent framework integrate across the ecosystem
 
 ---
 
-## 📁 What’s Inside This Folder
-
-This folder will grow over time. For now, here are the key documents:
-
-### 📘 **1. Template Authoring Guidelines (`report_template_guidelines.md`)**
-
-A detailed guide explaining how to create custom Markdown templates for performance reports, including:
-
-* Supported Markdown syntax
-* Placeholder reference
-* Rules for Confluence-safe formatting
-* Examples for API tables, summaries, and insights
-* How the report generator fills in template variables
-
-➡️ *Use this if you want to customize the look & layout of performance reports.*
-
----
-
-### 📂 **2. HAR Adapter Guide (`har_adapter_guide.md`)**
-
-A practical guide for Performance Test Engineers on converting HAR files into JMeter scripts using the `convert_har_to_capture` tool, including:
-
-* When to use the HAR adapter vs. Playwright or Swagger inputs
-* Configuration prerequisites (domain filtering, pseudo-header stripping)
-* Step-by-step usage with parameter reference
-* Step strategy selection (auto, page, time_gap, single_step)
-* Output structure and capture manifest
-* Troubleshooting common issues
-
-➡️ *Use this if you have a HAR file and want to generate a JMeter script from it.*
-
----
-
-### 📦 **3. Artifacts Guide (`artifacts_guide.md`)**
-
-A comprehensive guide explaining how the MCP Performance Suite manages test data through the local filesystem, including:
-
-* Why the suite is local-first (no database, no cloud storage)
-* The role of `test_run_id` and how it organizes everything
-* The `artifacts_path` configuration across all MCP servers
-* Full directory structure with every subfolder and file explained
-* Vendor folder conventions (`blazemeter/` vs `jmeter/`)
-* How the AI HITL tools use artifacts as state (backups as revision history)
-* Key files and their producer/consumer relationships
-* Tips for managing and backing up artifacts
-
-➡️ *Use this to understand where test data lives and how MCP servers share it.*
-
----
-
-### 🤖 **4. JMeter HITL Editing Guide (`jmeter_hitl_user_guide.md`)**
-
-A comprehensive guide for using the AI-assisted Human-in-the-Loop tools to analyze, add to, and edit JMeter JMX scripts, including:
-
-* What scripts are supported (any valid JMX, not just AI-generated)
-* Requirements: `test_run_id` and artifact folder conventions
-* How to import an external/pre-existing JMX script
-* The four script generation pipelines (External, Playwright, HAR, Swagger)
-* Step-by-step HITL workflow: analyze → add → edit → verify
-* Safety features: dry run, automatic backups, node ID stability
-* Supported component types (36+ across 8 categories)
-* Best practices and V2 roadmap
-
-➡️ *Use this if you want to leverage AI to modify JMeter scripts without manually editing XML.*
-
----
-
-### 🧠 **5. PerfMemory & Debugging User Guide (`perfmemory_user_guide.md`)**
-
-A practical guide showing how PerfMemory MCP and JMeter MCP work together for AI-driven script debugging, including:
-
-* Example prompts for every use case (search, store, ingest, browse, maintain)
-* Both natural language prompts and underlying tool calls (for Cursor, Claude CLI, Codex CLI, etc.)
-* Skills reference: which skills activate and when
-* Integrated workflow walkthrough: what the PTE types vs. what the agent does
-* Tips for writing high-quality symptom text for better search results
-* FAQ covering embedding providers, team sharing, and offline use
-
-➡️ *Use this if you want to debug JMeter scripts with AI memory — or if you're setting up PerfMemory for your team.*
-
----
-
-### ⚙️ **6. MCP Configuration References (Coming Soon)** 
-
-Planned documents:
-
-#### **`config_reference.md`**
-
-A unified explanation of the `config.yaml` files used across all MCP servers, including:
-
-* Common fields (`general`, `artifacts`, `logging`, etc.)
-* Server-specific sections
-* Examples from:
-
-  * `blazemeter-mcp`
-  * `datadog-mcp`
-  * `perfreport-mcp`
-  * `confluence-mcp`
-  * Any future MCP servers added to the suite
-
-➡️ *This will help users understand exactly how to configure each server consistently.*
-
----
-
-### 🔧 **7. MCP Tool Index (Coming Soon)**
-
-Planned document:
-
-#### **`mcp_tools_index.md`**
-
-A single reference listing *all* tools exposed by each MCP server.
-For each server, we will include:
-
-* Server name
-* Tool name
-* Purpose
-* Input arguments
-* Example usage
-
-Example snippet:
-
-```
-blazemeter-mcp
-  • get_test_runs
-  • start_test_run
-  • stop_test_run
-  • get_aggregate_report
-```
-
-➡️ *Useful for developers integrating MCP servers into automated pipelines or toolchains.*
-
-> **Current state:** The suite runs on **FastMCP 3.4.x**. Each MCP server can run standalone or be accessed through the **PerfPilot Hub** (Gateway MCP) — a unified MCP gateway that exposes all servers and their tools under one endpoint. See [gateway-mcp/README.md](../mcp-perf-suite/gateway-mcp/README.md) for details.
-
----
-
-### 🔬 **8. PerfAnalysis Analytical Techniques Guide (`perfanalysis_techniques_guide.md`)**
-
-A comprehensive reference explaining every statistical algorithm and data science technique used by the PerfAnalysis MCP server, including:
-
-* All statistical algorithms: percentiles, Pearson correlation, linear regression, Z-score anomaly detection, rolling median smoothing, Median Absolute Deviation (MAD), and more
-* All data science techniques: SLA validation, temporal correlation, trend classification, outlier suppression, sustained degradation detection, multi-factor severity scoring
-* The five-step analysis pipeline with workflow diagrams
-* Deep-dive into the bottleneck detection engine: Phase 1 core detectors, Phase 2 infrastructure cross-reference, Phase 3 KPI-driven bottlenecks
-* What PerfAnalysis produces (all output files and JSON structures)
-* Configuration knobs that drive analysis behavior
-* A glossary of performance testing and data science terms
-
-Written in plain language for junior-to-mid-level Performance Test Engineers.
-
-➡️ *Use this to understand how PerfAnalysis analyzes test results and what techniques it uses to identify bottlenecks.*
-
----
-
-### 📊 **9. Large File Handling (`large_file_handling.md`)**
-
-A technical reference explaining how the PerfAnalysis MCP handles large JTL/CSV files (200+ MB), including:
-
-* Memory optimisation techniques (column selection, category dtypes, explicit type maps)
-* Configurable row limits (`max_jtl_rows`)
-* Why chunked processing is not used and when it would be appropriate
-* Memory estimates and recommendations by file size
-* Multi-engine concurrency correction
-
-➡️ *Use this to understand the design decisions behind large file handling and known limitations.*
-
----
-
-### 🔗 **10. A2A New-JMX Pipeline Guide (`agent-framework/a2a_new_jmx_pipeline_guide.md`)**
-
-A reference for upstream AI agent frameworks and the PerfPilot Web UI that
-need to drive the *new-JMX* pipeline (generate → push to Git → local
-smoke → provision BlazeMeter test), including:
-
-* Which surfaces the pipeline supports (A2A, Web UI, Cursor/MCP)
-* Full A2A metadata schema (`environment`, `scm`, `blazemeter`,
-  `test_run_id`)
-* A minimal example A2A payload that a `curl` or Python client can send
-* User-attributed vs user-agnostic GitHub token flow (per-request vs
-  server env var)
-* Which HITL gates apply to the pipeline and where they fire
-
-➡️ *Use this if you are integrating an upstream framework (or a
-custom UI) with the PerfPilot orchestrator's script-creation pipeline.*
-
----
-
-### 🧩 **11. Architecture & Flow Docs (Future Expansion)**
-
-Potential documents coming later:
-
-* `architecture_overview.md`
-* `data_flow_across_mcp_servers.md`
-* `report_generation_pipeline.md`
-* `how_network_capture_integrates_with_jmeter.md`
-
-➡️ *These give new contributors a high-level picture of the entire ecosystem.*
-
----
-
-## 🧭 Suggested Folder Structure (Growing)
+## 📁 Folder Structure
 
 ```
 docs/
+├── README.md                          ← You are here
+├── artifacts_guide.md
+├── large_file_handling.md
+├── metrics_calculations_and_display.md
 │
-├── README.md                         ← You are here
-├── artifacts_guide.md                ← Artifacts folder & local-first architecture
-├── har_adapter_guide.md              ← HAR-to-JMeter conversion guide
-├── jmeter_hitl_user_guide.md         ← AI HITL editing guide
-├── perfmemory_user_guide.md         ← PerfMemory + debugging workflows & example prompts
-├── report_template_guidelines.md     ← Performance report template rules
-├── large_file_handling.md            ← Large JTL file handling & limitations
-├── perfanalysis_techniques_guide.md ← Analytical techniques & algorithms reference
+├── a2a/
+│   └── a2a-server-data-contracts.md
 │
 ├── agent-framework/
-│   └── a2a_new_jmx_pipeline_guide.md ← A2A + Web UI new-JMX pipeline metadata reference
+│   ├── a2a_new_jmx_pipeline_guide.md
+│   └── hitl-configuration.md
 │
-├── config_reference.md        ← (Planned)
-├── mcp_tools_index.md         ← (Planned)
+├── aspire/
+│   └── aspire-setup-guide.md
 │
 ├── changelogs/
-│   ├── CHANGELOG-2026-01.md   ← January 2026 changes
-│   ├── CHANGELOG-2026-02.md   ← February 2026 changes
-│   ├── CHANGELOG-2026-03.md   ← March 2026 changes
-│   ├── CHANGELOG-2026-04.md   ← April 2026 changes
-│   ├── CHANGELOG-2026-05.md   ← May 2026 changes
-│   └── CHANGELOG-2026-06.md   ← June 2026 changes
+│   ├── CHANGELOG-2026-01.md
+│   ├── CHANGELOG-2026-02.md
+│   ├── CHANGELOG-2026-03.md
+│   ├── CHANGELOG-2026-04.md
+│   ├── CHANGELOG-2026-05.md
+│   ├── CHANGELOG-2026-06.md
+│   ├── CHANGELOG-2026-07.md
+│   ├── CHANGELOG-2026-08.md
+│   └── CHANGELOG-2026-09.md
 │
-├── architecture_overview.md   ← (Future)
-└── examples/                  ← Example templates, configs, outputs
+├── database/
+│   ├── apache_age_installation_guide.md
+│   ├── apache_age_viewer_guide.md
+│   ├── perfmemory_user_guide.md
+│   └── pgvector_installation_guide.md
+│
+├── datadog-mcp/
+│   └── datadog_query_guide.md
+│
+├── engineering/
+│   ├── development-workflow.md
+│   └── technology-stack.md
+│
+├── jmeter-mcp/
+│   ├── correlation_analysis_guide.md
+│   ├── har_adapter_guide.md
+│   ├── har_jmx_comparison_guide.md
+│   ├── jmeter_hitl_user_guide.md
+│   └── jmeter_mcp_configuration_guide.md
+│
+├── perfanalysis-mcp/
+│   ├── perfanalysis_techniques_guide.md
+│   └── sla_configuration_guide.md
+│
+├── perfreport-mcp/
+│   └── report_template_guidelines.md
+│
+├── playwright-mcp/
+│   └── playwright_mcp_configuration_guide.md
+│
+└── troubleshooting/
+    ├── age-viewer-troubleshooting.md
+    ├── docker-gateway-macos-build-and-runtime.md
+    ├── msteams-mcp-troubleshooting.md
+    ├── norton-360-ssl-interception.md
+    ├── pgvector-fix-on-macbook.md
+    ├── rancher-desktop-fix.md
+    └── rancher-desktop-port-forwarding.md
 ```
 
 ---
 
-## 🚀 Future Improvements
+## 🗂️ Guide Index
 
-As more MCP servers are added or enhanced, this docs folder will evolve to include:
+### 🚀 Aspire & Orchestration
 
-* Detailed examples
-* Troubleshooting guides
-* Contribution guidelines
-* Best practices for large-scale performance testing
-* How to extend or override MCP server behavior
+| Document | Description |
+|----------|-------------|
+| [`aspire/aspire-setup-guide.md`](aspire/aspire-setup-guide.md) | Full Aspire setup, secrets provisioning, smoke checks, and troubleshooting |
+
+### 🤖 Agent Framework
+
+| Document | Description |
+|----------|-------------|
+| [`agent-framework/a2a_new_jmx_pipeline_guide.md`](agent-framework/a2a_new_jmx_pipeline_guide.md) | A2A + Web UI new-JMX pipeline metadata reference for upstream integrations |
+| [`agent-framework/hitl-configuration.md`](agent-framework/hitl-configuration.md) | Human-in-the-Loop approval configuration and behavior |
+| [`a2a/a2a-server-data-contracts.md`](a2a/a2a-server-data-contracts.md) | A2A server data contracts and request/response schemas |
+
+### 🔌 MCP Server Guides
+
+| Document | Description |
+|----------|-------------|
+| [`jmeter-mcp/jmeter_mcp_configuration_guide.md`](jmeter-mcp/jmeter_mcp_configuration_guide.md) | JMeter MCP configuration reference |
+| [`jmeter-mcp/jmeter_hitl_user_guide.md`](jmeter-mcp/jmeter_hitl_user_guide.md) | AI-assisted Human-in-the-Loop JMeter script editing |
+| [`jmeter-mcp/har_adapter_guide.md`](jmeter-mcp/har_adapter_guide.md) | HAR-to-JMeter conversion guide |
+| [`jmeter-mcp/har_jmx_comparison_guide.md`](jmeter-mcp/har_jmx_comparison_guide.md) | HAR vs JMX comparison reference |
+| [`jmeter-mcp/correlation_analysis_guide.md`](jmeter-mcp/correlation_analysis_guide.md) | JMeter correlation analysis and variable naming |
+| [`datadog-mcp/datadog_query_guide.md`](datadog-mcp/datadog_query_guide.md) | Datadog custom query configuration |
+| [`perfanalysis-mcp/perfanalysis_techniques_guide.md`](perfanalysis-mcp/perfanalysis_techniques_guide.md) | Analytical techniques and algorithms reference |
+| [`perfanalysis-mcp/sla_configuration_guide.md`](perfanalysis-mcp/sla_configuration_guide.md) | SLA threshold configuration |
+| [`perfreport-mcp/report_template_guidelines.md`](perfreport-mcp/report_template_guidelines.md) | Performance report template authoring rules |
+| [`playwright-mcp/playwright_mcp_configuration_guide.md`](playwright-mcp/playwright_mcp_configuration_guide.md) | Playwright MCP configuration and browser automation |
+
+### 🗄️ Database
+
+| Document | Description |
+|----------|-------------|
+| [`database/perfmemory_user_guide.md`](database/perfmemory_user_guide.md) | PerfMemory + debugging workflows and example prompts |
+| [`database/pgvector_installation_guide.md`](database/pgvector_installation_guide.md) | pgvector installation and setup |
+| [`database/apache_age_installation_guide.md`](database/apache_age_installation_guide.md) | Apache AGE graph extension installation |
+| [`database/apache_age_viewer_guide.md`](database/apache_age_viewer_guide.md) | AGE Viewer setup and usage |
+
+### 📦 General Reference
+
+| Document | Description |
+|----------|-------------|
+| [`artifacts_guide.md`](artifacts_guide.md) | Artifacts folder structure and local-first architecture |
+| [`large_file_handling.md`](large_file_handling.md) | Large JTL/CSV file handling and memory optimization |
+| [`metrics_calculations_and_display.md`](metrics_calculations_and_display.md) | Metrics calculations and display conventions |
+
+### ⚙️ Engineering
+
+| Document | Description |
+|----------|-------------|
+| [`engineering/technology-stack.md`](engineering/technology-stack.md) | Technology inventory — observed versions, constraints, and official references |
+| [`engineering/development-workflow.md`](engineering/development-workflow.md) | Development workflow, coding standards, and testing conventions |
+
+### 🩺 Troubleshooting
+
+| Document | Description |
+|----------|-------------|
+| [`troubleshooting/docker-gateway-macos-build-and-runtime.md`](troubleshooting/docker-gateway-macos-build-and-runtime.md) | Docker gateway macOS build and runtime issues |
+| [`troubleshooting/pgvector-fix-on-macbook.md`](troubleshooting/pgvector-fix-on-macbook.md) | pgvector fix for macOS |
+| [`troubleshooting/rancher-desktop-fix.md`](troubleshooting/rancher-desktop-fix.md) | Rancher Desktop troubleshooting |
+| [`troubleshooting/rancher-desktop-port-forwarding.md`](troubleshooting/rancher-desktop-port-forwarding.md) | Rancher Desktop port forwarding setup |
+| [`troubleshooting/norton-360-ssl-interception.md`](troubleshooting/norton-360-ssl-interception.md) | Norton 360 SSL interception workaround |
+| [`troubleshooting/msteams-mcp-troubleshooting.md`](troubleshooting/msteams-mcp-troubleshooting.md) | MS Teams MCP troubleshooting |
+| [`troubleshooting/age-viewer-troubleshooting.md`](troubleshooting/age-viewer-troubleshooting.md) | AGE Viewer troubleshooting |
+
+### Monthly Changelogs
+
+Monthly archives live in [`changelogs/`](changelogs/). The current month's
+changes are tracked in the repository-root [`CHANGELOG.md`](../CHANGELOG.md).
+
+---
+
+## 🧭 Related READMEs
+
+| Location | Description |
+|----------|-------------|
+| [`README.md`](../README.md) | Repository root — project overview and getting started |
+| [`aspire/README.md`](../aspire/README.md) | Aspire orchestration quick start |
+| [`docker/README.md`](../docker/README.md) | Docker Compose deployment guide |
+| [`agent-framework/README.md`](../agent-framework/README.md) | Agent framework architecture and agents |
+| [`agent-framework/frontend/ui/README.md`](../agent-framework/frontend/ui/README.md) | Web UI (Next.js + CopilotKit) |
+| [`mcp-perf-suite/README.md`](../mcp-perf-suite/README.md) | MCP source tree overview |
+| [`mcp-perf-suite/gateway-mcp/README.md`](../mcp-perf-suite/gateway-mcp/README.md) | Gateway MCP (unified endpoint) |
