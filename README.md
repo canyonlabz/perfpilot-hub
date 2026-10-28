@@ -79,20 +79,23 @@ perfpilot-hub/
 ├── agent-framework/       # AG2 agents, A2A server, AG-UI backend, CopilotKit frontend
 │   ├── frontend/          # CopilotKit / React / Next.js web UI (FlightDeck)
 │   └── backend/           # Python AG-UI server and A2A server
+├── aspire/                # .NET Aspire AppHost — recommended local orchestration
 ├── mcp-perf-suite/        # Gateway + all MCP servers
 │   ├── gateway-mcp/       # PerfPilot Hub — unified MCP gateway via FastMCP 3.4.x
-│   ├── blazemeter-mcp/    # BlazeMeter API tools
-│   ├── confluence-mcp/    # Confluence publishing tools
-│   ├── datadog-mcp/       # Datadog metrics, logs, and APM tools
+│   ├── blazemeter-mcp/    # BlazeMeter API integration (optional)
+│   ├── confluence-mcp/    # Confluence publishing integration (optional)
+│   ├── datadog-mcp/       # Datadog metrics, logs, and APM integration (optional)
+│   ├── github-mcp/        # GitHub Contents API integration (optional)
 │   ├── jmeter-mcp/        # JMeter script generation and execution tools
-│   ├── msteams-mcp/       # MS Teams notifications
+│   ├── msteams-mcp/       # MS Teams notifications (optional, local only)
 │   ├── perfanalysis-mcp/  # Performance analysis and correlation tools
 │   ├── perfmemory-mcp/    # AI memory backed by PostgreSQL, pgvector, and Apache AGE
 │   ├── perfreport-mcp/    # Report generation tools
-│   ├── sharepoint-mcp/    # SharePoint artifact storage
+│   ├── sharepoint-mcp/    # SharePoint artifact storage (optional, local only)
 │   ├── artifacts/         # Test artifacts, reports, JTLs, logs, and generated files
 │   └── streamlit-ui/      # Web UI for viewing performance test results
-├── docker/                # Per-MCP Dockerfiles, compose files, and full-stack deployment (see docker/README.md)
+├── docker/                # Per-MCP Dockerfiles, compose files, and deployment (see docker/README.md)
+├── tests/                 # Unit tests and regression coverage (CI in progress)
 └── docs/                  # Public documentation
 ```
 
@@ -104,7 +107,7 @@ perfpilot-hub/
 
 **PerfPilot Gateway** is the central MCP gateway. Instead of connecting an AI agent to many separate MCP servers, PerfPilot Hub exposes the performance testing toolchain through one MCP endpoint.
 
-It routes requests to specialized MCP servers such as JMeter, BlazeMeter, Datadog, PerfAnalysis, PerfReport, Confluence, PerfMemory, MS Teams, and SharePoint.
+It routes requests to eight gateway-mounted MCP servers: JMeter, BlazeMeter, Datadog, PerfAnalysis, PerfReport, Confluence, PerfMemory, and GitHub. Playwright MCP runs as a direct endpoint (not gateway-mounted). MS Teams and SharePoint run as local stdio servers and are not part of the gateway.
 
 ### 🤖 Pilot and Copilots
 
@@ -114,7 +117,7 @@ The **Copilots** are specialist agents. Each Copilot focuses on a specific phase
 
 Together, the Pilot and Copilots form the agent layer of PerfPilot.
 
-Planned and/or evolving agents include:
+Current agents:
 
 | Agent                  | Purpose                                                         |
 | ---------------------- | --------------------------------------------------------------- |
@@ -160,7 +163,14 @@ The implementation lives inside `agent-framework/backend/`.
 │  Browser UI / Cursor / Claude / Other AI Agent Frameworks        │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
-                                ▼
+              ┌─────────────────┼─────────────────┐
+              ▼                                   ▼
+┌──────────────────────┐             ┌──────────────────────┐
+│  AG-UI (port 8102)   │             │  A2A (port 8101)     │
+│  Browser / Web UI    │             │  External AI agents  │
+└──────────┬───────────┘             └──────────┬───────────┘
+           └─────────────────┬──────────────────┘
+                             ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                       PerfPilot Agent Layer                      │
 │                                                                  │
@@ -171,34 +181,24 @@ The implementation lives inside `agent-framework/backend/`.
 │     ├── Analysis Agent                                           │
 │     ├── Reporting Agent                                          │
 │     └── Notifications Agent                                      │
-│                                                                  │
-│  Surfaces:                                                       │
-│     - A2A server for agent-to-agent workflows                    │
-│     - AG-UI backend for browser-based human interaction          │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                                 ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                         PerfPilot Hub                            │
-│                                                                  │
-│  Unified MCP gateway exposing performance testing tools          │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │
-        ┌───────────────────────┼────────────────────────┐
-        ▼                       ▼                        ▼
-┌───────────────┐       ┌────────────────┐        ┌─────────────────┐
-│ JMeter MCP    │       │ BlazeMeter MCP │        │ Datadog MCP     │
-└───────────────┘       └────────────────┘        └─────────────────┘
-        ▼                       ▼                        ▼
-┌───────────────┐       ┌────────────────┐        ┌─────────────────┐
-│ PerfAnalysis  │       │ PerfReport     │        │ PerfMemory      │
-│ MCP           │       │ MCP            │        │ MCP             │
-└───────────────┘       └────────────────┘        └─────────────────┘
-        ▼                       ▼                        ▼
-┌───────────────┐       ┌────────────────┐        ┌─────────────────┐
-│ Confluence    │       │ MS Teams       │        │ SharePoint      │
-│ MCP           │       │ MCP            │        │ MCP             │
-└───────────────┘       └────────────────┘        └─────────────────┘
+│                    Gateway MCP (port 8125)                       │
+│         8 mounted servers via FastMCP create_proxy()             │
+├──────────┬──────────┬──────────┬──────────┬──────────────────────┤
+│ JMeter   │BlazeMeter│ Datadog  │PerfAnalys│ PerfReport           │
+│ MCP      │ MCP      │ MCP      │ MCP      │ MCP                  │
+├──────────┴──────────┼──────────┴──────────┴──────────────────────┤
+│ Confluence MCP      │ PerfMemory MCP      │ GitHub MCP           │
+└─────────────────────┴─────────────────────┴──────────────────────┘
+
+  Direct (not gateway-mounted):
+  ┌─────────────────────┐  ┌──────────────┐  ┌──────────────┐
+  │ Playwright MCP      │  │ MS Teams MCP │  │ SharePoint   │
+  │ (port 8117)         │  │ (local stdio)│  │ MCP (stdio)  │
+  └─────────────────────┘  └──────────────┘  └──────────────┘
 ```
 
 ---
@@ -237,61 +237,53 @@ A future end-to-end PerfPilot workflow may look like this:
 | Load testing                 | JMeter, BlazeMeter               |
 | Observability                | Datadog                          |
 | Reporting / collaboration    | Confluence, SharePoint, MS Teams |
-| Local orchestration          | Docker Compose                   |
+| Local orchestration          | .NET Aspire                      |
 
 ---
 
 ## 📦 Project Status
 
-PerfPilot is currently being assembled from the original `mcp-perf-suite` project and the experimental agent-framework branch.
-
-| Area                 | Status                                               |
-| -------------------- | ---------------------------------------------------- |
-| MCP Perf Suite       | Existing project being moved under the new root repo |
-| PerfPilot Hub        | Existing MCP gateway concept from `gateway-mcp`      |
-| Agent Framework      | Active development                                   |
-| A2A Server           | Active development                                   |
-| AG-UI Backend        | Active development                                   |
-| CopilotKit Web UI    | Active development                                   |
-| Docker Compose       | Complete (Phase 1) — per-MCP images, full-stack topology |
-| Public documentation | In progress                                          |
+| Area                 | Status              |
+| -------------------- | ------------------- |
+| MCP Perf Suite       | ✅ Working          |
+| Gateway MCP          | ✅ Working          |
+| Agent Framework      | ✅ Working          |
+| A2A Server           | ✅ Working          |
+| AG-UI Backend        | ✅ Working          |
+| CopilotKit Web UI    | Active development  |
+| Aspire orchestration | ✅ Working          |
+| Docker images        | ✅ Working          |
+| Public documentation | In progress         |
 
 ---
 
 ## ▶️ Getting Started
 
-> The repository is currently in early setup. Full installation instructions will be added as the folder structure stabilizes.
-
-For now, the expected local development flow will be:
+The recommended way to run PerfPilot locally is with [.NET Aspire](https://aspire.dev). One command starts the database, all MCP servers, the gateway, the agent backends, and the Web UI.
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/canyonlabz/perfpilot-hub.git
 cd perfpilot-hub
+
+# 2. Set your secrets (one-time)
+#    See docs/aspire/aspire-setup-guide.md for the full list
+dotnet user-secrets set "Parameters:openai-api-key" "<your-key>" --id perfpilot-aspire-apphost
+
+# 3. Start everything
+cd aspire
+aspire run
 ```
 
-Then follow the setup instructions inside each major module:
+The Aspire dashboard opens automatically. All 14 resources start in dependency order with health checks.
 
-| Module          | Path               | Purpose                                                            |
-| --------------- | ------------------ | ------------------------------------------------------------------ |
-| Agent Framework | `agent-framework/` | Multi-agent orchestration, A2A server, AG-UI backend, and frontend |
-| MCP Perf Suite  | `mcp-perf-suite/`  | MCP gateway and specialized performance testing MCP servers        |
-| Docker          | `docker/`          | Per-MCP images + full-stack Compose ([docker/README.md](docker/README.md)) |
-| Docs            | `docs/`            | Public documentation and architecture notes                        |
+See [`docs/aspire/aspire-setup-guide.md`](docs/aspire/aspire-setup-guide.md) for prerequisites, the full secrets list, and troubleshooting.
 
-### 🐳 Docker deployment (fastest path)
+> **Optional integrations:** BlazeMeter, Datadog, Confluence, GitHub, MS Teams, and SharePoint each require their own API keys or tokens. PerfPilot works without them — you just won't have access to those specific tools. Set only the secrets you need.
 
-If you'd rather skip module-by-module setup and just run the stack, PerfPilot Hub ships a full-stack Docker Compose deployment:
+### 🐳 Docker Compose (optional)
 
-```bash
-cd docker/
-cp .env.example .env         # populate your API keys / passwords
-docker compose -f docker-compose-full-windows.yaml up --build   # or -mac.yaml
-```
-
-That command builds and starts **14 containers** — the PostgreSQL database, all nine MCP servers, the gateway aggregator, the Playwright browser automation server, the A2A + AG-UI agent backends, and the Next.js UI — with health checks and dependency ordering handled automatically.
-
-See [`docker/README.md`](docker/README.md) for the full deployment guide (prerequisites, port allocation, corporate-CA setup, macOS-specific PostgreSQL notes, per-MCP READMEs, and legacy → canonical migration).
+Docker Compose files are included in `docker/` for building individual images or running the stack without Aspire. See [`docker/README.md`](docker/README.md) for details.
 
 ---
 
@@ -299,15 +291,12 @@ See [`docker/README.md`](docker/README.md) for the full deployment guide (prereq
 
 Planned areas of work include:
 
-* [x] ~~Normalize environment configuration across agents, MCPs, and Docker~~ — ✅ Implemented (unified `docker/.env.example`, per-MCP `.env.example`, `DEPLOYMENT_MODE` toggle)
-* [x] ~~Add root-level Docker Compose orchestration~~ — ✅ Implemented (`docker/docker-compose-full-{mac,windows}.yaml` orchestrating 14 containers)
-* [x] ~~Add one-command local startup for database, MCP gateway, agents, and UI~~ — ✅ Implemented (`docker compose -f docker-compose-full-<os>.yaml up --build`)
-* [ ] Expand specialist agents beyond the first working vertical slices
-* [ ] Add human-in-the-loop approval cards in the Web UI
-* [ ] Add persistent multi-thread conversation history
-* [ ] Add task progress streaming and test-run result views
-* [ ] Add public architecture documentation
-* [ ] Add contribution guidelines
+* [x] ~~One-command local startup~~ — ✅ `aspire run` starts all 14 resources
+* [x] ~~Persistent multi-thread conversation history~~ — ✅ PostgreSQL-backed threads survive restarts
+* [x] ~~Specialist agents for scripting, execution, monitoring, analysis, and reporting~~ — ✅ Working
+* [ ] Human-in-the-loop approval cards in the Web UI
+* [ ] Task progress streaming and test-run result views in the Web UI
+* [ ] Contribution guidelines
 
 ---
 
