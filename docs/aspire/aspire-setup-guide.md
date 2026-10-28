@@ -66,7 +66,7 @@ Resources defined in `apphost.cs` reference assets in two places:
 
 ## 🧱 What's Orchestrated
 
-Running `aspire run` from `aspire/` brings up **13 resources**:
+Running `aspire run` from `aspire/` brings up **14 resources**:
 
 | Group | Resource | Port | Notes |
 |---|---|---|---|
@@ -81,9 +81,9 @@ Running `aspire run` from `aspire/` brings up **13 resources**:
 | | `perfpilot-mcp-github` | 8118 | Pushes JMX to non-main branches |
 | **MCP (direct)** | `perfpilot-mcp-playwright` | 8117 | Not gateway-mounted (stateful browser sessions) |
 | **Gateway** | `perfpilot-mcp-gateway` | 8125 | Single entry point for Cursor / agents |
-| **Agent backend** | `perf-a2a-server` | 8101 | Python / FastAPI — Agent-to-Agent protocol |
-| | `perf-agui-server` | 8102 | Python / FastAPI — CopilotKit bridge |
-| **Frontend** | `perf-frontend` | dynamic | Next.js / CopilotKit |
+| **Agent backend** | `perfpilot-a2a` | 8101 | Python / FastAPI — Agent-to-Agent protocol |
+| | `perfpilot-agui` | 8102 | Python / FastAPI — CopilotKit bridge |
+| **Frontend** | `perfpilot-ui` | dynamic | Next.js / CopilotKit |
 
 **Not included** (require browser-based auth tokens — not container-friendly):
 `msteams-mcp`, `sharepoint-mcp`.
@@ -96,14 +96,12 @@ with an `ADO_PAT` or `MCP_URL_ADO`. SCM integration flows through GitHub only.
 ## 🔐 Secrets Setup
 
 Secrets are **never** stored in `.env` files, source code, or `appsettings.json`.
-Locally they live in the .NET user-secrets store; in the cloud they're sourced
-from **HashiCorp Vault** and injected into containers as environment variables.
-Aspire's `AddParameter(..., secret: true)` reads the same key names from either
-source, so the AppHost code is identical in both environments.
+Locally they live in the .NET user-secrets store. Aspire's
+`AddParameter(..., secret: true)` reads the key names from the store at startup.
 
-The AppHost declares a `UserSecretsId` of `perfpilot-aspire-apphost`, so
-`dotnet user-secrets` picks the right store without needing `--id` or
-`--project` arguments.
+The AppHost declares a `UserSecretsId` of `perfpilot-aspire-apphost`.
+Always pass `--id perfpilot-aspire-apphost` when running `dotnet user-secrets`
+commands from the repository root.
 
 ### Setting every required secret
 
@@ -138,13 +136,31 @@ dotnet user-secrets set "Parameters:dd-app-key"      "<dd-app-key>"             
 dotnet user-secrets set "Parameters:dd-api-base-url" "<https://api.datadoghq.com>" --id perfpilot-aspire-apphost
 
 # ── Confluence MCP (v2 API) ──────────────────────────────────────────────
-dotnet user-secrets set "Parameters:confluence-v2-base-url"  "<https://yourcompany.atlassian.net/wiki>" --id perfpilot-aspire-apphost
-dotnet user-secrets set "Parameters:confluence-v2-user"      "<name@company.com>"                       --id perfpilot-aspire-apphost
+dotnet user-secrets set "Parameters:confluence-v2-base-url"  "<https://example.atlassian.net/wiki>"    --id perfpilot-aspire-apphost
+dotnet user-secrets set "Parameters:confluence-v2-user"      "<name@example.com>"                      --id perfpilot-aspire-apphost
 dotnet user-secrets set "Parameters:confluence-v2-api-token" "<confluence-api-token>"                   --id perfpilot-aspire-apphost
 
 # ── AI Assistant / SCM integration ───────────────────────────────────────
 dotnet user-secrets set "Parameters:github-personal-access-token" "<github-personal-access-token>" --id perfpilot-aspire-apphost
 ```
+
+### Optional secrets (commented out in `apphost.cs`)
+
+The Playwright certificate and JMeter JKS keystore parameters are commented
+out in `apphost.cs` by default. Only uncomment and set these if your test
+environment requires mTLS or a password-protected JKS keystore:
+
+```powershell
+# ── Playwright MCP (certificate handling) ────────────────────────────────
+dotnet user-secrets set "Parameters:playwright-cert-passphrase"     "<passphrase>" --id perfpilot-aspire-apphost
+dotnet user-secrets set "Parameters:playwright-cert-auto-select-cn" "<cert-cn>"    --id perfpilot-aspire-apphost
+
+# ── JMeter MCP (JKS keystore) ────────────────────────────────────────────
+dotnet user-secrets set "Parameters:jmeter-jks-pwd" "<jks-password>" --id perfpilot-aspire-apphost
+```
+
+> After setting these, also uncomment the matching `AddParameter` and
+> `.WithEnvironment(...)` lines in `aspire/apphost.cs`.
 
 ### Verifying what's stored
 
@@ -179,8 +195,8 @@ cd aspire
 aspire run
 ```
 
-Aspire prints a dashboard URL (defaults to `https://localhost:17123` or a
-nearby port). Open it to:
+Aspire prints a dashboard URL (defaults to `https://localhost:17014` or
+`http://localhost:15233`). Open it to:
 
 * Watch each resource go from `Starting` → `Running` → `Healthy`
 * Stream logs per resource
@@ -225,8 +241,7 @@ curl http://localhost:8125/perfpilot-mcp-perfmemory/health
 curl http://localhost:8117/mcp
 ```
 
-Open the frontend at the port shown in the Aspire dashboard (base path
-`/perfpilot-ui`).
+Open the frontend at the port shown for `perfpilot-ui` in the Aspire dashboard.
 
 ---
 
@@ -348,22 +363,12 @@ Aspire fails fast with a clear message. Start Docker Desktop and re-run.
 
 ### Playwright certificate errors
 
-If browser automation hangs or fails on first HTTPS request, confirm the
-`playwright-cert-passphrase` and `playwright-cert-auto-select-cn` secrets
-are set and that the certificate files referenced by the Playwright MCP
-container are mounted at the paths expected by `docker/playwright-mcp/`.
+If browser automation hangs or fails on first HTTPS request and your test
+environment requires client certificates, confirm the cert parameters are
+uncommented in `apphost.cs` and the matching secrets are set. See
+[Optional secrets](#optional-secrets-commented-out-in-apphostcs) above.
 
 ---
-
-## ☁️ Production Deployment
-
-Locally: `dotnet user-secrets`. In the cloud: **HashiCorp Vault** is the
-source of record for every secret. The same `Parameters:<name>` keys
-declared in `apphost.cs` are populated as environment variables inside each
-container at startup — the AppHost code and resource definitions do not
-change between environments; only the source of configuration does.
-
-No `.env` files are involved in either environment.
 
 ---
 
