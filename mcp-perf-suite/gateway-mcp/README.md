@@ -5,8 +5,8 @@ agents a single endpoint into the performance testing lifecycle, routing them to
 specialized MCP servers for JMeter, BlazeMeter, Datadog, analysis, reporting,
 collaboration, and debugging memory.
 
-Built on FastMCP v3.4.x's `create_proxy()` composition — each server runs as its own
-subprocess with full process isolation. No shared dependencies, no import conflicts.
+Built on FastMCP v3.4.x's `create_proxy()` composition — each MCP server is
+proxied through the gateway with full isolation.
 
 > "Connect your AI agent to **PerfPilot Hub** and get the full performance testing
 > toolchain through one MCP endpoint."
@@ -20,30 +20,34 @@ subprocess with full process isolation. No shared dependencies, no import confli
 │  Cursor / Claude / AI Agent                             │
 │  (connects to ONE MCP endpoint)                         │
 └───────────────────────────┬─────────────────────────────┘
-                            │ stdio (local) or http (docker)
+                            │ stdio (local) or http (Aspire/Docker)
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │  PerfPilot Hub                                          │
-│  gateway-mcp/gateway.py                                 │
+│  gateway-mcp/gateway.py               port 8125 (http)  │
 │  FastMCP("perfpilot-hub")                               │
 ├─────────────────────────────────────────────────────────┤
-│  9 servers mounted via create_proxy() subprocesses:     │
+│  8 servers mounted via create_proxy():                  │
 │                                                         │
 │  ⚡ jmeter       │ 🔥 blazemeter  │ 📊 datadog         │
 │  🔬 perfanalysis │ 📝 perfreport  │ 📚 confluence      │
-│  🧠 perfmemory   │ 💬 msteams     │ 📁 sharepoint      │
+│  🧠 perfmemory   │ 🐙 github                           │
 └─────────────────────────────────────────────────────────┘
+
+Not gateway-mounted (require browser-based auth):
+  💬 msteams   │ 📁 sharepoint
 ```
 
-Each server uses its **own virtual environment** and runs independently — exactly
-as it does in standalone mode.
+In **stdio mode** (local Cursor), each server runs as its own subprocess.
+In **http mode** (Aspire / Docker), the gateway proxies to each MCP server's
+HTTP endpoint.
 
 ---
 
 ## 📋 Prerequisites
 
 - ✅ Python 3.12+
-- ✅ All 9 MCP servers set up with their own `.venv` and dependencies installed
+- ✅ All 8 gateway-mounted MCP servers set up with their own `.venv` and dependencies installed
 - ✅ FastMCP v3.4.x+ installed in the gateway venv
 
 ---
@@ -117,12 +121,12 @@ PerfPilot Hub is configured via `config.yaml`:
 ```yaml
 server:
   name: "perfpilot-hub"
-  transport: "stdio"       # "stdio" for local, "http" for future Docker/A2A
+  transport: "stdio"       # "stdio" for local, "http" for Aspire/Docker
   host: "0.0.0.0"
-  port: 8000
+  port: 8125
 
 servers:
-  # Core servers (always enabled)
+  # Core servers (gateway-mounted)
   jmeter: true
   blazemeter: true
   datadog: true
@@ -130,9 +134,10 @@ servers:
   perfreport: true
   confluence: true
   perfmemory: true
-  # Local-only servers
-  msteams: true
-  sharepoint: true
+  github: true
+  # Not gateway-mounted (browser-based auth)
+  # msteams: false
+  # sharepoint: false
 ```
 
 ### 🔀 Environment Variable Overrides
@@ -141,7 +146,7 @@ servers:
 |----------|---------|-------------|
 | `GATEWAY_TRANSPORT` | `stdio` | Transport mode: `stdio` or `http` |
 | `GATEWAY_HOST` | `0.0.0.0` | Bind address (http mode only) |
-| `GATEWAY_PORT` | `8000` | Listen port (http mode only) |
+| `GATEWAY_PORT` | `8125` | Listen port (http mode only) |
 
 ---
 
@@ -158,14 +163,16 @@ All tools are namespaced with their server prefix:
 | 📝 PerfReport | `perfreport` | `perfreport_create_performance_test_report` |
 | 📚 Confluence | `confluence` | `confluence_publish_page` |
 | 🧠 PerfMemory | `perfmemory` | `perfmemory_store_debug_session` |
-| 💬 MS Teams | `msteams` | `msteams_teams_send_message` |
-| 📁 SharePoint | `sharepoint` | `sharepoint_sharepoint_upload_file` |
+| 🐙 GitHub | `github` | `github_push_jmx_to_branch` |
+
+> **Not gateway-mounted:** MS Teams (`msteams`) and SharePoint (`sharepoint`)
+> require browser-based authentication and are accessed directly when configured.
 
 ---
 
 ## 🔌 Cursor Integration
 
-Once PerfPilot Hub is tested, replace all 9 MCP entries in `mcp.json` with one:
+Once PerfPilot Hub is tested, replace all individual MCP entries in `mcp.json` with one:
 
 ```json
 {
