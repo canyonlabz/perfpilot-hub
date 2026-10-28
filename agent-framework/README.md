@@ -102,7 +102,7 @@ flowchart LR
     end
 
     subgraph hub [PerfPilot Hub]
-        GW[Gateway MCP<br/>+ 7 tool MCPs]
+        GW[Gateway MCP<br/>+ 8 tool MCPs]
     end
 
     subgraph backends [External Systems]
@@ -215,10 +215,10 @@ protocols** at every layer:
   `AGUIStream`, with CopilotKit as the React frontend of choice but
   technology-agnostic by URL contract (`/api/perfpilot/chat` instead
   of `/api/copilotkit/...`).
-- **OIDC / JWT** ready for upstream authentication. The Epic 3 identity
-  resolver accepts any verifying middleware (Azure Container Apps Easy
-  Auth, oauth2-proxy, AWS ALB + Cognito, GCP IAP, on-prem mTLS — your
-  choice) without any vendor SDK imports in the agent layer.
+- **OIDC / JWT** ready for upstream authentication. The identity
+  resolver accepts any verifying middleware (oauth2-proxy, reverse-proxy
+  mTLS, cloud-native auth — your choice) without any vendor SDK imports
+  in the agent layer.
 
 The agent code does not care what cloud you deploy it to, what LLM you
 plug in, what testing tools you swap behind PerfPilot Hub, or what
@@ -249,9 +249,9 @@ and multiple concurrent AI frameworks calling the same backend safely:
   mints a conversation id for the client.
 - **Forward-compatible with cloud auth.** The identity resolver is a
   four-step chain (upstream-auth placeholder → `X-PerfPilot-Token` header →
-  `perfpilot_token` cookie → freshly minted token). Epic 4 lights up the
-  top step with any OIDC/JWT verifier without touching the resolver
-  chain or the downstream owner-filtering logic.
+  `perfpilot_token` cookie → freshly minted token). Adding an OIDC/JWT
+  verifier lights up the top step without touching the resolver chain
+  or the downstream owner-filtering logic.
 
 ---
 
@@ -298,106 +298,44 @@ function call that specialists invoke when they need a green light.
 
 - Python 3.12+
 - Node.js 25.x and npm 11.x (for the Web UI)
-- Docker Desktop (for the database and MCP gateway containers)
-- PostgreSQL 18 with pgvector + Apache AGE (existing
-  `Dockerfile.pgvector-age.example` image works as-is — the
-  `perfagent_state` database is provisioned additively on the same instance)
+- PostgreSQL 18 with pgvector + Apache AGE
+- Docker Desktop (Aspire launches containers through Docker)
+- .NET SDK 10.0 and [Aspire CLI 13.6+](https://aspire.dev) (recommended
+  orchestrator)
 - An LLM provider: OpenAI API key, Azure OpenAI deployment, or a local
   Ollama instance
 
-### Running the Web UI
+### Recommended: start with Aspire
 
-The PerfPilot Web UI is a Next.js chat interface that connects to the AG-UI
-backend. Services must be started **in order** — each depends on the previous:
+Aspire starts the full stack — database, all MCP servers, agent backends,
+and the Web UI — with a single command:
 
-#### Step 1 — Start the database and MCP gateway (Docker)
-
-```bash
-# Windows:
-docker compose -f docker/docker-compose-full-windows.yaml up -d
-
-# macOS:
-docker compose -f docker/docker-compose-full-mac.yaml up -d
+```powershell
+cd aspire
+aspire run
 ```
 
-The "FULL" compose variant starts both the **PerfMemory PostgreSQL** database
-(which includes the `perfagent_state` database for threads, sessions, and
-conversation history) and the **Gateway MCP** (the unified MCP endpoint that
-agents route tool calls through).
+See [`aspire/README.md`](../aspire/README.md) for commands and
+[`docs/aspire/aspire-setup-guide.md`](../docs/aspire/aspire-setup-guide.md)
+for first-time secrets setup.
 
-Wait until all containers are healthy before proceeding.
+### Alternative: Docker Compose
 
-> **First time only:** If the `perfagent_state` database has not been
-> provisioned yet, run: `python agent-framework/sql/provision.py`
+If you prefer Docker Compose, see [`docker/README.md`](../docker/README.md)
+for the full-stack compose files and `.env` setup.
 
-#### Step 2 — Start the AG-UI backend (Python)
+### Quick reference
 
-```bash
-cd agent-framework
-python agui_server.py
-```
-
-Starts the AG-UI bridge on **port 8102**. Wait for:
-```
-INFO:     Uvicorn running on http://0.0.0.0:8102 (Press CTRL+C to quit)
-```
-
-#### Step 3 — Start the Web UI frontend (Node.js)
-
-```bash
-cd agent-framework/frontend/ui
-npm install    # first time only
-npm run dev
-```
-
-Starts the Next.js dev server on **port 3000**. Wait for:
-```
-✓ Ready in Xs
-```
-
-Open `http://localhost:3000` in your browser. You should see the PerfPilot
-chat interface with a green "Connected" badge in the header.
-
-#### Stopping (reverse order)
-
-1. Stop the frontend: `Ctrl+C` in the frontend terminal
-2. Stop the backend: `Ctrl+C` in the backend terminal
-3. Stop Docker: `docker compose -f docker/docker-compose-full-windows.yaml down`
-
-#### Quick reference
-
-| Service | Port | Start command | Started from |
-|---------|------|---------------|--------------|
-| PerfMemory DB + Gateway MCP | 5432, varies | `docker compose -f docker/docker-compose-full-*.yaml up -d` | repo root |
-| AG-UI backend | 8102 | `python agui_server.py` | `agent-framework/` |
-| Web UI frontend | 3000 | `npm run dev` | `agent-framework/frontend/ui/` |
-| A2A server (optional) | 8101 | `python a2a_server.py` | `agent-framework/` |
-
-> The A2A server (port 8101) is only needed for agent-to-agent
-> communication and the upcoming Agent Catalog panel. The chat interface
-> works without it.
+| Service | Default port | Notes |
+|---------|-------------|-------|
+| PostgreSQL | 5432 | pgvector + Apache AGE |
+| A2A server | 8101 | Agent-to-agent communication |
+| AG-UI backend | 8102 | CopilotKit bridge |
+| Gateway MCP | 8125 | Aggregates 8 tool MCPs |
+| Web UI frontend | dynamic (Aspire) / 8080 (Compose) | Next.js + CopilotKit |
 
 For more details on the Web UI, see
 [`frontend/ui/README.md`](./frontend/ui/README.md).
-
-#### Changing ports (avoiding conflicts)
-
-The default ports may already be in use (e.g., by another AI Agent framework on
-the same machine). All ports are configurable via environment variables —
-hardcoded fallbacks exist only as defaults when the env var is unset.
-
-| Service | Default port | Env var | Additional files to update |
-|---------|-------------|---------|---------------------------|
-| Frontend dev server | 3000 | CLI: `npm run dev -- --port 3001` | Update `AGUI_CORS_ORIGINS` in `.env` to include the new origin |
-| AG-UI backend | 8102 | `AGUI_PORT` | `frontend/ui/next.config.js` (2 proxy destinations), `frontend/ui/app/api/copilotkit/route.ts` (HttpAgent URL) |
-| A2A server | 8101 | `A2A_PORT` | Orchestrator specialist delegation is in-process; no extra A2A base URL is required |
-| Gateway MCP | 8000 | `GATEWAY_MCP_URL` | — (fully env-driven) |
-| PostgreSQL | 5432 | `PERFAGENT_STATE_PORT` | — (fully env-driven) |
-| CORS origins | localhost:3000 | `AGUI_CORS_ORIGINS` | — (comma-separated list of allowed origins) |
-
-See `.env.example` for the complete environment template, and
-[`frontend/ui/README.md` — Changing Ports](./frontend/ui/README.md#changing-ports)
-for step-by-step instructions.
 
 ### Project structure
 
@@ -417,7 +355,7 @@ imports, four-file pattern), and per-agent config schema, see
 | **AG-UI / CopilotKit bridge** (port 8102) — `/copilotkit/`, sessions, runs, events, HITL, thread CRUD | ✅ Working | Backend complete with real orchestrator at `/copilotkit/` and DB-loaded conversation history; Next.js + CopilotKit React frontend operational |
 | Multi-user isolation (Alice cannot see Bob's data) | ✅ Working | Owner-filtering on every read endpoint; Bob-vs-Alice isolation blocks across all sessions / runs / events / HITL / thread endpoints |
 | Persistent threads (ChatGPT-style multi-day resumption) | ✅ Working | DB-loaded conversation history wired on BOTH the AG-UI `/copilotkit/` surface AND the A2A SendMessage surface; close your browser, come back tomorrow, the conversation continues |
-| Identity resolver (vendor-neutral, Epic 4-ready) | ✅ Working | Four-step chain: upstream-auth → `X-PerfPilot-Token` → `perfpilot_token` cookie → freshly minted token |
+| Identity resolver (vendor-neutral, auth-ready) | ✅ Working | Four-step chain: upstream-auth → `X-PerfPilot-Token` → `perfpilot_token` cookie → freshly minted token |
 | 🎯 Orchestrator agent | ✅ Working | Real AG2 `ConversableAgent` with all four delegation tools wired (`list_available_specialists`, `delegate_to_specialist`, `check_task_status`, `request_human_approval`); `metadata.status: available`; HITL approval round-trip end-to-end proven |
 | **FastMCP `StreamableHttpTransport` client** (`utils/mcp_client.py`) | ✅ Working | Routes every agent's tool calls through PerfPilot Hub with per-agent namespace allowlist filtering (`PermissionError` raised before network round-trip for out-of-allowlist calls); `<ns>_` prefix matching defends against prefix-collision edge cases |
 | 🚀 Execution agent (BlazeMeter) — first vertical slice | ✅ Working | Three vendor-agnostic tools live (`start_performance_test` / `wait_for_completion` / `extract_test_run_artifacts`); `metadata.status: available`; **first live BlazeMeter end-to-end run proven on 2026-06-14** (all 6 artifact-extraction steps succeeded); orchestrator-to-execution-agent A2A contract proven with **zero orchestrator code changes** |
@@ -427,11 +365,11 @@ imports, four-file pattern), and per-agent config schema, see
 | 📄 Reporting agent (with multi-round HITL revision) | ✅ Working | Drafts performance reports via `perfreport` MCP namespace; publishes to Confluence via `confluence` namespace; supports multi-round HITL revision workflow |
 | 📣 Notifications agent (vendor-neutral events) | 🔮 Pending | Emits `TestRunCompleted` events; MS Teams and SharePoint adapters wired via `msteams` and `sharepoint` MCP namespaces |
 | CopilotKit React frontend (Next.js 15 + AG-UI) | 🟡 In progress | Chat interface, thread management, persistent history, and streaming all working; agent catalog, task streaming, HITL UI, token usage indicator, and results display coming next. See [`frontend/ui/README.md`](./frontend/ui/README.md) |
-| Docker compose for the full stack (`docker-compose-full-*.yaml`) | ✅ Working | Three services: PerfMemory DB (PostgreSQL + pgvector + AGE), Gateway MCP, Playwright MCP. Platform variants for Windows and macOS |
-| Auth + OpenTelemetry hooks (default-off, Epic 4-ready) | 🟡 Hooks reserved | Placeholders in place; activation deferred to cloud deployment |
-| Azure Container Apps / EntraID / Key Vault deployment | 🔮 Epic 4 | Vendor-agnostic by design — other clouds and auth providers are first-class targets |
+| Docker Compose / Aspire orchestration | ✅ Working | Full stack via `aspire run` (recommended) or `docker compose` (alternative). Platform variants for Windows and macOS |
+| Auth + OpenTelemetry hooks (default-off) | 🟡 Hooks reserved | Placeholders in place; activation deferred to cloud deployment |
+| Cloud deployment | 🔮 Planned | Vendor-agnostic by design — any cloud and auth provider are first-class targets |
 | End-to-end workflows (`workflows/e2e_perf_pipeline.py` etc.) | 🟡 In progress | Agent-to-agent pipelines (extraction, analysis-report, comparison) orchestrating multi-specialist handoffs |
-| `Dockerfile.agents` + production-grade container | 🔮 Later epic | Local dev today; container hardening with the cloud-deploy milestone |
+| `Dockerfile.agents` + production-grade container | 🔮 Planned | Local dev today; container hardening with the cloud-deploy milestone |
 
 **Legend:** ✅ working today · 🟡 in progress · ⏭ next up · 🔮 later
 milestone
