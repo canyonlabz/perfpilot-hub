@@ -89,62 +89,41 @@ The dev server starts on `http://localhost:3000`. Open this in your browser.
 
 ## Startup Order
 
-The PerfPilot Web UI depends on several backend services that must be started
-in sequence:
+The Web UI requires the AG-UI backend (port 8102), the database, and the
+MCP gateway to be running. The simplest way to start everything is with
+**.NET Aspire**:
 
-### Step 1 — Start the database and MCP gateway
-
-```bash
-# From the repo root — use the FULL compose variant
-# Windows:
-docker compose -f docker/docker-compose-full-windows.yaml up -d
-
-# macOS:
-docker compose -f docker/docker-compose-full-mac.yaml up -d
+```powershell
+cd aspire
+aspire run
 ```
 
-This starts:
-- **PerfMemory PostgreSQL** (pgvector + AGE) — includes the `perfagent_state`
-  database used by the agent framework for threads, sessions, and conversation
-  history
-- **Gateway MCP** — the unified MCP endpoint that agents route tool calls through
+Aspire starts the database, every MCP server, both agent backends, **and**
+the frontend automatically. Open the Aspire dashboard to find the frontend
+URL (the `perfpilot-ui` resource).
 
-Wait until the containers are healthy before proceeding.
+See [`aspire/README.md`](../../../aspire/README.md) for commands and
+[`docs/aspire/aspire-setup-guide.md`](../../../docs/aspire/aspire-setup-guide.md)
+for first-time secrets setup.
 
-### Step 2 — Start the AG-UI backend
+> **Alternative:** If you prefer Docker Compose, see
+> [`docker/README.md`](../../../docker/README.md). After starting Compose,
+> launch the backend and frontend manually:
+>
+> ```bash
+> # Terminal 1 — AG-UI backend
+> cd agent-framework && python agui_server.py
+>
+> # Terminal 2 — Frontend
+> cd agent-framework/frontend/ui && npm run dev
+> ```
 
-```bash
-cd agent-framework
-python agui_server.py
-```
+### What to look for
 
-This starts the AG-UI bridge on **port 8102**, which:
-- Serves the `/copilotkit/` SSE streaming endpoint
-- Hosts thread CRUD under `/api/threads/*`
-- Hosts the conversation message history under `/api/threads/{id}/messages`
-- Connects to PostgreSQL for persistent conversation state
-- Dispatches to the real AG2 orchestrator agent
-
-Wait for `Uvicorn running on http://0.0.0.0:8102` before proceeding.
-
-### Step 3 — Start the frontend
-
-```bash
-cd agent-framework/frontend/ui
-npm run dev
-```
-
-Open `http://localhost:3000` in your browser. You should see:
+Once running, open the frontend in your browser. You should see:
 - A green "Connected" badge in the header
 - A thread sidebar on the left
 - The chat panel ready for input
-
-### Stopping
-
-Stop in reverse order:
-1. Stop the frontend (`Ctrl+C`)
-2. Stop the backend (`Ctrl+C`)
-3. Stop the Docker containers: `docker compose -f docker/docker-compose-full-windows.yaml down`
 
 ---
 
@@ -278,7 +257,7 @@ AGUI_CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
 | AG-UI backend | 8102 | `AGUI_PORT` | `next.config.js`, `route.ts` |
 | A2A server | 8101 | `A2A_PORT` | Orchestrator specialist delegation is in-process |
 | CORS origins | localhost:3000 | `AGUI_CORS_ORIGINS` | `agui_server.py` (fallback list) |
-| Gateway MCP | 8000 | `GATEWAY_MCP_URL` | `.env` |
+| Gateway MCP | 8125 | `GATEWAY_MCP_URL` | `.env` |
 | PostgreSQL | 5432 | `PERFAGENT_STATE_PORT` | `.env` |
 
 > **Tip:** All backend port settings read from environment variables first,
