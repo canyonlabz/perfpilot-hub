@@ -26,6 +26,8 @@ are retired, and inbound messages follow A2A v1.0.0.
 - [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
 - [🪪 13. A2A Agent Cards](#13-a2a-agent-cards)
 - [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
+- [📖 15. Public documentation refresh](#15-public-documentation-refresh)
+- [🚀 16. .NET Aspire orchestration](#16-net-aspire-orchestration)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -225,6 +227,51 @@ lives under `tests/agent_framework/a2a/`.
 
 ---
 
+## 📖 15. Public documentation refresh
+
+All public-facing READMEs updated to reflect .NET Aspire as the recommended
+local orchestration path and to use open-source-friendly language throughout.
+
+**Files updated:**
+
+| File | Key changes |
+|------|-------------|
+| `README.md` | Aspire-first getting started, architecture diagram with 8 gateway-mounted MCPs, corrected repo tree (`aspire/`, `tests/`, `github-mcp/`) |
+| `docs/aspire/aspire-setup-guide.md` | Fixed resource names and count (14), dashboard URL (`17014`), moved cert/JKS secrets to optional, removed Vault/cloud claims |
+| `aspire/README.md` | Fixed resource count (14) |
+| `docker/README.md` | Added Aspire banner, removed Phase 1/2 language and Vault references, Compose positioned as supported alternative |
+| `agent-framework/README.md` | Aspire-first startup, fixed gateway port (`8125`), removed Epic/Azure/EntraID/Key Vault references |
+| `agent-framework/frontend/ui/README.md` | Aspire-first startup order, fixed gateway port (`8125`) |
+| `docs/README.md` | Rebuilt guide index from actual file tree with categorized tables |
+
+---
+
+## 🚀 16. .NET Aspire orchestration
+
+Added .NET Aspire as the recommended local orchestration path
+([PR #11](https://github.com/canyonlabz/perfpilot-hub/pull/11)).
+
+A single-file C# AppHost (`aspire/apphost.cs`) using Aspire 13.x `#:sdk`
+directives starts **14 resources** — PostgreSQL, 9 MCP servers, the gateway,
+both agent backends, and the frontend — with one command (`aspire run`).
+Secrets are managed via `dotnet user-secrets` with
+`UserSecretsId = perfpilot-aspire-apphost`.
+
+**Files added:**
+
+| File | Purpose |
+|------|---------|
+| `aspire/apphost.cs` | Single-file AppHost — resources, env vars, secrets, health waits |
+| `aspire/aspire.config.json` | Project-level Aspire config |
+| `aspire/apphost.run.json` | Dev launch profiles (dashboard on `https://localhost:17014`) |
+| `aspire/README.md` | Quick-start guide and command reference |
+| `docs/aspire/aspire-setup-guide.md` | Full setup walkthrough — prerequisites, secrets, smoke checks, troubleshooting |
+
+Docker Compose remains supported as an alternative for contributors who
+prefer it or cannot run .NET Aspire.
+
+---
+
 ## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
@@ -241,4 +288,4 @@ lives under `tests/agent_framework/a2a/`.
 
 ---
 
-*Last Updated: October 21, 2026* ✨
+*Last Updated: October 27, 2026* ✨
