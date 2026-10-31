@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, FormEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, FormEvent } from "react";
 import { useCopilotChat, useCopilotReadable } from "@copilotkit/react-core";
 import { TextMessage, Role } from "@copilotkit/runtime-client-gql";
 import ReactMarkdown from "react-markdown";
@@ -108,7 +108,19 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
     null
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevLoadingRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    if (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content")) {
+      return;
+    }
+    textarea.style.height = "auto";
+    const max = parseFloat(getComputedStyle(textarea).maxHeight) || 400;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, max)}px`;
+  }, [input]);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,6 +310,7 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
       <div className="pp-composer-wrap shrink-0">
         <form onSubmit={handleSend} className="pp-composer">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

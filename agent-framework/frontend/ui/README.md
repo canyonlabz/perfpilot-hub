@@ -140,7 +140,11 @@ Once running, open the frontend in your browser. You should see:
 | Markdown rendering for agent responses (react-markdown + remark-gfm) | Done | 
 | Real-time streaming with inline "thinking" indicator | Done |
 | Single unified chat pane (no dual-pane split) | Done | 
-| Stop generation button | Done | 
+| Stop generation button | Done |
+| YAML-aligned light/dark/auto theme (pre-paint) | Done |
+| Chat shell matching the approved mock | Done |
+| Composer autosize (`field-sizing` + fallback) | Done |
+| Settings page shell (Projects / Secrets / Preferences / Profile) | Done | 
 
 ### Architecture
 
@@ -170,7 +174,10 @@ Browser (localhost:3000)
 | `app/api/copilotkit/route.ts` | CopilotKit Runtime API route — proxies to AG-UI backend with cookie forwarding |
 | `components/chat/chat-panel.tsx` | Unified chat panel — DB history + live streaming + react-markdown; also exposes attached GitHub SCM metadata to the orchestrator via `useCopilotReadable` |
 | `components/sidebar/thread-sidebar.tsx` | Thread list with CRUD operations |
-| `components/layout/header.tsx` | PerfPilot header with health indicator + Agents / Tasks / GitHub toggle buttons |
+| `components/layout/header.tsx` | PerfPilot header — Runs / Agents / Tasks / GitHub + Settings pill + status |
+| `app/settings/page.tsx` | Settings shell — Projects, Secrets, Preferences, Profile (visual tabs; theme control is live) |
+| `lib/theme-config.ts` | Theme palettes and `perfpilot.theme` contract |
+| `lib/theme-applier.ts` | Pre-paint script that sets CSS variables on `<html>` |
 | `components/github/github-creds-card.tsx` | Session-only GitHub credential capture card (URL + PAT + optional branch/path) with privacy disclosures |
 | `lib/api.ts` | API helpers (health, threads, messages) |
 | `lib/github-creds.ts` | AES-256-GCM encrypted, session-scoped storage for GitHub credentials via Web Crypto API |
@@ -188,7 +195,8 @@ Browser (localhost:3000)
 | HITL approve/reject inline cards | Completed |
 | GitHub credentials card (session-scoped, encrypted, drives new-JMX pipeline) | Completed |
 | Test-run results display (`/runs` pages) | In Progress |
-| Polish — dark/light mode, responsive layout, skeletons, error boundaries | Not started |
+| Theme — Auto / Light / Dark from Settings → Preferences | Completed |
+| Polish — responsive layout, skeletons, error boundaries | Not started |
 
 ---
 

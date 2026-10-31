@@ -28,6 +28,7 @@ are retired, and inbound messages follow A2A v1.0.0.
 - [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
 - [📖 15. Public documentation refresh](#15-public-documentation-refresh)
 - [🚀 16. .NET Aspire orchestration](#16-net-aspire-orchestration)
+- [🎨 17. Web UI visual port](#17-web-ui-visual-port)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -272,6 +273,18 @@ prefer it or cannot run .NET Aspire.
 
 ---
 
+## 🎨 17. Web UI visual port
+
+The live frontend now matches the approved chat and Settings mocks.
+
+- YAML-aligned color tokens apply before first paint (`perfpilot.theme` in `localStorage`, Auto follows the OS).
+- Chat chrome: right-aligned nav, Settings pill, conversation bubbles, Perplexity-style composer with `field-sizing: content` and a `scrollHeight` fallback.
+- `/settings` has Projects, Secrets, Preferences, and Profile as visual shells. Only the theme control is wired. Secrets stay dummy masks — no `/api/secrets`, `/api/me`, or project persistence.
+
+**Files added:** `lib/theme-config.ts`, `lib/theme-applier.ts`, `lib/theme-preference.ts`, `lib/settings-demo.ts`, `components/theme/theme-runtime.tsx`, `app/settings/page.tsx`, `components/settings/*`.
+
+---
+
 ## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
@@ -288,4 +301,4 @@ prefer it or cannot run .NET Aspire.
 
 ---
 
-*Last Updated: October 27, 2026* ✨
+*Last Updated: October 31, 2026* ✨
