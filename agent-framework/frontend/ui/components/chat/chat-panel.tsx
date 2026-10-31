@@ -12,6 +12,7 @@ import {
   subscribeToCredsChanges,
   type GitHubCredsMetadata,
 } from "@/lib/github-creds";
+import { ArrowUp, Check, Mic, Plus, Square } from "lucide-react";
 
 interface ChatPanelProps {
   threadId: string | null;
@@ -50,18 +51,12 @@ function MessageBubble({
 }) {
   const isUser = role === "user";
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3`}>
-      <div
-        className={`max-w-[80%] rounded-lg px-4 py-2 text-sm ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground"
-        }`}
-      >
+    <div className="pp-msg-row" data-role={isUser ? "user" : "assistant"}>
+      <div className="pp-msg" data-role={isUser ? "user" : "assistant"}>
         {isUser ? (
           <span className="whitespace-pre-wrap">{content}</span>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {content}
             </ReactMarkdown>
@@ -80,25 +75,20 @@ function ToolCallBubble({ name, args }: { name: string; args?: Record<string, un
 
   if (isDelegation) {
     return (
-      <div className="flex justify-start mb-3">
-        <div className="max-w-[80%] rounded-lg px-3 py-2 text-xs bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-          <span className="font-medium">Task delegated</span>
-          {targetAgent && (
-            <span> to {targetAgent}</span>
-          )}
-          <span className="text-blue-500 dark:text-blue-400 ml-1">
-            — check Tasks panel for progress
-          </span>
-        </div>
+      <div className="pp-chip-row">
+        <span className="pp-chip">
+          <Check className="h-3 w-3" />
+          Task delegated to {targetAgent ?? "specialist"}
+        </span>
       </div>
     );
   }
 
   return (
-    <div className="flex justify-start mb-3">
-      <div className="max-w-[80%] rounded-lg px-3 py-1.5 text-xs bg-muted/50 text-muted-foreground border border-dashed">
+    <div className="pp-chip-row">
+      <span className="pp-chip">
         Using tool: <span className="font-mono">{name}</span>
-      </div>
+      </span>
     </div>
   );
 }
@@ -233,7 +223,7 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
 
   if (!threadId) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground">
+      <div className="pp-chat flex-1 flex items-center justify-center text-[var(--text-muted)]">
         <p className="text-sm">
           Select a thread or create a new one to start chatting.
         </p>
@@ -242,20 +232,16 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4"
-      >
+    <div className="pp-chat flex-1 flex flex-col h-full overflow-hidden">
+      <div ref={scrollRef} className="pp-messages flex-1 overflow-y-auto">
         {!historyLoaded && (
           <div className="flex items-center justify-center py-8">
-            <p className="text-sm text-muted-foreground animate-pulse">
+            <p className="text-sm text-[var(--text-muted)] animate-pulse">
               Loading conversation...
             </p>
           </div>
         )}
 
-        {/* DB history — ALWAYS shown */}
         {historyMessages.map((msg) => (
           <MessageBubble
             key={`db-${msg.id}`}
@@ -268,12 +254,11 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
           historyMessages.length > 0 &&
           liveMessages.length === 0 &&
           !isLoading && (
-            <div className="text-center text-xs text-muted-foreground py-2">
+            <div className="pp-divider">
               End of history — continue the conversation below
             </div>
           )}
 
-        {/* Live CopilotKit messages — shown when streaming or new messages */}
         {liveMessages.map((msg) => {
           if (msg.isTextMessage()) {
             return (
@@ -300,39 +285,66 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
           liveMessages.filter(
             (m) => m.isTextMessage() && m.role !== Role.User
           ).length === 0 && (
-            <div className="flex justify-start mb-3">
-              <div className="bg-muted rounded-lg px-4 py-2 text-sm text-muted-foreground animate-pulse">
-                PerfPilot is thinking...
+            <div className="pp-msg-row" data-role="assistant">
+              <div className="pp-msg" data-role="assistant">
+                <p className="animate-pulse text-[var(--text-muted)]">
+                  PerfPilot is thinking...
+                </p>
               </div>
             </div>
           )}
       </div>
 
-      {/* Input area */}
-      <div className="shrink-0 border-t bg-background p-4">
-        <form onSubmit={handleSend} className="flex gap-2 items-end">
+      <div className="pp-composer-wrap shrink-0">
+        <form onSubmit={handleSend} className="pp-composer">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask PerfPilot anything about performance testing..."
-            className="flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm
-                       placeholder:text-muted-foreground focus-visible:outline-none
-                       focus-visible:ring-1 focus-visible:ring-ring min-h-[40px] max-h-[120px]"
-            rows={1}
+            placeholder="Ask PerfPilot anything about performance testing…"
+            className="pp-composer-input"
+            rows={2}
             disabled={isLoading}
+            aria-label="Message PerfPilot"
           />
-          <button
-            type={isLoading ? "button" : "submit"}
-            onClick={isLoading ? stopGeneration : undefined}
-            disabled={!isLoading && !input.trim()}
-            className="shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-medium
-                       text-primary-foreground hover:bg-primary/90
-                       disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-colors"
-          >
-            {isLoading ? "Stop" : "Send"}
-          </button>
+          <div className="pp-composer-actions">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="pp-icon-btn"
+                title="Attach file"
+                aria-label="Attach file"
+              >
+                <Plus className="h-[18px] w-[18px]" />
+              </button>
+              <span className="pp-composer-hint">
+                Enter to send · Shift+Enter for new line
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="pp-icon-btn"
+                title="Dictate"
+                aria-label="Dictate message"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+              <button
+                type={isLoading ? "button" : "submit"}
+                onClick={isLoading ? stopGeneration : undefined}
+                disabled={!isLoading && !input.trim()}
+                className="pp-send"
+                aria-label={isLoading ? "Stop generating" : "Send message"}
+              >
+                {isLoading ? (
+                  <Square className="h-3.5 w-3.5" />
+                ) : (
+                  <ArrowUp className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     </div>

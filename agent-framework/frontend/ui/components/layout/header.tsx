@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, CheckCircle2, XCircle, BookOpen, ListChecks, FlaskConical, Github } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import {
+  BookOpen,
+  ListChecks,
+  FlaskConical,
+  Github,
+  Settings,
+} from "lucide-react";
 import { fetchHealth } from "@/lib/api";
 
 type HealthStatus = "loading" | "healthy" | "unavailable";
@@ -16,6 +21,7 @@ interface HeaderProps {
   showGitHubCreds?: boolean;
   onToggleGitHubCreds?: () => void;
   gitHubCredsAttached?: boolean;
+  settingsActive?: boolean;
 }
 
 export function Header({
@@ -26,6 +32,7 @@ export function Header({
   showGitHubCreds,
   onToggleGitHubCreds,
   gitHubCredsAttached,
+  settingsActive,
 }: HeaderProps) {
   const [status, setStatus] = useState<HealthStatus>("loading");
 
@@ -50,56 +57,59 @@ export function Header({
   }, []);
 
   return (
-    <header className="flex items-center justify-between px-4 py-2 border-b bg-card">
-      <div className="flex items-center gap-2">
-        <Activity className="h-5 w-5 text-primary" />
-        <span className="font-semibold text-lg">PerfPilot</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <Link
-          href="/runs"
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-          title="Test Runs"
-        >
-          <FlaskConical className="h-3.5 w-3.5" />
-          Runs
-        </Link>
-        {onToggleCatalog && (
+    <header className="pp-header">
+      <Link href="/" className="pp-brand">
+        <span className="pp-brand-logo" aria-hidden="true">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 20V4h8a5 5 0 0 1 0 10H5" />
+          </svg>
+        </span>
+        PerfPilot
+      </Link>
+
+      <div className="pp-header-cluster">
+        <nav className="pp-nav" aria-label="Primary">
+          <Link href="/runs" className="pp-nav-item" title="Test Runs">
+            <FlaskConical className="h-3.5 w-3.5" />
+            Runs
+          </Link>
           <button
+            type="button"
+            className="pp-nav-item"
+            data-active={showCatalog ? "true" : undefined}
             onClick={onToggleCatalog}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-              showCatalog
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted text-muted-foreground hover:text-foreground"
-            }`}
+            disabled={!onToggleCatalog}
             title="Agent Catalog"
           >
             <BookOpen className="h-3.5 w-3.5" />
             Agents
           </button>
-        )}
-        {onToggleTasks && (
           <button
+            type="button"
+            className="pp-nav-item"
+            data-active={showTasks ? "true" : undefined}
             onClick={onToggleTasks}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-              showTasks
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted text-muted-foreground hover:text-foreground"
-            }`}
+            disabled={!onToggleTasks}
             title="Task Progress"
           >
             <ListChecks className="h-3.5 w-3.5" />
             Tasks
           </button>
-        )}
-        {onToggleGitHubCreds && (
           <button
+            type="button"
+            className="pp-nav-item"
+            data-active={showGitHubCreds ? "true" : undefined}
             onClick={onToggleGitHubCreds}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-              showGitHubCreds
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted text-muted-foreground hover:text-foreground"
-            }`}
+            disabled={!onToggleGitHubCreds}
             title={
               gitHubCredsAttached
                 ? "GitHub credentials attached — click to review or clear"
@@ -110,14 +120,23 @@ export function Header({
             GitHub
             {gitHubCredsAttached && (
               <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  showGitHubCreds ? "bg-primary-foreground" : "bg-emerald-500"
-                }`}
+                className="h-1.5 w-1.5 rounded-full bg-[var(--success)]"
                 aria-hidden
               />
             )}
           </button>
-        )}
+        </nav>
+
+        <Link
+          href="/settings"
+          className="pp-nav-item"
+          data-active={settingsActive ? "true" : undefined}
+          title="Settings"
+          aria-current={settingsActive ? "page" : undefined}
+        >
+          <Settings className="h-3.5 w-3.5" />
+          Settings
+        </Link>
         <HealthIndicator status={status} />
       </div>
     </header>
@@ -125,22 +144,17 @@ export function Header({
 }
 
 function HealthIndicator({ status }: { status: HealthStatus }) {
-  switch (status) {
-    case "loading":
-      return <Badge variant="secondary" className="text-xs">Connecting...</Badge>;
-    case "healthy":
-      return (
-        <Badge variant="success" className="flex items-center gap-1 text-xs">
-          <CheckCircle2 className="h-3 w-3" />
-          Connected
-        </Badge>
-      );
-    case "unavailable":
-      return (
-        <Badge variant="destructive" className="flex items-center gap-1 text-xs">
-          <XCircle className="h-3 w-3" />
-          Disconnected
-        </Badge>
-      );
-  }
+  const label =
+    status === "healthy"
+      ? "Connected"
+      : status === "unavailable"
+        ? "Disconnected"
+        : "Connecting...";
+
+  return (
+    <div className="pp-status" data-state={status}>
+      <span className="pp-status-dot" aria-hidden="true" />
+      {label}
+    </div>
+  );
 }

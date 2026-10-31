@@ -121,8 +121,8 @@ export default function HomePage() {
     return (
       <div className="flex flex-col h-screen">
         <Header />
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-sm text-muted-foreground animate-pulse">Loading...</p>
+        <div className="pp-chat flex-1 flex items-center justify-center">
+          <p className="text-sm text-[var(--text-muted)] animate-pulse">Loading...</p>
         </div>
       </div>
     );
@@ -156,7 +156,7 @@ export default function HomePage() {
             <ChatPanel threadId={activeThreadId} />
           </CopilotKit>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="pp-chat flex-1 flex items-center justify-center text-[var(--text-muted)]">
             <p className="text-sm">Select a thread to start chatting.</p>
           </div>
         )}
