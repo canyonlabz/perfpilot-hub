@@ -96,9 +96,9 @@ export const THEME_CONFIG: ThemeConfig = {
     themes: {
       light: {
         canvas: { background: "#fafaf9" },
-        /* Same ChatGPT-style user bubble in light and dark. */
+        /* Same ChatGPT-style steel-blue user bubble in light and dark. */
         user: {
-          background: "#2f2f2f",
+          background: "#3d5674",
           text: "#ffffff",
           code_background: "rgba(255,255,255,0.15)",
           code_text: "#ffffff",
@@ -120,7 +120,7 @@ export const THEME_CONFIG: ThemeConfig = {
       dark: {
         canvas: { background: "#09090b" },
         user: {
-          background: "#2f2f2f",
+          background: "#3d5674",
           text: "#ffffff",
           code_background: "rgba(255,255,255,0.18)",
           code_text: "#ffffff",

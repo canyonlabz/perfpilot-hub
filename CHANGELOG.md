@@ -278,7 +278,7 @@ prefer it or cannot run .NET Aspire.
 The live frontend now matches the approved chat and Settings mocks, plus Aspire review follow-up.
 
 - YAML-aligned color tokens apply before first paint (`perfpilot.theme` in `localStorage`, Auto follows the OS). Dark theme also sets the full token set in CSS so text stays light if the applier is late. Assistant markdown uses conversation text tokens instead of typography gray.
-- Chat chrome: right-aligned nav, Settings pill, ~960px conversation column, ChatGPT-style right-edge alignment, shared `#2f2f2f` user bubble in light and dark, Perplexity-style composer with `field-sizing: content` and a `scrollHeight` fallback.
+- Chat chrome: right-aligned nav, Settings pill, ~960px conversation column, ChatGPT-style right-edge alignment, shared `#3d5674` steel-blue user bubble in light and dark, Perplexity-style composer with `field-sizing: content` and a `scrollHeight` fallback.
 - `/settings` has Projects, Secrets, Preferences, and Profile as visual shells. Dummy project/secret rows are gone. Add-secret Component options are scoped to the focus area (including Confluence Cloud / On-Prem). Trash removes an in-session preview row. Project dropdowns list Secrets token names plus None selected. Only the theme control persists. No `/api/secrets`, `/api/me`, or project persistence.
 
 **Files added:** `lib/theme-config.ts`, `lib/theme-applier.ts`, `lib/theme-preference.ts`, `lib/settings-catalog.ts`, `components/theme/theme-runtime.tsx`, `app/settings/page.tsx`, `components/settings/*`.
