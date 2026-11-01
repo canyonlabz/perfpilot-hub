@@ -32,6 +32,7 @@
     --danger: #dc2626;
 
     --conv-canvas-bg: #fafaf9;
+    --conv-composer-bg: #e8eef4;
     --conv-user-bg: #3d5674;
     --conv-user-text: #ffffff;
     --conv-user-code-bg: rgba(255, 255, 255, 0.15);
@@ -69,6 +70,7 @@
     --danger: #ef4444;
 
     --conv-canvas-bg: #09090b;
+    --conv-composer-bg: #1c2430;
     --conv-user-bg: #3d5674;
     --conv-user-text: #ffffff;
     --conv-user-code-bg: rgba(255, 255, 255, 0.18);
@@ -424,12 +426,16 @@
   .pp-composer {
     max-width: 960px;
     margin: 0 auto;
-    background: var(--surface);
+    background: var(--conv-composer-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     overflow: hidden;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  [data-theme="light"] .pp-composer {
+    border-color: #a8a29e;
   }
 
   .pp-composer:focus-within {
