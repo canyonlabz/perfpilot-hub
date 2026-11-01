@@ -59,15 +59,11 @@ export function ThreadItem({
 
   return (
     <div
-      className={cn(
-        "group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors",
-        isActive
-          ? "bg-accent text-accent-foreground"
-          : "hover:bg-muted text-foreground"
-      )}
+      className={cn("pp-thread group", isActive && "font-medium")}
+      data-active={isActive ? "true" : undefined}
       onClick={() => !isEditing && onSelect(thread.thread_id)}
     >
-      <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-70" />
 
       {isEditing ? (
         <div className="flex-1 flex items-center gap-1">

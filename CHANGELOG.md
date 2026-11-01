@@ -28,6 +28,7 @@ are retired, and inbound messages follow A2A v1.0.0.
 - [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
 - [📖 15. Public documentation refresh](#15-public-documentation-refresh)
 - [🚀 16. .NET Aspire orchestration](#16-net-aspire-orchestration)
+- [🎨 17. Web UI visual port](#17-web-ui-visual-port)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -272,6 +273,18 @@ prefer it or cannot run .NET Aspire.
 
 ---
 
+## 🎨 17. Web UI visual port
+
+The live frontend now matches the approved chat and Settings mocks, plus Aspire review follow-up.
+
+- YAML-aligned color tokens apply before first paint (`perfpilot.theme` in `localStorage`, Auto follows the OS). Dark theme also sets the full token set in CSS so text stays light if the applier is late. Assistant markdown uses conversation text tokens instead of typography gray.
+- Chat chrome: right-aligned nav, Settings pill, ~960px conversation column, ChatGPT-style right-edge alignment, shared `#3d5674` steel-blue user bubble in light and dark, composer well (`#e8eef4` plus a stone-gray border in light; `#1c2430` in dark) so the prompt box reads against the canvas, Perplexity-style autosize with `field-sizing: content` and a `scrollHeight` fallback.
+- `/settings` has Projects, Secrets, Preferences, and Profile as visual shells. Dummy project/secret rows are gone. Add-secret Component options are scoped to the focus area (including Confluence Cloud / On-Prem). Trash removes an in-session preview row. Project dropdowns list Secrets token names plus None selected. Only the theme control persists. No `/api/secrets`, `/api/me`, or project persistence.
+
+**Files added:** `lib/theme-config.ts`, `lib/theme-applier.ts`, `lib/theme-preference.ts`, `lib/settings-catalog.ts`, `components/theme/theme-runtime.tsx`, `app/settings/page.tsx`, `components/settings/*`.
+
+---
+
 ## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
@@ -288,4 +301,4 @@ prefer it or cannot run .NET Aspire.
 
 ---
 
-*Last Updated: October 27, 2026* ✨
+*Last Updated: November 1, 2026* ✨
