@@ -32,7 +32,7 @@
     --danger: #dc2626;
 
     --conv-canvas-bg: #fafaf9;
-    --conv-user-bg: #4f46e5;
+    --conv-user-bg: #2f2f2f;
     --conv-user-text: #ffffff;
     --conv-user-code-bg: rgba(255, 255, 255, 0.15);
     --conv-user-code-text: #ffffff;
@@ -52,6 +52,37 @@
     color-scheme: dark;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
     --shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+
+    --bg: #09090b;
+    --surface: #18181b;
+    --surface-2: #27272a;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --text: #fafafa;
+    --text-muted: #a1a1aa;
+    --text-subtle: #71717a;
+    --accent: #818cf8;
+    --accent-weak: #1e1b4b;
+    --accent-strong: #a5b4fc;
+    --success: #22c55e;
+    --success-weak: #052e16;
+    --danger: #ef4444;
+
+    --conv-canvas-bg: #09090b;
+    --conv-user-bg: #2f2f2f;
+    --conv-user-text: #ffffff;
+    --conv-user-code-bg: rgba(255, 255, 255, 0.18);
+    --conv-user-code-text: #ffffff;
+    --conv-agent-bg: #18181b;
+    --conv-agent-text: #fafafa;
+    --conv-agent-border: #27272a;
+    --conv-agent-code-bg: #27272a;
+    --conv-agent-code-text: #fafafa;
+    --conv-chip-bg: #1e1b4b;
+    --conv-chip-text: #c7d2fe;
+    --conv-chip-border: #3730a3;
+    --conv-divider-line: #27272a;
+    --conv-divider-text: #a1a1aa;
   }
 }
 
@@ -258,7 +289,7 @@
   }
 
   .pp-msg-row {
-    max-width: 760px;
+    max-width: 960px;
     margin: 0 auto;
     padding: 0 24px 20px;
     display: flex;
@@ -270,7 +301,6 @@
   }
 
   .pp-msg {
-    max-width: 72%;
     padding: 10px 14px;
     border-radius: var(--radius);
     font-size: 14px;
@@ -278,6 +308,7 @@
   }
 
   .pp-msg[data-role="user"] {
+    max-width: 75%;
     background: var(--conv-user-bg);
     color: var(--conv-user-text);
     border-bottom-right-radius: 4px;
@@ -293,11 +324,13 @@
   }
 
   .pp-msg[data-role="assistant"] {
-    background: var(--conv-agent-bg);
+    width: 100%;
+    max-width: 100%;
+    background: transparent;
     color: var(--conv-agent-text);
-    border: 1px solid var(--conv-agent-border);
-    border-bottom-left-radius: 4px;
-    box-shadow: var(--shadow-sm);
+    border: 0;
+    box-shadow: none;
+    padding: 2px 0;
   }
 
   .pp-msg[data-role="assistant"] p {
@@ -306,6 +339,27 @@
 
   .pp-msg[data-role="assistant"] p:last-child {
     margin-bottom: 0;
+  }
+
+  .pp-msg[data-role="assistant"] .prose {
+    color: var(--conv-agent-text);
+    max-width: none;
+    --tw-prose-body: var(--conv-agent-text);
+    --tw-prose-headings: var(--conv-agent-text);
+    --tw-prose-lead: var(--conv-agent-text);
+    --tw-prose-links: var(--accent-strong);
+    --tw-prose-bold: var(--conv-agent-text);
+    --tw-prose-counters: var(--text-muted);
+    --tw-prose-bullets: var(--text-muted);
+    --tw-prose-hr: var(--conv-divider-line);
+    --tw-prose-quotes: var(--conv-agent-text);
+    --tw-prose-quote-borders: var(--border-strong);
+    --tw-prose-captions: var(--text-muted);
+    --tw-prose-code: var(--conv-agent-code-text);
+    --tw-prose-pre-code: var(--conv-agent-code-text);
+    --tw-prose-pre-bg: var(--conv-agent-code-bg);
+    --tw-prose-th-borders: var(--border);
+    --tw-prose-td-borders: var(--border);
   }
 
   .pp-msg[data-role="assistant"] code {
@@ -323,7 +377,7 @@
   }
 
   .pp-chip-row {
-    max-width: 760px;
+    max-width: 960px;
     margin: 0 auto;
     padding: 0 24px 16px;
     display: flex;
@@ -344,7 +398,7 @@
   }
 
   .pp-divider {
-    max-width: 760px;
+    max-width: 960px;
     margin: 10px auto 24px;
     padding: 0 24px;
     display: flex;
@@ -368,7 +422,7 @@
   }
 
   .pp-composer {
-    max-width: 760px;
+    max-width: 960px;
     margin: 0 auto;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -846,8 +900,19 @@
   .pp-component-dot[data-component="ado"] { background: #0078d4; }
   .pp-component-dot[data-component="jira"] { background: #0052cc; }
   .pp-component-dot[data-component="confluence"] { background: #0b7fff; }
+  .pp-component-dot[data-component="confluence-cloud"] { background: #0b7fff; }
+  .pp-component-dot[data-component="confluence-onprem"] { background: #0747a6; }
   .pp-component-dot[data-component="github"] { background: #6e7681; }
   .pp-component-dot[data-component="blazemeter"] { background: #ff8d2a; }
+
+  .pp-secret-delete:hover {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+  }
+
+  .pp-integrations-preview {
+    padding: 0 20px 16px;
+  }
 
   .pp-masked {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;

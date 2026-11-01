@@ -144,7 +144,7 @@ Once running, open the frontend in your browser. You should see:
 | YAML-aligned light/dark/auto theme (pre-paint) | Done |
 | Chat shell matching the approved mock | Done |
 | Composer autosize (`field-sizing` + fallback) | Done |
-| Settings page shell (Projects / Secrets / Preferences / Profile) | Done | 
+| Settings page shell (Projects / Secrets / Preferences / Profile) | Done — empty visual shells; in-session preview only | 
 
 ### Architecture
 
@@ -176,6 +176,7 @@ Browser (localhost:3000)
 | `components/sidebar/thread-sidebar.tsx` | Thread list with CRUD operations |
 | `components/layout/header.tsx` | PerfPilot header — Runs / Agents / Tasks / GitHub + Settings pill + status |
 | `app/settings/page.tsx` | Settings shell — Projects, Secrets, Preferences, Profile (visual tabs; theme control is live) |
+| `lib/settings-catalog.ts` | Focus-area / component catalogs and token-name dropdown helpers |
 | `lib/theme-config.ts` | Theme palettes and `perfpilot.theme` contract |
 | `lib/theme-applier.ts` | Pre-paint script that sets CSS variables on `<html>` |
 | `components/github/github-creds-card.tsx` | Session-only GitHub credential capture card (URL + PAT + optional branch/path) with privacy disclosures |

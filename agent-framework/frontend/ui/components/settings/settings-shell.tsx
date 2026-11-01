@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Folder, KeyRound, SlidersHorizontal, User } from "lucide-react";
 import { Header } from "@/components/layout/header";
+import type { SettingsSecret } from "@/lib/settings-catalog";
 import { ProjectsTab } from "./projects-tab";
 import { SecretsTab } from "./secrets-tab";
 import { PreferencesTab } from "./preferences-tab";
@@ -19,6 +20,7 @@ const TABS: { id: SettingsTabId; label: string; icon: typeof Folder }[] = [
 
 export function SettingsShell() {
   const [tab, setTab] = useState<SettingsTabId>("projects");
+  const [secrets, setSecrets] = useState<SettingsSecret[]>([]);
 
   return (
     <div className="flex flex-col h-screen">
@@ -43,8 +45,20 @@ export function SettingsShell() {
           </div>
         </aside>
         <section className="pp-settings-content">
-          {tab === "projects" && <ProjectsTab />}
-          {tab === "secrets" && <SecretsTab />}
+          {tab === "projects" && <ProjectsTab secrets={secrets} />}
+          {tab === "secrets" && (
+            <SecretsTab
+              secrets={secrets}
+              onAdd={(secret) =>
+                setSecrets((current) => [...current, secret])
+              }
+              onDelete={(id) =>
+                setSecrets((current) =>
+                  current.filter((secret) => secret.id !== id)
+                )
+              }
+            />
+          )}
           {tab === "preferences" && <PreferencesTab />}
           {tab === "profile" && <ProfileTab />}
         </section>

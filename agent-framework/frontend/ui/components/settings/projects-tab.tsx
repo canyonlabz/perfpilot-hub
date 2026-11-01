@@ -1,57 +1,36 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { DEMO_PROJECTS, type DemoProject } from "@/lib/settings-demo";
+import { Info } from "lucide-react";
+import {
+  integrationSelectOptions,
+  type IntegrationKey,
+  type SettingsSecret,
+} from "@/lib/settings-catalog";
 
-type ProjectState = DemoProject & {
-  confluenceValue: string;
-  blazemeterValue: string;
-  githubValue: string;
-};
-
-function toState(project: DemoProject): ProjectState {
-  return {
-    ...project,
-    confluenceValue: project.confluence[0],
-    blazemeterValue: project.blazemeter[0],
-    githubValue: project.github[0],
-  };
-}
-
-export function ProjectsTab() {
-  const [projects, setProjects] = useState<ProjectState[]>(() =>
-    DEMO_PROJECTS.map(toState)
-  );
-  const [activeId, setActiveId] = useState("project1");
-
-  const enabledCount = useMemo(
-    () => projects.filter((project) => project.enabled).length,
-    [projects]
-  );
-
-  function toggleEnabled(id: string, enabled: boolean) {
-    setProjects((current) => {
-      const next = current.map((project) =>
-        project.id === id ? { ...project, enabled } : project
-      );
-      if (!enabled && activeId === id) {
-        const fallback = next.find((project) => project.id !== id && project.enabled);
-        setActiveId(fallback?.id ?? "");
-      }
-      return next;
-    });
-  }
+export function ProjectsTab({ secrets }: { secrets: SettingsSecret[] }) {
+  const confluenceOptions = integrationSelectOptions(secrets, "confluence");
+  const blazemeterOptions = integrationSelectOptions(secrets, "blazemeter");
+  const githubOptions = integrationSelectOptions(secrets, "github");
 
   return (
     <div>
       <div className="pp-page-title">
         <h1>Projects</h1>
         <p>
-          Choose which projects appear in your project switcher and which one new
-          chats default to. Project configuration itself (environments, auth,
-          workspace IDs) lives on the backend in{" "}
+          Choose which projects appear in your project switcher and which one
+          new chats default to. Project configuration itself (environments,
+          auth, workspace IDs) lives on the backend in{" "}
           <span className="pp-mono">environments.yaml</span>.
         </p>
+      </div>
+
+      <div className="pp-note">
+        <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+        <span>
+          Project rows will come from the backend. Each enabled row will bind
+          Confluence, BlazeMeter, and GitHub to a token name from Secrets, or
+          leave that integration as <strong>None selected</strong>.
+        </span>
       </div>
 
       <div className="pp-card">
@@ -65,112 +44,30 @@ export function ProjectsTab() {
           </div>
         </div>
         <div className="pp-card-body pp-card-body-tight">
-          {projects.map((project) => {
-            const isActive = project.enabled && project.id === activeId;
-            return (
-              <div
-                key={project.id}
-                className="pp-project-row"
-                data-disabled={!project.enabled}
-                data-active={isActive}
-              >
-                <div className="pp-project-head">
-                  <input
-                    type="checkbox"
-                    className="pp-check"
-                    checked={project.enabled}
-                    aria-label={`Enable ${project.name}`}
-                    onChange={(event) =>
-                      toggleEnabled(project.id, event.target.checked)
-                    }
-                  />
-                  <div className="pp-project-info">
-                    <div className="pp-project-name">
-                      {project.name}{" "}
-                      <span className="pp-mono">{project.slug}</span>
-                      {isActive && <span className="pp-pill-active">Active</span>}
-                    </div>
-                    <div className="pp-project-hint">
-                      {project.environmentCount === 0
-                        ? "No environments configured"
-                        : `${project.environmentCount} environment${
-                            project.environmentCount === 1 ? "" : "s"
-                          }`}
-                      {" · aliases: "}
-                      {project.aliases.map((alias, index) => (
-                        <span key={alias}>
-                          {index > 0 && ", "}
-                          <span className="pp-mono">{alias}</span>
-                        </span>
-                      ))}
-                    </div>
-                    <div className="pp-integrations">
-                      <IntegrationSelect
-                        label="Confluence"
-                        options={project.confluence}
-                        value={project.confluenceValue}
-                        disabled={!project.enabled}
-                        onChange={(value) =>
-                          setProjects((current) =>
-                            current.map((item) =>
-                              item.id === project.id
-                                ? { ...item, confluenceValue: value }
-                                : item
-                            )
-                          )
-                        }
-                      />
-                      <IntegrationSelect
-                        label="BlazeMeter"
-                        options={project.blazemeter}
-                        value={project.blazemeterValue}
-                        disabled={!project.enabled}
-                        onChange={(value) =>
-                          setProjects((current) =>
-                            current.map((item) =>
-                              item.id === project.id
-                                ? { ...item, blazemeterValue: value }
-                                : item
-                            )
-                          )
-                        }
-                      />
-                      <IntegrationSelect
-                        label="GitHub"
-                        options={project.github}
-                        value={project.githubValue}
-                        disabled={!project.enabled}
-                        onChange={(value) =>
-                          setProjects((current) =>
-                            current.map((item) =>
-                              item.id === project.id
-                                ? { ...item, githubValue: value }
-                                : item
-                            )
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-                <label className="pp-radio-active">
-                  <input
-                    type="radio"
-                    className="pp-check"
-                    name="active-project"
-                    checked={isActive}
-                    disabled={!project.enabled}
-                    onChange={() => setActiveId(project.id)}
-                  />
-                  Make active
-                </label>
-              </div>
-            );
-          })}
+          <div className="pp-section-empty">
+            No projects are available yet. Once the backend lists environments,
+            each row will offer these token-name options:
+          </div>
+          <div className="pp-integrations pp-integrations-preview">
+            <IntegrationSelect
+              label="Confluence"
+              options={confluenceOptions}
+              disabled
+            />
+            <IntegrationSelect
+              label="BlazeMeter"
+              options={blazemeterOptions}
+              disabled
+            />
+            <IntegrationSelect
+              label="GitHub"
+              options={githubOptions}
+              disabled
+            />
+          </div>
         </div>
         <div className="pp-card-footer">
-          {enabledCount} enabled · active:{" "}
-          <span className="pp-mono">{activeId || "none"}</span>
+          0 enabled · active: <span className="pp-mono">none</span>
         </div>
       </div>
     </div>
@@ -180,28 +77,28 @@ export function ProjectsTab() {
 function IntegrationSelect({
   label,
   options,
-  value,
   disabled,
-  onChange,
 }: {
   label: string;
-  options: string[];
-  value: string;
+  options: { value: string; label: string }[];
   disabled: boolean;
-  onChange: (value: string) => void;
 }) {
+  const key = label.toLowerCase() as IntegrationKey;
   return (
     <div>
-      <label className="pp-field-label">{label}</label>
+      <label className="pp-field-label" htmlFor={`preview-${key}`}>
+        {label}
+      </label>
       <select
+        id={`preview-${key}`}
         className="pp-field"
         disabled={disabled}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+        defaultValue=""
+        aria-label={`${label} token`}
       >
         {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
+          <option key={option.value || "none"} value={option.value}>
+            {option.label}
           </option>
         ))}
       </select>

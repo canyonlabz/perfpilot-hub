@@ -1,25 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Info, Plus, X } from "lucide-react";
+import { Info, Plus, Trash2, X } from "lucide-react";
 import {
   COMPONENT_LABELS,
-  DEMO_SECRET_SECTIONS,
-  type DemoComponent,
-  type DemoSecret,
-  type DemoSecretSection,
-} from "@/lib/settings-demo";
+  FOCUS_AREAS,
+  focusAreaById,
+  type FocusAreaId,
+  type SecretComponent,
+  type SettingsSecret,
+} from "@/lib/settings-catalog";
 
 type ModalState = {
-  sectionId: string;
-  sectionTitle: string;
-  component: DemoComponent;
+  sectionId: FocusAreaId;
 };
 
-export function SecretsTab() {
-  const [sections, setSections] = useState<DemoSecretSection[]>(
-    DEMO_SECRET_SECTIONS
-  );
+export function SecretsTab({
+  secrets,
+  onAdd,
+  onDelete,
+}: {
+  secrets: SettingsSecret[];
+  onAdd: (secret: SettingsSecret) => void;
+  onDelete: (id: string) => void;
+}) {
   const [modal, setModal] = useState<ModalState | null>(null);
 
   return (
@@ -36,75 +40,82 @@ export function SecretsTab() {
       <div className="pp-note">
         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
-          Visual shell only — values are dummy masks and are not stored, logged,
-          or sent anywhere.
+          Visual shell only — typed values are discarded. Rows stay in this
+          Settings visit until you delete them; nothing is stored or sent
+          anywhere.
         </span>
       </div>
 
-      {sections.map((section) => (
-        <div key={section.id} className="pp-card">
-          <div className="pp-card-header">
-            <div>
-              <h3>{section.title}</h3>
-              <p>{section.hint}</p>
-            </div>
-            <button
-              type="button"
-              className="pp-btn pp-btn-secondary"
-              onClick={() =>
-                setModal({
-                  sectionId: section.id,
-                  sectionTitle: section.title,
-                  component: section.defaultComponent,
-                })
-              }
-            >
-              <Plus className="h-3 w-3" />
-              Add secret
-            </button>
-          </div>
-          <div className="pp-card-body pp-card-body-tight">
-            {section.secrets.length === 0 ? (
-              <div className="pp-section-empty">
-                No secrets added yet. Click <strong>Add secret</strong> to create
-                one.
+      {FOCUS_AREAS.map((section) => {
+        const rows = secrets.filter((secret) => secret.sectionId === section.id);
+        return (
+          <div key={section.id} className="pp-card">
+            <div className="pp-card-header">
+              <div>
+                <h3>{section.title}</h3>
+                <p>{section.hint}</p>
               </div>
-            ) : (
-              section.secrets.map((secret) => (
-                <div key={secret.id} className="pp-secret-item">
-                  <div className="font-medium">{secret.name}</div>
-                  <span className="pp-component-pill">
-                    <span
-                      className="pp-component-dot"
-                      data-component={secret.component}
-                    />
-                    {COMPONENT_LABELS[secret.component]}
-                  </span>
-                  <span className="pp-masked">{secret.masked}</span>
-                  <span className="text-[11.5px] text-[var(--text-subtle)]">
-                    {secret.added}
-                  </span>
-                  <span />
+              <button
+                type="button"
+                className="pp-btn pp-btn-secondary"
+                onClick={() => setModal({ sectionId: section.id })}
+              >
+                <Plus className="h-3 w-3" />
+                Add secret
+              </button>
+            </div>
+            <div className="pp-card-body pp-card-body-tight">
+              {rows.length === 0 ? (
+                <div className="pp-section-empty">
+                  No secrets added yet. Click <strong>Add secret</strong> to
+                  create one.
                 </div>
-              ))
-            )}
+              ) : (
+                rows.map((secret) => (
+                  <div key={secret.id} className="pp-secret-item">
+                    <div className="font-medium">{secret.name}</div>
+                    <span className="pp-component-pill">
+                      <span
+                        className="pp-component-dot"
+                        data-component={secret.component}
+                      />
+                      {COMPONENT_LABELS[secret.component]}
+                    </span>
+                    <span className="pp-masked">{secret.masked}</span>
+                    <span className="text-[11.5px] text-[var(--text-subtle)]">
+                      {secret.added}
+                    </span>
+                    <button
+                      type="button"
+                      className="pp-icon-btn pp-secret-delete"
+                      title={`Delete ${secret.name}`}
+                      aria-label={`Delete ${secret.name}`}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Remove “${secret.name}” from this preview list?`
+                          )
+                        ) {
+                          onDelete(secret.id);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {modal && (
         <AddSecretModal
-          sectionTitle={modal.sectionTitle}
-          component={modal.component}
+          sectionId={modal.sectionId}
           onClose={() => setModal(null)}
           onSave={(entry) => {
-            setSections((current) =>
-              current.map((section) =>
-                section.id === modal.sectionId
-                  ? { ...section, secrets: [...section.secrets, entry] }
-                  : section
-              )
-            );
+            onAdd(entry);
             setModal(null);
           }}
         />
@@ -114,18 +125,19 @@ export function SecretsTab() {
 }
 
 function AddSecretModal({
-  sectionTitle,
-  component,
+  sectionId,
   onClose,
   onSave,
 }: {
-  sectionTitle: string;
-  component: DemoComponent;
+  sectionId: FocusAreaId;
   onClose: () => void;
-  onSave: (secret: DemoSecret) => void;
+  onSave: (secret: SettingsSecret) => void;
 }) {
+  const section = focusAreaById(sectionId);
   const [name, setName] = useState("");
-  const [selected, setSelected] = useState<DemoComponent>(component);
+  const [selected, setSelected] = useState<SecretComponent>(
+    section.components[0]
+  );
   const [value, setValue] = useState("");
 
   useEffect(() => {
@@ -141,9 +153,10 @@ function AddSecretModal({
     setValue("");
     onSave({
       id: `local-${Date.now()}`,
+      sectionId,
       name: tokenName,
       component: selected,
-      masked: "••••••••••••demo",
+      masked: "••••••••••••preview",
       added: "Preview only",
     });
   }
@@ -176,7 +189,7 @@ function AddSecretModal({
               Focus area
             </label>
             <select className="pp-field" id="secret-section" disabled>
-              <option>{sectionTitle}</option>
+              <option>{section.title}</option>
             </select>
           </div>
           <div className="pp-modal-field">
@@ -188,12 +201,12 @@ function AddSecretModal({
               id="secret-component"
               value={selected}
               onChange={(event) =>
-                setSelected(event.target.value as DemoComponent)
+                setSelected(event.target.value as SecretComponent)
               }
             >
-              {Object.entries(COMPONENT_LABELS).map(([key, label]) => (
+              {section.components.map((key) => (
                 <option key={key} value={key}>
-                  {label}
+                  {COMPONENT_LABELS[key]}
                 </option>
               ))}
             </select>
