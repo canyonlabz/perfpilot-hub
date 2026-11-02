@@ -144,7 +144,17 @@ Once running, open the frontend in your browser. You should see:
 | YAML-aligned light/dark/auto theme (pre-paint) | Done |
 | Chat shell matching the approved mock | Done |
 | Composer autosize (`field-sizing` + fallback) | Done |
-| Settings page (Projects / Secrets / Preferences / Profile) | Done — Profile, Secrets, and Projects persist through AG-UI APIs; Preferences stay local | 
+| Settings page (Projects / Secrets / Preferences / Profile) | Done — Profile, Secrets, and Projects persist through AG-UI APIs; Preferences stay local |
+
+### Settings persistence
+
+Profile, Secrets, and Projects call the same-origin `/api/*` rewrites
+to AG-UI. The browser cookie identifies the user. Secret **values** are
+sent once on create and never listed again (name, component, and a mask
+only). Project rows come from the backend catalog (`environments.yaml`);
+each enabled row binds Confluence, BlazeMeter, Datadog, and GitHub to a
+token **name**. Preferences theme remains `localStorage`. A2A callers do
+not use these Settings tokens. 
 
 ### Architecture
 

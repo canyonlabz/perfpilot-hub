@@ -1,6 +1,6 @@
 # 🧰 PerfPilot Technology Stack
 
-Last updated: November 1, 2026
+Last updated: November 2, 2026
 
 ## 🎯 Purpose
 
@@ -65,6 +65,13 @@ Other supplied backend requirements:
 | `pyyaml` | `>=6.0.2` |
 | `python-dotenv` | `>=1.2.1` |
 | `tiktoken` | `>=0.12.0` |
+| `cryptography` | `>=43.0.0` |
+| `PyJWT` | `>=2.9.0` |
+
+`cryptography` and `PyJWT` are also declared on the GitHub, BlazeMeter,
+Datadog, and Confluence MCP requirement files (`>=43.0.0` and `>=2.9.0`).
+Those four MCPs also declare `asyncpg>=0.30.0` for Web-UI secret reads.
+Installed versions were not re-checked in this update.
 
 No A2A SDK package is installed according to the maintainer. Follow the existing
 server implementation; do not assume SDK-specific classes or install an SDK as

@@ -117,14 +117,20 @@ full stack up you'll want most of these:
 - 🔑 **Confluence** — either a Cloud API token or an on-prem PAT
 - 🔑 **OpenAI** or **Azure OpenAI** or **Ollama** access (used by both the agent
   chat model and the PerfMemory embedding model)
-- 🔑 **GitHub** personal access token
+- 🔑 **GitHub** personal access token (A2A env path; Web-UI users store
+  theirs in Settings → Secrets)
+- 🔑 **Web-UI secrets master key** (`PERFPLOT_SECRETS_MASTER_KEY`, 32-byte
+  base64) if you will save tokens in the Web UI
 - 🔒 **PostgreSQL** password (you pick this — used for the local `perfmem-pgvector-age`
   container)
 - 🏢 *(optional)* **Corporate CA bundle** (PEM) if your network runs an
   HTTPS-intercepting proxy (Zscaler, Norton 360, BlueCoat, etc.). See §9.
 
 Every secret goes into `docker/.env` (copied from `docker/.env.example`).
-Nothing is baked into images.
+Nothing is baked into images. Compose interpolates
+`PERFPLOT_SECRETS_MASTER_KEY` onto AG-UI and the GitHub, BlazeMeter,
+Datadog, and Confluence MCP services only. A2A keeps using the vendor
+environment variables above.
 
 ---
 

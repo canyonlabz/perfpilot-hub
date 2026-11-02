@@ -58,6 +58,12 @@ SSL_CERT_FILE=/path/to/ca-bundle.pem
 REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem
 ```
 
+Those token environment variables are the **A2A** credential path. A
+Web-UI call that arrives with `Authorization: Bearer` uses the active
+project's Settings `token` field instead and does not fall back to
+the env token. Base URL and user still come from this environment /
+project config.
+
 ### 4. Configure SSL Verification (Optional)
 
 Edit `config.yaml` to control SSL verification behavior:
