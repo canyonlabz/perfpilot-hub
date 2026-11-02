@@ -342,10 +342,24 @@ async def build_webui_secrets_hint(user_id: str) -> str | None:
         + (getattr(binding, f"{key}_token_name", None) or "not configured")
         for key in INTEGRATION_COMPONENTS
     )
+    confluence_mode_hint = ""
+    confluence_token = getattr(binding, "confluence_token_name", None)
+    if confluence_token:
+        for item in secrets:
+            if item.name != confluence_token:
+                continue
+            if item.component == "confluence-cloud":
+                confluence_mode_hint = " confluence_mode=cloud."
+            elif item.component == "confluence-onprem":
+                confluence_mode_hint = " confluence_mode=onprem."
+            break
     return (
-        f"Web-UI secrets: active project {binding.project_key}. {flags}. "
+        f"Web-UI secrets: active project {binding.project_key}. {flags}."
+        f"{confluence_mode_hint} "
         f"Stored token names: {named}. "
-        "Never put a PAT, JWT, or secret value in a tool argument."
+        "Never put a PAT, JWT, or secret value in a tool argument. "
+        "For Confluence tools, omit mode when confluence_mode is set; "
+        "the MCP resolves cloud vs onprem from Settings."
     )
 
 

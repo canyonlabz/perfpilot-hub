@@ -26,6 +26,11 @@ _TOKEN_COLUMN = {
     "confluence": "confluence_token_name",
 }
 
+_CONFLUENCE_COMPONENT_TO_MODE = {
+    "confluence-cloud": "cloud",
+    "confluence-onprem": "onprem",
+}
+
 _pool: Optional[asyncpg.Pool] = None
 
 
@@ -159,3 +164,62 @@ async def resolve_user_fields(integration: str) -> Optional[dict[str, str]]:
             aad=aad,
         )
     return fields
+
+
+async def resolve_confluence_mode() -> Optional[str]:
+    """Return ``cloud`` / ``onprem`` from the Web-UI Settings component.
+
+    No Authorization header → ``None`` (A2A keeps the caller ``mode``).
+    JWT present → map ``confluence-cloud`` / ``confluence-onprem`` from
+    the active project's bound secret. Never returns values or logs them.
+    """
+    try:
+        compact = _bearer_token()
+    except CredentialResolveError:
+        raise
+    if compact is None:
+        return None
+    try:
+        claims = verify_mcp_context_jwt(compact)
+    except McpJwtError as exc:
+        raise CredentialResolveError(str(exc)) from exc
+
+    pool = await _pool_conn()
+    async with pool.acquire() as conn:
+        binding = await conn.fetchrow(
+            """
+            SELECT project_key, confluence_token_name AS token_name
+            FROM user_project_bindings
+            WHERE user_id = $1 AND is_active
+            LIMIT 1
+            """,
+            claims.user_id,
+        )
+        if binding is None or not binding["token_name"]:
+            project = binding["project_key"] if binding else "(none active)"
+            raise CredentialResolveError(
+                f"No token configured for confluence on project {project}."
+            )
+        secret = await conn.fetchrow(
+            """
+            SELECT component
+            FROM user_secrets
+            WHERE user_id = $1 AND name = $2
+            LIMIT 1
+            """,
+            claims.user_id,
+            binding["token_name"],
+        )
+
+    if secret is None:
+        raise CredentialResolveError(
+            f"No token configured for confluence on project "
+            f"{binding['project_key']}."
+        )
+    mode = _CONFLUENCE_COMPONENT_TO_MODE.get(secret["component"])
+    if mode is None:
+        raise CredentialResolveError(
+            "Active Confluence secret component must be confluence-cloud "
+            "or confluence-onprem."
+        )
+    return mode

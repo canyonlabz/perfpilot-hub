@@ -45,7 +45,12 @@ namespaces:
 
 **Prerequisites:**
 - `test_run_id` = same as PerfReport `run_id`
-- `confluence_mode` = `"cloud"` or `"onprem"`
+- `confluence_mode` = `"cloud"` or `"onprem"` for A2A callers. On the
+  Web-UI path the active Settings secret component
+  (`confluence-cloud` / `confluence-onprem`) selects the API — omit
+  `mode` on Confluence tools when the system hint already has
+  `confluence_mode=...`. Do not ask the user cloud vs onprem when that
+  hint is present.
 - `confluence_space` = space name from user
 - `parent_page_name` or `parent_page_id` from user
 

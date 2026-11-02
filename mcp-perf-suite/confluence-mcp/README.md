@@ -64,6 +64,11 @@ project's Settings `token` field instead and does not fall back to
 the env token. Base URL and user still come from this environment /
 project config.
 
+Web-UI also selects **cloud vs onprem** from the Settings secret
+component (`confluence-cloud` → `cloud`, `confluence-onprem` →
+`onprem`). Confluence tools may omit `mode` on that path. A2A callers
+still pass `mode` explicitly.
+
 ### 4. Configure SSL Verification (Optional)
 
 Edit `config.yaml` to control SSL verification behavior:
