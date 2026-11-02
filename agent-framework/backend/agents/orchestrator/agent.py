@@ -150,6 +150,9 @@ _caller_identity: dict[str, Any] = {
     # for comparison-report intents so specialists see the full candidate
     # list. Empty list = no prior candidates / not populated.
     "known_test_run_ids": [],
+    # Inbound surface. ``web_ui`` enables JWT mint and BYOT preflight.
+    # A2A leaves this unset so MCP hops stay env-var credentials.
+    "surface": None,
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -184,6 +187,19 @@ def set_caller_identity(
     _caller_identity["test_run_id"] = test_run_id
 
 
+def set_caller_surface(surface: Optional[str]) -> None:
+    """Mark the inbound surface. Dedicated so ``set_caller_identity`` stays unchanged.
+
+    ``web_ui`` enables JWT headers and BYOT binding preflight. A2A never
+    calls this, so those hops keep env-var credentials.
+    """
+    if not surface or not isinstance(surface, str):
+        _caller_identity["surface"] = None
+        return
+    cleaned = surface.strip()
+    _caller_identity["surface"] = cleaned or None
+
+
 def set_known_test_run_ids(ids: Optional[list[str]]) -> None:
     """Populate the thread's known ``test_run_id`` candidates.
 
@@ -215,6 +231,7 @@ def clear_caller_identity() -> None:
     _caller_identity["task_id"] = None
     _caller_identity["test_run_id"] = None
     _caller_identity["known_test_run_ids"] = []
+    _caller_identity["surface"] = None
 
 
 # =============================================================================
