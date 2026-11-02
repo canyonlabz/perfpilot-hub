@@ -44,6 +44,10 @@ var confluenceV2ApiToken = builder.AddParameter("confluence-v2-api-token", secre
 // AI Assistant / SCM integration
 var githubPersonalAccessToken = builder.AddParameter("github-personal-access-token", secret: true);
 
+// Encrypts Web-UI user secrets at rest. Injected only into AG-UI and the
+// four API MCPs that decrypt those rows. Never A2A, gateway, or the UI.
+var perfPilotSecretsMasterKey = builder.AddParameter("perfpilot-secrets-master-key", secret: true);
+
 const string repoRoot = "../";
 const string artifactsHost = "../mcp-perf-suite/artifacts";
 const string artifactsContainer = "/app/artifacts";
@@ -87,12 +91,14 @@ var blazemeter = AddMcp("perfpilot-mcp-blazemeter", "docker/blazemeter-mcp/Docke
     .WithEnvironment("BLAZEMETER_API_KEY", blazemeterApiKey)
     .WithEnvironment("BLAZEMETER_API_SECRET", blazemeterApiSecret)
     .WithEnvironment("BLAZEMETER_ACCOUNT_ID", blazemeterAccountId)
-    .WithEnvironment("BLAZEMETER_WORKSPACE_ID", blazemeterWorkspaceId);
+    .WithEnvironment("BLAZEMETER_WORKSPACE_ID", blazemeterWorkspaceId)
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
 
 var datadog = AddMcp("perfpilot-mcp-datadog", "docker/datadog-mcp/Dockerfile", 8111)
     .WithEnvironment("DD_API_KEY", ddApiKey)
     .WithEnvironment("DD_APP_KEY", ddAppKey)
-    .WithEnvironment("DD_API_BASE_URL", ddApiBaseUrl);
+    .WithEnvironment("DD_API_BASE_URL", ddApiBaseUrl)
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
 
 // JMeter MCP also mounts the shared .playwright-mcp/ output folder so it can
 // parse Playwright trace files produced by perfpilot-mcp-playwright.
@@ -109,7 +115,8 @@ var perfreport = AddMcp("perfpilot-mcp-perfreport", "docker/perfreport-mcp/Docke
 var confluence = AddMcp("perfpilot-mcp-confluence", "docker/confluence-mcp/Dockerfile", 8115)
     .WithEnvironment("CONFLUENCE_V2_BASE_URL", confluenceV2BaseUrl)
     .WithEnvironment("CONFLUENCE_V2_USER", confluenceV2User)
-    .WithEnvironment("CONFLUENCE_V2_API_TOKEN", confluenceV2ApiToken);
+    .WithEnvironment("CONFLUENCE_V2_API_TOKEN", confluenceV2ApiToken)
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
 
 var perfmemory = AddMcp("perfpilot-mcp-perfmemory", "docker/perfmemory-mcp/Dockerfile", 8116)
     .WithEnvironment("POSTGRES_HOST", "perfmem-pgvector-age")
@@ -125,7 +132,8 @@ var perfmemory = AddMcp("perfpilot-mcp-perfmemory", "docker/perfmemory-mcp/Docke
 // non-main branch on behalf of the Orchestrator / A2A sender. Stateless HTTP
 // MCP, routed behind the gateway alongside the other FastMCP servers.
 var github = AddMcp("perfpilot-mcp-github", "docker/github-mcp/Dockerfile", 8118)
-    .WithEnvironment("GITHUB_PERSONAL_ACCESS_TOKEN", githubPersonalAccessToken);
+    .WithEnvironment("GITHUB_PERSONAL_ACCESS_TOKEN", githubPersonalAccessToken)
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
 
 // =============================================================================
 // Playwright MCP — @playwright/mcp Streamable HTTP /mcp on 8117
@@ -225,6 +233,7 @@ var aguiServer = builder.AddDockerfile("perfpilot-agui", repoRoot, "docker/agent
     .WithEnvironment("OPENAI_API_KEY", openAiApiKey)
     .WithEnvironment("GATEWAY_MCP_URL", gatewayMcpUrl)
     .WithEnvironment("PLAYWRIGHT_MCP_URL", playwrightMcpUrl)
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey)
     .WaitFor(database)
     .WaitFor(gateway)
     .WaitFor(playwright)
