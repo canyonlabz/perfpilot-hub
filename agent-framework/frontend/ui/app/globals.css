@@ -840,7 +840,7 @@
   .pp-integrations {
     margin-top: 12px;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
   }
 
@@ -910,6 +910,7 @@
   .pp-component-dot[data-component="confluence-onprem"] { background: #0747a6; }
   .pp-component-dot[data-component="github"] { background: #6e7681; }
   .pp-component-dot[data-component="blazemeter"] { background: #ff8d2a; }
+  .pp-component-dot[data-component="datadog"] { background: #632ca6; }
 
   .pp-secret-delete:hover {
     color: var(--danger);

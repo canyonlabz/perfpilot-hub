@@ -226,23 +226,32 @@ Which specialist owns this domain?
 
 ### Step 2.1: Detect Git-push intent (new-JMX pipeline)
 
+Applies **only** to new-script creation (Playwright / HAR / OpenAPI).
+Do not invent a GitHub destination for other work.
+
 Before choosing a specialist, check the request's **upstream context**
 block (surfaced automatically as `Upstream context: - SCM target: ...`
-under the user message when metadata is present):
+under the user message when metadata is present) **and** the user's
+chat text:
 
 - **A2A path.** The upstream framework may include an `scm` block in
-  the metadata (`scm.url`, optional `scm.branch`, `scm.path`,
-  `scm.createBranch`). Presence of `scm.url` signals a new-JMX
-  pipeline: script-agent must push the generated JMX to Git and run a
-  local smoke test, then execution-agent must provision a BlazeMeter
-  test from that JMX.
-- **Web UI path.** The user may attach a GitHub URL via the
-  `GitHubCredsCard` component in the browser session. When present, the
-  UI includes an encrypted per-session token and the same `scm` block
-  in the delegation payload.
-- **No `scm` block.** Fall back to the local-only pipeline: script-agent
-  generates the JMX, runs smoke, and does not push. The rest of the
-  pipeline behaves exactly as it did before.
+  the metadata (`scm.url`, `scm.branch`, optional `scm.path`,
+  `scm.createBranch`).
+- **Web UI path.** There is no header GitHub card. Destination comes
+  from the user's message (repo URL and a feature branch). Tokens live
+  in Settings → Secrets, not in chat metadata. Never put a PAT in a
+  tool argument or readable.
+- **Ask when dest is missing.** If this is script creation and repo
+  URL or branch is missing, ask in the conversation for both. Do not
+  add a new A2A `reasonCode`.
+- **Never push to `main` or `master`.** If the user names either,
+  refuse and ask for a feature branch.
+- **Dest provided.** Include `scm` on the script-agent delegation
+  (url + branch; path optional). After push, report the GitHub link.
+- **Dest still missing.** Still delegate to script-agent **without**
+  `scm` (generate + smoke only). Tell the user the script will be
+  created but may not be shareable because there is nowhere to push
+  it, so a GitHub link will not be available.
 
 When the new-JMX pipeline applies, run this delegation sequence:
 
@@ -606,9 +615,11 @@ delegate_to_specialist("<specialist>", {
 
 ### 9.8 New-JMX pipeline with Git push and BlazeMeter provisioning
 
-Trigger: Upstream payload includes an `scm` metadata block (or the Web
-UI attaches GitHub creds), and the request is to build a fresh JMX
-from a Playwright / HAR / Swagger source.
+Trigger: The request is to build a fresh JMX from a Playwright / HAR /
+OpenAPI source. Include `scm` on the script-agent payload when the user
+(or A2A metadata) supplied a repo URL and a non-`main`/`master` branch.
+If dest is still missing after you asked, omit `scm` and warn that a
+GitHub link will not be available.
 
 **CRITICAL: Steps are sequential. The BlazeMeter provisioning step
 depends on the JMX path and `smoke_status` returned by the script-agent.

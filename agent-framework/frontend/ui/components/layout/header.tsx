@@ -6,7 +6,6 @@ import {
   BookOpen,
   ListChecks,
   FlaskConical,
-  Github,
   Settings,
 } from "lucide-react";
 import { fetchHealth } from "@/lib/api";
@@ -18,9 +17,6 @@ interface HeaderProps {
   onToggleCatalog?: () => void;
   showTasks?: boolean;
   onToggleTasks?: () => void;
-  showGitHubCreds?: boolean;
-  onToggleGitHubCreds?: () => void;
-  gitHubCredsAttached?: boolean;
   settingsActive?: boolean;
 }
 
@@ -29,9 +25,6 @@ export function Header({
   onToggleCatalog,
   showTasks,
   onToggleTasks,
-  showGitHubCreds,
-  onToggleGitHubCreds,
-  gitHubCredsAttached,
   settingsActive,
 }: HeaderProps) {
   const [status, setStatus] = useState<HealthStatus>("loading");
@@ -103,27 +96,6 @@ export function Header({
           >
             <ListChecks className="h-3.5 w-3.5" />
             Tasks
-          </button>
-          <button
-            type="button"
-            className="pp-nav-item"
-            data-active={showGitHubCreds ? "true" : undefined}
-            onClick={onToggleGitHubCreds}
-            disabled={!onToggleGitHubCreds}
-            title={
-              gitHubCredsAttached
-                ? "GitHub credentials attached — click to review or clear"
-                : "Attach a GitHub repo for script pushes (session only)"
-            }
-          >
-            <Github className="h-3.5 w-3.5" />
-            GitHub
-            {gitHubCredsAttached && (
-              <span
-                className="h-1.5 w-1.5 rounded-full bg-[var(--success)]"
-                aria-hidden
-              />
-            )}
           </button>
         </nav>
 
