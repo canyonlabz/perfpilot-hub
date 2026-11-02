@@ -92,13 +92,27 @@ var blazemeter = AddMcp("perfpilot-mcp-blazemeter", "docker/blazemeter-mcp/Docke
     .WithEnvironment("BLAZEMETER_API_SECRET", blazemeterApiSecret)
     .WithEnvironment("BLAZEMETER_ACCOUNT_ID", blazemeterAccountId)
     .WithEnvironment("BLAZEMETER_WORKSPACE_ID", blazemeterWorkspaceId)
-    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey)
+    .WithEnvironment("PERFAGENT_STATE_HOST", "perfmem-pgvector-age")
+    .WithEnvironment("PERFAGENT_STATE_PORT", "5432")
+    .WithEnvironment("PERFAGENT_STATE_DB", "perfagent_state")
+    .WithEnvironment("PERFAGENT_STATE_USER", postgresUser)
+    .WithEnvironment("PERFAGENT_STATE_PASSWORD", postgresPassword)
+    .WithEnvironment("PERFAGENT_STATE_SSLMODE", "disable")
+    .WaitFor(database);
 
 var datadog = AddMcp("perfpilot-mcp-datadog", "docker/datadog-mcp/Dockerfile", 8111)
     .WithEnvironment("DD_API_KEY", ddApiKey)
     .WithEnvironment("DD_APP_KEY", ddAppKey)
     .WithEnvironment("DD_API_BASE_URL", ddApiBaseUrl)
-    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey)
+    .WithEnvironment("PERFAGENT_STATE_HOST", "perfmem-pgvector-age")
+    .WithEnvironment("PERFAGENT_STATE_PORT", "5432")
+    .WithEnvironment("PERFAGENT_STATE_DB", "perfagent_state")
+    .WithEnvironment("PERFAGENT_STATE_USER", postgresUser)
+    .WithEnvironment("PERFAGENT_STATE_PASSWORD", postgresPassword)
+    .WithEnvironment("PERFAGENT_STATE_SSLMODE", "disable")
+    .WaitFor(database);
 
 // JMeter MCP also mounts the shared .playwright-mcp/ output folder so it can
 // parse Playwright trace files produced by perfpilot-mcp-playwright.
@@ -116,7 +130,14 @@ var confluence = AddMcp("perfpilot-mcp-confluence", "docker/confluence-mcp/Docke
     .WithEnvironment("CONFLUENCE_V2_BASE_URL", confluenceV2BaseUrl)
     .WithEnvironment("CONFLUENCE_V2_USER", confluenceV2User)
     .WithEnvironment("CONFLUENCE_V2_API_TOKEN", confluenceV2ApiToken)
-    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey)
+    .WithEnvironment("PERFAGENT_STATE_HOST", "perfmem-pgvector-age")
+    .WithEnvironment("PERFAGENT_STATE_PORT", "5432")
+    .WithEnvironment("PERFAGENT_STATE_DB", "perfagent_state")
+    .WithEnvironment("PERFAGENT_STATE_USER", postgresUser)
+    .WithEnvironment("PERFAGENT_STATE_PASSWORD", postgresPassword)
+    .WithEnvironment("PERFAGENT_STATE_SSLMODE", "disable")
+    .WaitFor(database);
 
 var perfmemory = AddMcp("perfpilot-mcp-perfmemory", "docker/perfmemory-mcp/Dockerfile", 8116)
     .WithEnvironment("POSTGRES_HOST", "perfmem-pgvector-age")
@@ -133,7 +154,14 @@ var perfmemory = AddMcp("perfpilot-mcp-perfmemory", "docker/perfmemory-mcp/Docke
 // MCP, routed behind the gateway alongside the other FastMCP servers.
 var github = AddMcp("perfpilot-mcp-github", "docker/github-mcp/Dockerfile", 8118)
     .WithEnvironment("GITHUB_PERSONAL_ACCESS_TOKEN", githubPersonalAccessToken)
-    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey);
+    .WithEnvironment("PERFPLOT_SECRETS_MASTER_KEY", perfPilotSecretsMasterKey)
+    .WithEnvironment("PERFAGENT_STATE_HOST", "perfmem-pgvector-age")
+    .WithEnvironment("PERFAGENT_STATE_PORT", "5432")
+    .WithEnvironment("PERFAGENT_STATE_DB", "perfagent_state")
+    .WithEnvironment("PERFAGENT_STATE_USER", postgresUser)
+    .WithEnvironment("PERFAGENT_STATE_PASSWORD", postgresPassword)
+    .WithEnvironment("PERFAGENT_STATE_SSLMODE", "disable")
+    .WaitFor(database);
 
 // =============================================================================
 // Playwright MCP — @playwright/mcp Streamable HTTP /mcp on 8117

@@ -38,7 +38,7 @@ async def list_spaces_v1(ctx: Context) -> list:
     # Load environment/config as needed
     base_url = CONFLUENCE_V1_BASE_URL
     url = f"{base_url}/rest/api/space"
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
 
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -67,7 +67,7 @@ async def get_space_details_v1(space_ref: str, ctx: Context) -> dict:
     """
     base_url = CONFLUENCE_V1_BASE_URL
     url = f"{base_url}/rest/api/space/{space_ref}"
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
 
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -104,7 +104,7 @@ async def list_pages_v1(space_ref: str, ctx: Context) -> list:
     base_url = CONFLUENCE_V1_BASE_URL
     url = f"{base_url}/rest/api/content"
     params = {"spaceKey": space_ref, "type": "page"}
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
     
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -136,7 +136,7 @@ async def get_page_by_id_v1(page_ref: str, ctx: Context) -> dict:
     """
     base_url = CONFLUENCE_V1_BASE_URL
     url = f"{base_url}/rest/api/content/{page_ref}"
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
     
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -180,7 +180,7 @@ async def get_page_content_v1(page_ref: str, ctx: Context) -> dict:
     base_url = CONFLUENCE_V1_BASE_URL
     url = f"{base_url}/rest/api/content/{page_ref}"
     params = {"expand": "body.storage"}
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
     
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -218,7 +218,7 @@ async def create_page_v1(space_ref: str, title: str, storage_xhtml: str, ctx: Co
     """
     base_url = CONFLUENCE_V1_BASE_URL
     url = f"{base_url}/rest/api/content"
-    headers = get_headers({"Content-Type": "application/json", "Accept": "application/json"})
+    headers = await get_headers({"Content-Type": "application/json", "Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
     
     # Build request payload
@@ -287,7 +287,7 @@ async def search_content_v1(query: str, space_key: str = None, ctx: Context = No
     
     url = f"{base_url}/rest/api/content/search"
     params = {"cql": cql, "limit": 50}
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     verify_ssl = get_ssl_verify_setting()
     
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -348,7 +348,7 @@ async def attach_file_v1(page_ref: str, file_path: str, ctx: Context) -> dict:
     
     # Headers for multipart upload - no Content-Type header (httpx sets it with boundary)
     # X-Atlassian-Token: nocheck is required to bypass XSRF protection
-    headers = get_headers({
+    headers = await get_headers({
         "Accept": "application/json",
         "X-Atlassian-Token": "nocheck"
     })
@@ -429,7 +429,7 @@ async def update_page_v1(page_ref: str, storage_xhtml: str, ctx: Context) -> dic
     # First, get current page info to retrieve version and title
     try:
         get_url = f"{base_url}/rest/api/content/{page_ref}"
-        headers = get_headers({"Accept": "application/json"})
+        headers = await get_headers({"Accept": "application/json"})
         
         async with httpx.AsyncClient(verify=verify_ssl) as client:
             response = await client.get(get_url, headers=headers)
@@ -450,7 +450,7 @@ async def update_page_v1(page_ref: str, storage_xhtml: str, ctx: Context) -> dic
     # Now update the page with incremented version
     try:
         update_url = f"{base_url}/rest/api/content/{page_ref}"
-        headers = get_headers({"Content-Type": "application/json", "Accept": "application/json"})
+        headers = await get_headers({"Content-Type": "application/json", "Accept": "application/json"})
         
         payload = {
             "type": "page",
@@ -517,19 +517,27 @@ def get_ssl_verify_setting() -> Union[str, bool]:
         return True
 
 
-def get_headers(extra: dict = None):
-    """
-    Generates authorization headers for Confluence on-prem (v1) API.
-    Uses Bearer token authentication.
-    
-    Args:
-        extra (dict, optional): Additional headers to include.
-    
-    Returns:
-        dict: Headers dictionary with Authorization and any extra headers.
-    """
+async def get_headers(extra: dict = None):
+    """Authorization for Confluence on-prem (v1). Web-UI JWT or env PAT."""
+    from utils.credential_resolver import (
+        CredentialResolveError,
+        resolve_user_fields,
+    )
+
+    try:
+        fields = await resolve_user_fields("confluence")
+    except CredentialResolveError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if fields is not None:
+        pat = (fields.get("token") or "").strip()
+        if not pat:
+            raise RuntimeError(
+                "No token configured for confluence on the active project."
+            )
+    else:
+        pat = CONFLUENCE_V1_PAT
     h = {
-        "Authorization": f"Bearer {CONFLUENCE_V1_PAT}",
+        "Authorization": f"Bearer {pat}",
     }
     if extra:
         h.update(extra)

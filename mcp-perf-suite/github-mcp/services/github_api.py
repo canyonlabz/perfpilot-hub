@@ -112,14 +112,31 @@ class ResolvedToken:
     source: str
 
 
-def resolve_token(caller_token: Optional[str] = None) -> ResolvedToken:
-    """Resolve a GitHub token from the caller argument or env vars.
+async def resolve_token(caller_token: Optional[str] = None) -> ResolvedToken:
+    """Resolve a GitHub token from a Web-UI JWT, caller arg, or env.
 
-    Raises:
-        GitHubAuthError: When no token is available. GitHub rejects
-            unauthenticated writes on private repos with a 404, which is
-            misleading; failing fast here is friendlier.
+    Web-UI (Authorization Bearer present): decrypt the active GitHub
+    binding. Ignore ``token=``. Missing binding is an error, not env.
+    A2A (no JWT): explicit ``token`` then ``GITHUB_PERSONAL_ACCESS_TOKEN``
+    / ``GITHUB_TOKEN``.
     """
+    from utils.credential_resolver import (
+        CredentialResolveError,
+        resolve_user_fields,
+    )
+
+    try:
+        fields = await resolve_user_fields("github")
+    except CredentialResolveError as exc:
+        raise GitHubAuthError(str(exc)) from exc
+    if fields is not None:
+        value = (fields.get("token") or "").strip()
+        if not value:
+            raise GitHubAuthError(
+                "No token configured for github on the active project."
+            )
+        return ResolvedToken(value=value, source="webui")
+
     if caller_token and isinstance(caller_token, str) and caller_token.strip():
         return ResolvedToken(value=caller_token.strip(), source="caller")
 

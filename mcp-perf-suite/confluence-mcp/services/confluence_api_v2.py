@@ -35,7 +35,7 @@ async def list_spaces_v2(ctx: Context) -> list:
     api_key = CONFLUENCE_V2_API_TOKEN
     url = f"{base_url}/wiki/api/v2/spaces"
     async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=get_headers({"Accept": "application/json"}))
+        response = await client.get(url, headers=await get_headers({"Accept": "application/json"}))
         data = response.json()
     spaces = []
     for item in data["results"]:
@@ -62,7 +62,7 @@ async def get_space_details_v2(space_ref: str, ctx: Context) -> dict:
     api_token = CONFLUENCE_V2_API_TOKEN
     url = f"{base_url}/wiki/api/v2/spaces/{space_ref}"
     async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=get_headers({"Accept": "application/json"}))
+        response = await client.get(url, headers=await get_headers({"Accept": "application/json"}))
         item = response.json()
     details = {
         "space_ref": item.get("id"),
@@ -91,7 +91,7 @@ async def list_pages_v2(space_ref: str, ctx: Context) -> list:
     """
     base_url = CONFLUENCE_V2_BASE_URL
     url = f"{base_url}/wiki/api/v2/spaces/{space_ref}/pages"
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=headers)
@@ -125,7 +125,7 @@ async def get_page_by_id_v2(page_ref: str, ctx: Context) -> dict:
     """
     base_url = CONFLUENCE_V2_BASE_URL
     url = f"{base_url}/wiki/api/v2/pages/{page_ref}"
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=headers)
@@ -169,7 +169,7 @@ async def get_page_content_v2(page_ref: str, ctx: Context) -> dict:
     base_url = CONFLUENCE_V2_BASE_URL
     url = f"{base_url}/wiki/api/v2/pages/{page_ref}"
     params = {"body-format": "storage"}
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=headers, params=params)
@@ -206,7 +206,7 @@ async def create_page_v2(space_ref: str, title: str, storage_xhtml: str, ctx: Co
     """
     base_url = CONFLUENCE_V2_BASE_URL
     url = f"{base_url}/wiki/api/v2/pages"
-    headers = get_headers({"Content-Type": "application/json", "Accept": "application/json"})
+    headers = await get_headers({"Content-Type": "application/json", "Accept": "application/json"})
     
     # Build request payload
     payload = {
@@ -274,7 +274,7 @@ async def search_content_v2(query: str, space_key: str = None, ctx: Context = No
     # Use v1 search endpoint (CQL not available in v2)
     url = f"{base_url}/wiki/rest/api/search"
     params = {"cql": cql, "limit": 50}
-    headers = get_headers({"Accept": "application/json"})
+    headers = await get_headers({"Accept": "application/json"})
     
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=headers, params=params)
@@ -328,7 +328,7 @@ async def update_page_v2(page_ref: str, storage_xhtml: str, ctx: Context) -> dic
     # First, get current page info to retrieve version and title
     try:
         get_url = f"{base_url}/wiki/api/v2/pages/{page_ref}"
-        headers = get_headers({"Accept": "application/json"})
+        headers = await get_headers({"Accept": "application/json"})
         
         async with httpx.AsyncClient() as client:
             response = await client.get(get_url, headers=headers)
@@ -348,7 +348,7 @@ async def update_page_v2(page_ref: str, storage_xhtml: str, ctx: Context) -> dic
     # Now update the page with incremented version
     try:
         update_url = f"{base_url}/wiki/api/v2/pages/{page_ref}"
-        headers = get_headers({"Content-Type": "application/json", "Accept": "application/json"})
+        headers = await get_headers({"Content-Type": "application/json", "Accept": "application/json"})
         
         payload = {
             "id": page_ref,
@@ -423,7 +423,7 @@ async def attach_file_v2(page_ref: str, file_path: str, ctx: Context) -> dict:
     
     # Headers for multipart upload - no Content-Type header (httpx sets it with boundary)
     # X-Atlassian-Token: nocheck is required to bypass XSRF protection
-    headers = get_headers({
+    headers = await get_headers({
         "Accept": "application/json",
         "X-Atlassian-Token": "nocheck"
     })
@@ -478,9 +478,28 @@ async def attach_file_v2(page_ref: str, file_path: str, ctx: Context) -> dict:
 # Helper functions
 # -----------------------------
 
-def get_headers(extra: dict = None):
-    # Basic Auth header Confluence expects
-    auth = base64.b64encode(f"{CONFLUENCE_V2_USER}:{CONFLUENCE_V2_API_TOKEN}".encode()).decode()
+async def get_headers(extra: dict = None):
+    from utils.credential_resolver import (
+        CredentialResolveError,
+        resolve_user_fields,
+    )
+
+    try:
+        fields = await resolve_user_fields("confluence")
+    except CredentialResolveError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if fields is not None:
+        token = (fields.get("token") or "").strip()
+        if not token:
+            raise RuntimeError(
+                "No token configured for confluence on the active project."
+            )
+        user = CONFLUENCE_V2_USER or ""
+        auth = base64.b64encode(f"{user}:{token}".encode()).decode()
+    else:
+        auth = base64.b64encode(
+            f"{CONFLUENCE_V2_USER}:{CONFLUENCE_V2_API_TOKEN}".encode()
+        ).decode()
     h = {
         "Authorization": f"Basic {auth}",
     }

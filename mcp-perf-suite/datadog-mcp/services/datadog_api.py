@@ -65,6 +65,29 @@ def _ensure_ready():
         msg = f"Missing environment variable(s): {', '.join(missing)}"
         raise RuntimeError(msg)
 
+
+async def get_auth_headers() -> dict:
+    """Datadog keys from a Web-UI JWT binding, or process env for A2A."""
+    from utils.credential_resolver import (
+        CredentialResolveError,
+        resolve_user_fields,
+    )
+
+    try:
+        fields = await resolve_user_fields("datadog")
+    except CredentialResolveError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if fields is not None:
+        api_key = (fields.get("api_key") or "").strip()
+        app_key = (fields.get("app_key") or "").strip()
+        if not api_key or not app_key:
+            raise RuntimeError(
+                "No token configured for datadog on the active project."
+            )
+        return {"DD-API-KEY": api_key, "DD-APPLICATION-KEY": app_key}
+    _ensure_ready()
+    return {"DD-API-KEY": DD_API_KEY, "DD-APPLICATION-KEY": DD_APP_KEY}
+
 def _ensure_artifacts_dir(run_id: str) -> str:
     """Ensure artifacts/run_id/datadog/ directory exists and return its path."""
     base = os.path.join(artifacts_base, str(run_id), "datadog")
@@ -234,7 +257,7 @@ async def collect_host_metrics(env_name: str, start_time: str, end_time: str, ru
         "avg:system.mem.total{host:%(h)s}.rollup(avg,60)"
     )
 
-    headers = {"DD-API-KEY": DD_API_KEY, "DD-APPLICATION-KEY": DD_APP_KEY}
+    headers = await get_auth_headers()
 
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl) as client:
@@ -411,11 +434,8 @@ async def collect_kubernetes_metrics(env_name: str, start_time: str, end_time: s
     aggregates: List[Dict[str, Any]] = []
     warnings: List[str] = []
 
-    headers = {
-        "DD-API-KEY": DD_API_KEY,
-        "DD-APPLICATION-KEY": DD_APP_KEY,
-        "Content-Type": "application/json",
-    }
+    headers = await get_auth_headers()
+    headers["Content-Type"] = "application/json"
 
     verify_ssl = get_ssl_verify_setting()
 

@@ -19,8 +19,7 @@ from services.datadog_api import (
     _sanitize_filename,
     _normalize_k8s_filter,
     get_ssl_verify_setting,
-    DD_API_KEY,
-    DD_APP_KEY,
+    get_auth_headers,
     V2_TIMESERIES_URL,
 )
 
@@ -143,11 +142,8 @@ async def collect_kpi_timeseries(
     per_query_summary: List[Dict[str, Any]] = []
     warnings: List[str] = []
 
-    headers = {
-        "DD-API-KEY": DD_API_KEY,
-        "DD-APPLICATION-KEY": DD_APP_KEY,
-        "Content-Type": "application/json",
-    }
+    headers = await get_auth_headers()
+    headers["Content-Type"] = "application/json"
     verify_ssl = get_ssl_verify_setting()
 
     async with httpx.AsyncClient(verify=verify_ssl) as client:

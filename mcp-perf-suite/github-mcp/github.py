@@ -13,11 +13,9 @@ Tools
 - ``get_repo_default_branch`` - discover the default branch name for
   URL / branch defaulting.
 
-Token resolution matches ``services.github_api.resolve_token``:
-explicit ``token`` argument wins over ``GITHUB_PERSONAL_ACCESS_TOKEN``
-env var. See ``services/github_api.py`` for details. Every write tool
-returns a ``token_source`` field so callers can surface "no user
-attribution" when a Scenario 2 server-side token was used.
+Token resolution is in ``services.github_api.resolve_token``.
+A Web-UI JWT uses the bound secret and ignores ``token=``.
+A2A (no JWT) uses ``token`` then ``GITHUB_PERSONAL_ACCESS_TOKEN``.
 """
 
 from __future__ import annotations
@@ -104,7 +102,7 @@ async def push_jmx(
     content_bytes = src.read_bytes()
     size_bytes = len(content_bytes)
 
-    resolved_token = resolve_token(token)
+    resolved_token = await resolve_token(token)
     repo_ref = parse_repo_url(repo_url)
 
     target_branch = (branch or "").strip()
@@ -191,7 +189,7 @@ async def ensure_branch(
     if not branch or not isinstance(branch, str):
         raise ValueError("branch is required")
 
-    resolved_token = resolve_token(token)
+    resolved_token = await resolve_token(token)
     repo_ref = parse_repo_url(repo_url)
 
     status = await api_ensure_branch(
@@ -228,7 +226,7 @@ async def get_repo_default_branch(
             "no_user_attribution": bool,
         }
     """
-    resolved_token = resolve_token(token)
+    resolved_token = await resolve_token(token)
     repo_ref = parse_repo_url(repo_url)
 
     default_branch = await api_get_repo_default_branch(

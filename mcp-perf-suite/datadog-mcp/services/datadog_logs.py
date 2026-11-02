@@ -9,6 +9,7 @@ from pathlib import Path
 from fastmcp import FastMCP, Context    # ✅ FastMCP 2.x import
 from utils.config import load_config
 from utils.datadog_config_loader import load_environment_json, load_custom_queries_json
+from services.datadog_api import get_auth_headers
 
 # -----------------------------------------------
 # Bootstrap
@@ -472,12 +473,9 @@ async def collect_logs(env_name: str, start_time: str, end_time: str, query_type
 
         # API request setup
         url = V2_LOGS_URL
-        headers = {
-            'DD-API-KEY': DD_API_KEY,
-            'DD-APPLICATION-KEY': DD_APP_KEY,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
+        headers = await get_auth_headers()
+        headers['Content-Type'] = 'application/json'
+        headers['Accept'] = 'application/json'
         
         params = {
             'filter[from]': start_iso,
