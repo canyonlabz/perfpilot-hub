@@ -17,7 +17,7 @@ supply is the correct **A2A metadata block** on their initial task.
 |---------|----------|-------------------|
 | **A2A JSON-RPC** (server-to-server) | `POST http://<host>:8101/a2a/v1` (`SendMessage`) | JSON `metadata` field inside the request envelope |
 | **A2A REST** (server-to-server) | `POST http://<host>:8101/message:send` | JSON `metadata` field inside the request envelope |
-| **Web UI** (CopilotKit) | Browser → `POST /api/copilotkit` | Populated automatically from the [`GitHubCredsCard`](../../agent-framework/frontend/ui/components/github/github-creds-card.tsx) session state via `useCopilotReadable` |
+| **Web UI** (CopilotKit) | Browser → `POST /api/copilotkit` | Destination comes from the chat (repo URL + feature branch). There is no header GitHub card. Tokens are Settings → Secrets (BYOT), not browser `sessionStorage`. |
 | **Cursor / MCP** | Existing MCP tool calls | Not applicable — Cursor uses per-tool arguments, not framework metadata |
 
 Both surfaces route to the same orchestrator, so the metadata schema

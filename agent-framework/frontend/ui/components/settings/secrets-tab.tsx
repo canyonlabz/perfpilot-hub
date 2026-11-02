@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Info, Plus, Trash2, X } from "lucide-react";
 import {
   COMPONENT_LABELS,
+  COMPONENT_VALUE_FIELDS,
   FOCUS_AREAS,
   focusAreaById,
   type FocusAreaId,
@@ -138,7 +139,7 @@ function AddSecretModal({
   const [selected, setSelected] = useState<SecretComponent>(
     section.components[0]
   );
-  const [value, setValue] = useState("");
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -150,7 +151,7 @@ function AddSecretModal({
 
   function handleSave() {
     const tokenName = name.trim() || "untitled-secret";
-    setValue("");
+    setFieldValues({});
     onSave({
       id: `local-${Date.now()}`,
       sectionId,
@@ -200,9 +201,10 @@ function AddSecretModal({
               className="pp-field"
               id="secret-component"
               value={selected}
-              onChange={(event) =>
-                setSelected(event.target.value as SecretComponent)
-              }
+              onChange={(event) => {
+                setSelected(event.target.value as SecretComponent);
+                setFieldValues({});
+              }}
             >
               {section.components.map((key) => (
                 <option key={key} value={key}>
@@ -224,22 +226,32 @@ function AddSecretModal({
               onChange={(event) => setName(event.target.value)}
             />
           </div>
-          <div className="pp-modal-field">
-            <label className="pp-field-label" htmlFor="secret-value">
-              Token value
-            </label>
-            <input
-              className="pp-field"
-              id="secret-value"
-              type="password"
-              placeholder="paste the token"
-              value={value}
-              autoComplete="off"
-              onChange={(event) => setValue(event.target.value)}
-            />
-          </div>
+          {COMPONENT_VALUE_FIELDS[selected].map((field) => (
+            <div className="pp-modal-field" key={field.id}>
+              <label
+                className="pp-field-label"
+                htmlFor={`secret-value-${field.id}`}
+              >
+                {field.label}
+              </label>
+              <input
+                className="pp-field"
+                id={`secret-value-${field.id}`}
+                type="password"
+                placeholder={field.placeholder}
+                value={fieldValues[field.id] ?? ""}
+                autoComplete="off"
+                onChange={(event) =>
+                  setFieldValues((current) => ({
+                    ...current,
+                    [field.id]: event.target.value,
+                  }))
+                }
+              />
+            </div>
+          ))}
           <p className="pp-modal-note">
-            The typed value is discarded on save. Only a dummy masked name is
+            Typed values are discarded on save. Only a dummy masked name is
             shown in this preview.
           </p>
         </div>

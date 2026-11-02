@@ -29,6 +29,7 @@ are retired, and inbound messages follow A2A v1.0.0.
 - [📖 15. Public documentation refresh](#15-public-documentation-refresh)
 - [🚀 16. .NET Aspire orchestration](#16-net-aspire-orchestration)
 - [🎨 17. Web UI visual port](#17-web-ui-visual-port)
+- [🔐 18. Settings Secrets catalog and header GitHub retirement](#18-settings-secrets-catalog-and-header-github-retirement)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -282,6 +283,14 @@ The live frontend now matches the approved chat and Settings mocks, plus Aspire 
 - `/settings` has Projects, Secrets, Preferences, and Profile as visual shells. Dummy project/secret rows are gone. Add-secret Component options are scoped to the focus area (including Confluence Cloud / On-Prem). Trash removes an in-session preview row. Project dropdowns list Secrets token names plus None selected. Only the theme control persists. No `/api/secrets`, `/api/me`, or project persistence.
 
 **Files added:** `lib/theme-config.ts`, `lib/theme-applier.ts`, `lib/theme-preference.ts`, `lib/settings-catalog.ts`, `components/theme/theme-runtime.tsx`, `app/settings/page.tsx`, `components/settings/*`.
+
+---
+
+## 🔐 18. Settings Secrets catalog and header GitHub retirement
+
+- Settings → Secrets gained an Observability focus area (`datadog`) and per-component value fields (BlazeMeter `api_key` + `api_secret`, Datadog `api_key` + `app_key`; others remain a single token). Projects preview dropdowns include Datadog token names plus None selected.
+- The header GitHub connector, `github-creds.ts` session store, and CopilotKit readable of SCM metadata are removed. Repo and branch for script push come from chat. PATs belong on Settings → Secrets.
+- Orchestrator instructions: on Playwright / HAR / OpenAPI script creation, ask for repo + a feature branch; refuse `main`/`master`; if dest is still missing, create the script and warn that a GitHub link will not be available. Destination logging uses OTEL-shaped `log_event` (info when dest is known; warning when it is not). Never logs tokens.
 
 ---
 

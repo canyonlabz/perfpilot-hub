@@ -14,6 +14,7 @@ export type SecretComponent =
   | "confluence-cloud"
   | "confluence-onprem"
   | "blazemeter"
+  | "datadog"
   | "github";
 
 export const COMPONENT_LABELS: Record<SecretComponent, string> = {
@@ -22,10 +23,44 @@ export const COMPONENT_LABELS: Record<SecretComponent, string> = {
   "confluence-cloud": "Confluence Cloud",
   "confluence-onprem": "Confluence On-Prem",
   blazemeter: "BlazeMeter",
+  datadog: "Datadog",
   github: "GitHub",
 };
 
-export type FocusAreaId = "tracking" | "docs" | "load" | "scm";
+export type SecretValueField = {
+  id: string;
+  label: string;
+  placeholder: string;
+};
+
+export const COMPONENT_VALUE_FIELDS: Record<
+  SecretComponent,
+  SecretValueField[]
+> = {
+  ado: [{ id: "token", label: "Token", placeholder: "paste the PAT" }],
+  jira: [{ id: "token", label: "Token", placeholder: "paste the token" }],
+  "confluence-cloud": [
+    { id: "token", label: "Token", placeholder: "paste the API token" },
+  ],
+  "confluence-onprem": [
+    { id: "token", label: "Token", placeholder: "paste the PAT" },
+  ],
+  blazemeter: [
+    { id: "api_key", label: "API key", placeholder: "paste the API key" },
+    {
+      id: "api_secret",
+      label: "API secret",
+      placeholder: "paste the API secret",
+    },
+  ],
+  datadog: [
+    { id: "api_key", label: "API key", placeholder: "paste the API key" },
+    { id: "app_key", label: "Application key", placeholder: "paste the app key" },
+  ],
+  github: [{ id: "token", label: "Token", placeholder: "paste the PAT" }],
+};
+
+export type FocusAreaId = "tracking" | "docs" | "load" | "observability" | "scm";
 
 export type FocusArea = {
   id: FocusAreaId;
@@ -54,6 +89,12 @@ export const FOCUS_AREAS: FocusArea[] = [
     components: ["blazemeter"],
   },
   {
+    id: "observability",
+    title: "Observability",
+    hint: "API and application keys for Datadog metrics, logs, and APM.",
+    components: ["datadog"],
+  },
+  {
     id: "scm",
     title: "Source control",
     hint: "Personal access tokens for repository hosts.",
@@ -61,7 +102,7 @@ export const FOCUS_AREAS: FocusArea[] = [
   },
 ];
 
-export type IntegrationKey = "confluence" | "blazemeter" | "github";
+export type IntegrationKey = "confluence" | "blazemeter" | "datadog" | "github";
 
 export const INTEGRATION_COMPONENTS: Record<
   IntegrationKey,
@@ -69,7 +110,15 @@ export const INTEGRATION_COMPONENTS: Record<
 > = {
   confluence: ["confluence-cloud", "confluence-onprem"],
   blazemeter: ["blazemeter"],
+  datadog: ["datadog"],
   github: ["github"],
+};
+
+export const INTEGRATION_LABELS: Record<IntegrationKey, string> = {
+  confluence: "Confluence",
+  blazemeter: "BlazeMeter",
+  datadog: "Datadog",
+  github: "GitHub",
 };
 
 export type SettingsSecret = {

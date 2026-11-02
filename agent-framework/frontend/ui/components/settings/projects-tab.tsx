@@ -2,16 +2,20 @@
 
 import { Info } from "lucide-react";
 import {
+  INTEGRATION_LABELS,
   integrationSelectOptions,
   type IntegrationKey,
   type SettingsSecret,
 } from "@/lib/settings-catalog";
 
-export function ProjectsTab({ secrets }: { secrets: SettingsSecret[] }) {
-  const confluenceOptions = integrationSelectOptions(secrets, "confluence");
-  const blazemeterOptions = integrationSelectOptions(secrets, "blazemeter");
-  const githubOptions = integrationSelectOptions(secrets, "github");
+const PREVIEW_INTEGRATIONS: IntegrationKey[] = [
+  "confluence",
+  "blazemeter",
+  "datadog",
+  "github",
+];
 
+export function ProjectsTab({ secrets }: { secrets: SettingsSecret[] }) {
   return (
     <div>
       <div className="pp-page-title">
@@ -28,8 +32,9 @@ export function ProjectsTab({ secrets }: { secrets: SettingsSecret[] }) {
         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
           Project rows will come from the backend. Each enabled row will bind
-          Confluence, BlazeMeter, and GitHub to a token name from Secrets, or
-          leave that integration as <strong>None selected</strong>.
+          Confluence, BlazeMeter, Datadog, and GitHub to a token name from
+          Secrets, or leave that integration as{" "}
+          <strong>None selected</strong>.
         </span>
       </div>
 
@@ -49,21 +54,14 @@ export function ProjectsTab({ secrets }: { secrets: SettingsSecret[] }) {
             each row will offer these token-name options:
           </div>
           <div className="pp-integrations pp-integrations-preview">
-            <IntegrationSelect
-              label="Confluence"
-              options={confluenceOptions}
-              disabled
-            />
-            <IntegrationSelect
-              label="BlazeMeter"
-              options={blazemeterOptions}
-              disabled
-            />
-            <IntegrationSelect
-              label="GitHub"
-              options={githubOptions}
-              disabled
-            />
+            {PREVIEW_INTEGRATIONS.map((key) => (
+              <IntegrationSelect
+                key={key}
+                integration={key}
+                options={integrationSelectOptions(secrets, key)}
+                disabled
+              />
+            ))}
           </div>
         </div>
         <div className="pp-card-footer">
@@ -75,22 +73,22 @@ export function ProjectsTab({ secrets }: { secrets: SettingsSecret[] }) {
 }
 
 function IntegrationSelect({
-  label,
+  integration,
   options,
   disabled,
 }: {
-  label: string;
+  integration: IntegrationKey;
   options: { value: string; label: string }[];
   disabled: boolean;
 }) {
-  const key = label.toLowerCase() as IntegrationKey;
+  const label = INTEGRATION_LABELS[integration];
   return (
     <div>
-      <label className="pp-field-label" htmlFor={`preview-${key}`}>
+      <label className="pp-field-label" htmlFor={`preview-${integration}`}>
         {label}
       </label>
       <select
-        id={`preview-${key}`}
+        id={`preview-${integration}`}
         className="pp-field"
         disabled={disabled}
         defaultValue=""

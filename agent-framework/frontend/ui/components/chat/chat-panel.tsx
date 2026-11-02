@@ -1,17 +1,12 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useRef, FormEvent } from "react";
-import { useCopilotChat, useCopilotReadable } from "@copilotkit/react-core";
+import { useCopilotChat } from "@copilotkit/react-core";
 import { TextMessage, Role } from "@copilotkit/runtime-client-gql";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchMessages } from "@/lib/api";
 import type { Message as DbMessage } from "@/lib/types";
-import {
-  getGitHubCredsMetadata,
-  subscribeToCredsChanges,
-  type GitHubCredsMetadata,
-} from "@/lib/github-creds";
 import { ArrowUp, Check, Mic, Plus, Square } from "lucide-react";
 
 interface ChatPanelProps {
@@ -104,9 +99,6 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
   const [historyMessages, setHistoryMessages] = useState<HistoryMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [input, setInput] = useState("");
-  const [githubCreds, setGitHubCreds] = useState<GitHubCredsMetadata | null>(
-    null
-  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevLoadingRef = useRef(false);
@@ -121,44 +113,6 @@ export function ChatPanel({ threadId }: ChatPanelProps) {
     const max = parseFloat(getComputedStyle(textarea).maxHeight) || 400;
     textarea.style.height = `${Math.min(textarea.scrollHeight, max)}px`;
   }, [input]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      const meta = await getGitHubCredsMetadata();
-      if (!cancelled) setGitHubCreds(meta);
-    };
-    refresh();
-    const unsubscribe = subscribeToCredsChanges(refresh);
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
-
-  useCopilotReadable({
-    description:
-      "Session-attached GitHub SCM target for pushing generated JMeter scripts. " +
-      "When present, the orchestrator should treat this as an scm block and " +
-      "delegate the new-JMX pipeline (script-agent generate -> push -> smoke, " +
-      "then execution-agent provision_performance_test). The personal access " +
-      "token is NOT exposed here; it stays in the browser session and is only " +
-      "forwarded to the local Script Agent when a push is actually executed.",
-    value: githubCreds
-      ? {
-          url: githubCreds.url,
-          branch: githubCreds.branch || null,
-          path: githubCreds.path || null,
-          owner: githubCreds.owner,
-          repo: githubCreds.repo,
-          provider: "github",
-          token_available: githubCreds.has_token,
-          storage: "browser-session",
-          attached_at: githubCreds.updated_at,
-        }
-      : null,
-    available: githubCreds ? "enabled" : "disabled",
-  });
 
   useEffect(() => {
     setHistoryLoaded(false);
