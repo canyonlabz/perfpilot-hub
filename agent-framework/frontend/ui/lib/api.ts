@@ -10,6 +10,11 @@ import type {
   HitlApproval,
   HitlTaskResponse,
 } from "./types";
+import {
+  focusAreaForComponent,
+  type SecretComponent,
+  type SettingsSecret,
+} from "./settings-catalog";
 
 export interface HealthResponse {
   service: string;
@@ -222,4 +227,134 @@ export async function rejectHitl(
   });
   if (!res.ok) throw new Error(`Failed to reject HITL: ${res.status}`);
   return res.json();
+}
+
+// --- Settings persistence (Profile / Secrets / Projects) ---
+
+async function settingsError(res: Response): Promise<Error> {
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === "string") {
+      return new Error(body.detail);
+    }
+  } catch {
+    /* ignore non-JSON */
+  }
+  return new Error(`Request failed: ${res.status}`);
+}
+
+export type ProfileRecord = {
+  display_name: string | null;
+  email: string | null;
+};
+
+export async function fetchProfile(): Promise<ProfileRecord> {
+  const res = await fetch("/api/me", { credentials: "include" });
+  if (!res.ok) throw await settingsError(res);
+  return res.json();
+}
+
+export async function saveProfile(body: {
+  display_name: string;
+  email: string;
+}): Promise<ProfileRecord> {
+  const res = await fetch("/api/me", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await settingsError(res);
+  return res.json();
+}
+
+type SecretApiRow = {
+  id: string;
+  name: string;
+  component: SecretComponent;
+  focus_area?: string;
+  updated_at: string | null;
+};
+
+export function secretFromApi(row: SecretApiRow): SettingsSecret {
+  return {
+    id: row.id,
+    sectionId: focusAreaForComponent(row.component, row.focus_area),
+    name: row.name,
+    component: row.component,
+    masked: "••••••••••••",
+    added: row.updated_at ? row.updated_at.slice(0, 10) : "Saved",
+  };
+}
+
+export async function fetchSecrets(): Promise<SettingsSecret[]> {
+  const res = await fetch("/api/secrets", { credentials: "include" });
+  if (!res.ok) throw await settingsError(res);
+  const data = await res.json();
+  return (data.secrets || []).map(secretFromApi);
+}
+
+export async function createSecret(body: {
+  component: SecretComponent;
+  name: string;
+  fields: Record<string, string>;
+}): Promise<SettingsSecret> {
+  const res = await fetch("/api/secrets", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await settingsError(res);
+  return secretFromApi(await res.json());
+}
+
+export async function deleteSecret(id: string): Promise<void> {
+  const res = await fetch(`/api/secrets/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw await settingsError(res);
+}
+
+export type ProjectBinding = {
+  project_key: string;
+  name: string;
+  is_enabled: boolean;
+  is_active: boolean;
+  confluence_token_name: string | null;
+  blazemeter_token_name: string | null;
+  datadog_token_name: string | null;
+  github_token_name: string | null;
+};
+
+export async function fetchProjectBindings(): Promise<ProjectBinding[]> {
+  const res = await fetch("/api/project-bindings", { credentials: "include" });
+  if (!res.ok) throw await settingsError(res);
+  const data = await res.json();
+  return data.projects || [];
+}
+
+export async function saveProjectBindings(
+  bindings: ProjectBinding[]
+): Promise<ProjectBinding[]> {
+  const res = await fetch("/api/project-bindings", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      bindings: bindings.map((row) => ({
+        project_key: row.project_key,
+        is_enabled: row.is_enabled,
+        is_active: row.is_active,
+        confluence_token_name: row.confluence_token_name,
+        blazemeter_token_name: row.blazemeter_token_name,
+        datadog_token_name: row.datadog_token_name,
+        github_token_name: row.github_token_name,
+      })),
+    }),
+  });
+  if (!res.ok) throw await settingsError(res);
+  const data = await res.json();
+  return data.projects || [];
 }

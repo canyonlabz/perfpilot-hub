@@ -379,21 +379,19 @@ uncommented in `apphost.cs` and the matching secrets are set. See
 
 ---
 
-## Docker Compose and other runtimes (follow-up)
+## Docker Compose and other runtimes
 
-Aspire is wired for `PERFPLOT_SECRETS_MASTER_KEY`. Docker Compose and a
-bare AG-UI `.env` are **not** yet. When you run the stack without Aspire:
+Aspire injects `PERFPLOT_SECRETS_MASTER_KEY` from user-secrets. When you
+run Docker Compose instead:
 
 1. Generate the same 32-byte base64 key (or reuse the Aspire value).
 2. Put `PERFPLOT_SECRETS_MASTER_KEY=` in `docker/.env` (see
    `docker/.env.example`) and in `agent-framework/backend/.env` for a
    host-side AG-UI process.
-3. Restrict that variable to `perfpilot-agui` plus the GitHub, BlazeMeter,
-   Datadog, and Confluence MCP services. Do not add it to A2A, the
-   gateway, or the frontend.
-4. Compose YAML `environment:` scoping for those five services is still
-   outstanding; `env_file: .env` on every service would leak the key
-   more widely than intended.
+3. Full-stack Compose interpolates that key plus `PERFAGENT_STATE_*`
+   onto `perfpilot-agui` and the GitHub, BlazeMeter, Datadog, and
+   Confluence MCP services only. Other services unset the key, including
+   A2A, the gateway, and the frontend.
 
 ---
 

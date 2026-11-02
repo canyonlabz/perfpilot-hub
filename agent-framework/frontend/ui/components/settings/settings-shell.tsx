@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Folder, KeyRound, SlidersHorizontal, User } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import type { SettingsSecret } from "@/lib/settings-catalog";
+import {
+  fetchProjectBindings,
+  fetchSecrets,
+  type ProjectBinding,
+} from "@/lib/api";
 import { ProjectsTab } from "./projects-tab";
 import { SecretsTab } from "./secrets-tab";
 import { PreferencesTab } from "./preferences-tab";
@@ -21,6 +26,36 @@ const TABS: { id: SettingsTabId; label: string; icon: typeof Folder }[] = [
 export function SettingsShell() {
   const [tab, setTab] = useState<SettingsTabId>("projects");
   const [secrets, setSecrets] = useState<SettingsSecret[]>([]);
+  const [projects, setProjects] = useState<ProjectBinding[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  async function reload() {
+    const [secretRows, projectRows] = await Promise.all([
+      fetchSecrets(),
+      fetchProjectBindings(),
+    ]);
+    setSecrets(secretRows);
+    setProjects(projectRows);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await reload();
+        if (!cancelled) setLoadError(null);
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(
+            err instanceof Error ? err.message : "Failed to load Settings."
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex flex-col h-screen">
@@ -45,18 +80,23 @@ export function SettingsShell() {
           </div>
         </aside>
         <section className="pp-settings-content">
-          {tab === "projects" && <ProjectsTab secrets={secrets} />}
+          {loadError && (
+            <div className="pp-note" style={{ marginBottom: 16 }}>
+              {loadError}
+            </div>
+          )}
+          {tab === "projects" && (
+            <ProjectsTab
+              secrets={secrets}
+              projects={projects}
+              onProjectsChange={setProjects}
+            />
+          )}
           {tab === "secrets" && (
             <SecretsTab
               secrets={secrets}
-              onAdd={(secret) =>
-                setSecrets((current) => [...current, secret])
-              }
-              onDelete={(id) =>
-                setSecrets((current) =>
-                  current.filter((secret) => secret.id !== id)
-                )
-              }
+              onSecretsChange={setSecrets}
+              onReload={reload}
             />
           )}
           {tab === "preferences" && <PreferencesTab />}

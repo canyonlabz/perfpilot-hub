@@ -1,38 +1,97 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
+import { fetchProfile, saveProfile } from "@/lib/api";
 
 export function ProfileTab() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [savedName, setSavedName] = useState("");
+  const [savedEmail, setSavedEmail] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await fetchProfile();
+        if (cancelled) return;
+        const nextName = profile.display_name ?? "";
+        const nextEmail = profile.email ?? "";
+        setName(nextName);
+        setEmail(nextEmail);
+        setSavedName(nextName);
+        setSavedEmail(nextEmail);
+        setError(null);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Failed to load profile."
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSave() {
+    setBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const profile = await saveProfile({
+        display_name: name.trim(),
+        email: email.trim(),
+      });
+      const nextName = profile.display_name ?? "";
+      const nextEmail = profile.email ?? "";
+      setName(nextName);
+      setEmail(nextEmail);
+      setSavedName(nextName);
+      setSavedEmail(nextEmail);
+      setNotice("Profile saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save profile.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div>
       <div className="pp-page-title">
         <h1>Profile</h1>
         <p>
-          Your name and work email. For now, PerfPilot uses this profile across
-          all of your personal access tokens — it should match the identity
-          those tokens were created for.
+          Your name and work email. PerfPilot uses this profile across all of
+          your personal access tokens — it should match the identity those
+          tokens were created for.
         </p>
       </div>
 
       <div className="pp-note">
         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
-          Temporary: in a future release this will come from your Microsoft
-          Entra ID sign-in and will be read-only here. This form is a visual
-          shell and is not saved to a server.
+          Saved on the server for this browser identity. A later release will
+          replace this with your Microsoft Entra ID sign-in.
         </span>
       </div>
+
+      {error && (
+        <div className="pp-note" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
 
       <div className="pp-card">
         <div className="pp-card-header">
           <div>
             <h3>Your profile</h3>
-            <p>Stored on this device only until Entra ID integration lands.</p>
+            <p>Display name and email for this browser session.</p>
           </div>
         </div>
         <div className="pp-card-body">
@@ -75,10 +134,12 @@ export function ProfileTab() {
           <button
             type="button"
             className="pp-btn pp-btn-secondary"
+            disabled={busy}
             onClick={() => {
-              setName("");
-              setEmail("");
+              setName(savedName);
+              setEmail(savedEmail);
               setNotice(null);
+              setError(null);
             }}
           >
             Cancel
@@ -86,9 +147,8 @@ export function ProfileTab() {
           <button
             type="button"
             className="pp-btn pp-btn-primary"
-            onClick={() =>
-              setNotice("Preview only — nothing was saved to a server.")
-            }
+            disabled={busy}
+            onClick={() => void handleSave()}
           >
             Save profile
           </button>

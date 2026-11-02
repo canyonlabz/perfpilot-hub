@@ -11,6 +11,7 @@ import {
   type SecretComponent,
   type SettingsSecret,
 } from "@/lib/settings-catalog";
+import { createSecret, deleteSecret } from "@/lib/api";
 
 type ModalState = {
   sectionId: FocusAreaId;
@@ -18,14 +19,37 @@ type ModalState = {
 
 export function SecretsTab({
   secrets,
-  onAdd,
-  onDelete,
+  onSecretsChange,
+  onReload,
 }: {
   secrets: SettingsSecret[];
-  onAdd: (secret: SettingsSecret) => void;
-  onDelete: (id: string) => void;
+  onSecretsChange: (secrets: SettingsSecret[]) => void;
+  onReload: () => Promise<void>;
 }) {
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function handleDelete(secret: SettingsSecret) {
+    if (
+      !window.confirm(
+        `Remove “${secret.name}”? Project bindings that used this name will be cleared.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(secret.id);
+    setError(null);
+    try {
+      await deleteSecret(secret.id);
+      onSecretsChange(secrets.filter((row) => row.id !== secret.id));
+      await onReload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete secret.");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div>
@@ -41,11 +65,16 @@ export function SecretsTab({
       <div className="pp-note">
         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
-          Visual shell only — typed values are discarded. Rows stay in this
-          Settings visit until you delete them; nothing is stored or sent
-          anywhere.
+          Values are sent once and stored encrypted. This page only shows
+          names, components, and a mask — never the saved value.
         </span>
       </div>
+
+      {error && (
+        <div className="pp-note" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
 
       {FOCUS_AREAS.map((section) => {
         const rows = secrets.filter((secret) => secret.sectionId === section.id);
@@ -91,15 +120,8 @@ export function SecretsTab({
                       className="pp-icon-btn pp-secret-delete"
                       title={`Delete ${secret.name}`}
                       aria-label={`Delete ${secret.name}`}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Remove “${secret.name}” from this preview list?`
-                          )
-                        ) {
-                          onDelete(secret.id);
-                        }
-                      }}
+                      disabled={busyId === secret.id}
+                      onClick={() => void handleDelete(secret)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -115,10 +137,12 @@ export function SecretsTab({
         <AddSecretModal
           sectionId={modal.sectionId}
           onClose={() => setModal(null)}
-          onSave={(entry) => {
-            onAdd(entry);
+          onSaved={async (entry) => {
+            onSecretsChange([...secrets, entry]);
             setModal(null);
+            await onReload();
           }}
+          onError={setError}
         />
       )}
     </div>
@@ -128,11 +152,13 @@ export function SecretsTab({
 function AddSecretModal({
   sectionId,
   onClose,
-  onSave,
+  onSaved,
+  onError,
 }: {
   sectionId: FocusAreaId;
   onClose: () => void;
-  onSave: (secret: SettingsSecret) => void;
+  onSaved: (secret: SettingsSecret) => Promise<void>;
+  onError: (message: string | null) => void;
 }) {
   const section = focusAreaById(sectionId);
   const [name, setName] = useState("");
@@ -140,6 +166,7 @@ function AddSecretModal({
     section.components[0]
   );
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -149,17 +176,42 @@ function AddSecretModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  function handleSave() {
-    const tokenName = name.trim() || "untitled-secret";
-    setFieldValues({});
-    onSave({
-      id: `local-${Date.now()}`,
-      sectionId,
-      name: tokenName,
-      component: selected,
-      masked: "••••••••••••preview",
-      added: "Preview only",
-    });
+  async function handleSave() {
+    const tokenName = name.trim();
+    if (!tokenName) {
+      onError("Token name is required.");
+      return;
+    }
+    const required = COMPONENT_VALUE_FIELDS[selected];
+    const fields: Record<string, string> = {};
+    const missing: string[] = [];
+    for (const field of required) {
+      const value = (fieldValues[field.id] ?? "").trim();
+      if (!value) {
+        missing.push(field.label);
+      } else {
+        fields[field.id] = value;
+      }
+    }
+    if (missing.length > 0) {
+      onError(`Missing or empty field(s): ${missing.join(", ")}`);
+      return;
+    }
+    setBusy(true);
+    onError(null);
+    try {
+      const saved = await createSecret({
+        component: selected,
+        name: tokenName,
+        fields,
+      });
+      setFieldValues({});
+      await onSaved(saved);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to save secret.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -251,15 +303,25 @@ function AddSecretModal({
             </div>
           ))}
           <p className="pp-modal-note">
-            Typed values are discarded on save. Only a dummy masked name is
-            shown in this preview.
+            The value is sent once and stored encrypted. It will not appear
+            again in this list.
           </p>
         </div>
         <div className="pp-modal-footer">
-          <button type="button" className="pp-btn pp-btn-secondary" onClick={onClose}>
+          <button
+            type="button"
+            className="pp-btn pp-btn-secondary"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancel
           </button>
-          <button type="button" className="pp-btn pp-btn-primary" onClick={handleSave}>
+          <button
+            type="button"
+            className="pp-btn pp-btn-primary"
+            disabled={busy}
+            onClick={() => void handleSave()}
+          >
             Save secret
           </button>
         </div>
