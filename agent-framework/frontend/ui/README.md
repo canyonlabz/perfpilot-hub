@@ -172,16 +172,14 @@ Browser (localhost:3000)
 |------|---------|
 | `app/page.tsx` | Main page — manages `activeThreadId`, wraps chat in `<CopilotKit>` provider |
 | `app/api/copilotkit/route.ts` | CopilotKit Runtime API route — proxies to AG-UI backend with cookie forwarding |
-| `components/chat/chat-panel.tsx` | Unified chat panel — DB history + live streaming + react-markdown; also exposes attached GitHub SCM metadata to the orchestrator via `useCopilotReadable` |
+| `components/chat/chat-panel.tsx` | Unified chat panel — DB history + live streaming + react-markdown |
 | `components/sidebar/thread-sidebar.tsx` | Thread list with CRUD operations |
-| `components/layout/header.tsx` | PerfPilot header — Runs / Agents / Tasks / GitHub + Settings pill + status |
+| `components/layout/header.tsx` | PerfPilot header — Runs / Agents / Tasks + Settings pill + status |
 | `app/settings/page.tsx` | Settings shell — Projects, Secrets, Preferences, Profile (visual tabs; theme control is live) |
-| `lib/settings-catalog.ts` | Focus-area / component catalogs and token-name dropdown helpers |
+| `lib/settings-catalog.ts` | Focus-area / component catalogs (including Datadog) and token-name dropdown helpers |
 | `lib/theme-config.ts` | Theme palettes and `perfpilot.theme` contract |
 | `lib/theme-applier.ts` | Pre-paint script that sets CSS variables on `<html>` |
-| `components/github/github-creds-card.tsx` | Session-only GitHub credential capture card (URL + PAT + optional branch/path) with privacy disclosures |
 | `lib/api.ts` | API helpers (health, threads, messages) |
-| `lib/github-creds.ts` | AES-256-GCM encrypted, session-scoped storage for GitHub credentials via Web Crypto API |
 | `lib/types.ts` | TypeScript interfaces (Thread, Message, etc.) |
 | `next.config.js` | Proxy rewrites + webpack config for CopilotKit v2 CSS exclusion |
 
@@ -194,7 +192,7 @@ Browser (localhost:3000)
 | Agent catalog panel (cards with status, skills) | Completed |
 | SSE task streaming (real-time progress display) | Completed |
 | HITL approve/reject inline cards | Completed |
-| GitHub credentials card (session-scoped, encrypted, drives new-JMX pipeline) | Completed |
+| GitHub credentials card (session-scoped, encrypted, drives new-JMX pipeline) | Retired — dest is chat; PAT is Settings → Secrets |
 | Test-run results display (`/runs` pages) | In Progress |
 | Theme — Auto / Light / Dark from Settings → Preferences | Completed |
 | Polish — responsive layout, skeletons, error boundaries | Not started |

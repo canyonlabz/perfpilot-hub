@@ -36,7 +36,13 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from utils.logging_config import log_event
+
 log = logging.getLogger(__name__)
+
+_LOGGER_NAME = "services.scm_resolver"
+_PROTECTED_PUSH_BRANCHES = frozenset({"main", "master"})
+_SCRIPT_CREATION_SOURCE_TYPES = frozenset({"playwright", "har", "openapi"})
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +275,20 @@ def resolve_scm_target(
         )
         branch_defaulted = True
 
+    if is_protected_push_branch(branch):
+        log_event(
+            _LOGGER_NAME,
+            logging.WARNING,
+            "Refusing to push to a protected branch; ask the user for a "
+            "feature branch.",
+            {
+                "scm.url": _redact_url(url.strip()),
+                "scm.branch": branch,
+                "scm.provider": provider,
+            },
+        )
+        return None
+
     if isinstance(path_raw, str) and path_raw.strip():
         path = path_raw.strip().lstrip("/\\")
     else:
@@ -291,6 +311,72 @@ def resolve_scm_target(
         path=path,
         create_branch=create_branch,
         url=url.strip(),
+    )
+
+
+def is_protected_push_branch(branch: Optional[str]) -> bool:
+    """Return True when ``branch`` is ``main`` or ``master`` (any case)."""
+    if not branch or not isinstance(branch, str):
+        return False
+    return branch.strip().lower() in _PROTECTED_PUSH_BRANCHES
+
+
+def log_script_creation_destination(
+    scm: Optional[dict],
+    *,
+    source_type: str,
+) -> None:
+    """Log dest for Playwright / HAR / OpenAPI script creation via ``log_event``.
+
+    Never logs tokens. When dest is known, records redacted url / branch /
+    optional path. When dest is missing, emits a warning that the script
+    will still be created and a GitHub link will not be available.
+    """
+    if source_type not in _SCRIPT_CREATION_SOURCE_TYPES:
+        return
+
+    url = ""
+    branch = ""
+    path = ""
+    if isinstance(scm, dict):
+        raw_url = scm.get("url")
+        raw_branch = scm.get("branch")
+        raw_path = scm.get("path")
+        if isinstance(raw_url, str):
+            url = raw_url.strip()
+        if isinstance(raw_branch, str):
+            branch = raw_branch.strip()
+        if isinstance(raw_path, str):
+            path = raw_path.strip()
+
+    dest_known = bool(url) and bool(branch) and not is_protected_push_branch(
+        branch
+    )
+    if dest_known:
+        log_event(
+            _LOGGER_NAME,
+            logging.INFO,
+            "Script-creation destination is known.",
+            {
+                "source_type": source_type,
+                "scm.url": _redact_url(url),
+                "scm.branch": branch,
+                "scm.path": path or None,
+            },
+        )
+        return
+
+    log_event(
+        _LOGGER_NAME,
+        logging.WARNING,
+        "Destination is not known; script will be created and a GitHub "
+        "link will not be available.",
+        {
+            "source_type": source_type,
+            "scm.url_present": bool(url),
+            "scm.branch_present": bool(branch),
+            "scm.protected_branch": is_protected_push_branch(branch),
+        },
     )
 
 

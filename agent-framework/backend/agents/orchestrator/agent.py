@@ -668,6 +668,13 @@ async def delegate_to_specialist(
         source_type_normalized = source_type.strip().lower()
         if agent_name == "script-agent":
             body["source_type"] = source_type_normalized
+            from services.scm_resolver import log_script_creation_destination
+
+            scm_block = body.get("scm")
+            log_script_creation_destination(
+                scm_block if isinstance(scm_block, dict) else None,
+                source_type=source_type_normalized,
+            )
         else:
             log.debug(
                 "delegate_to_specialist.source_type_ignored",
