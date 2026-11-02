@@ -469,7 +469,13 @@ def _compose_specialist_prompt(payload: dict) -> str:
             user_msg = val
             break
 
-    message_keys = {"user_message", "message", "text", "prompt"}
+    message_keys = {
+        "user_message",
+        "message",
+        "text",
+        "prompt",
+        "webui_secrets_hint",
+    }
     context = {
         k: v for k, v in payload.items()
         if k not in message_keys and not k.startswith("_") and v is not None
@@ -627,7 +633,16 @@ async def _run_mcp_specialist_agent(
         return envelope
 
     # ---- Agent invocation ---------------------------------------------
-    messages_for_llm = [{"role": "user", "content": user_prompt}]
+    # Web-UI secrets briefing (names only) is injected by
+    # delegate_to_specialist. Keep it as a system turn so specialists
+    # do not re-ask cloud vs onprem when confluence_mode is set.
+    messages_for_llm: list[dict] = []
+    secrets_hint = payload.get("webui_secrets_hint")
+    if isinstance(secrets_hint, str) and secrets_hint.strip():
+        messages_for_llm.append(
+            {"role": "system", "content": secrets_hint.strip()}
+        )
+    messages_for_llm.append({"role": "user", "content": user_prompt})
 
     await _broadcast(
         task.task_id,

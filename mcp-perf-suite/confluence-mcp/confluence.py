@@ -117,15 +117,16 @@ async def _effective_mode(mode: str | None) -> str:
 @mcp.tool
 async def list_spaces(ctx: Context, mode: str | None = None) -> list:
     """
-    Lists available Confluence spaces accessible in the given mode (cloud/onprem).
+    Lists available Confluence spaces.
+
+    Prefer omitting ``mode``. On the Web-UI path the server selects
+    cloud vs onprem from the active Settings secret. Do not ask the
+    user for cloud vs onprem before calling this tool.
 
     Args:
         ctx (Context): FastMCP invocation context. Stores retrieved spaces for reuse.
-        mode (str, optional): Which Confluence API to use. Options:
-            - "cloud": Use Confluence Cloud v2 API (uses 'space_id').
-            - "onprem": Use on-premises Confluence v1 API (uses 'space_key').
-            Web-UI callers may omit this; the active Settings secret
-            component (confluence-cloud / confluence-onprem) selects the API.
+        mode (str, optional): ``cloud`` (v2) or ``onprem`` (v1). Omit on
+            Web-UI; required only for A2A when no Settings binding exists.
 
     Returns:
         List[dict]: Spaces with keys:

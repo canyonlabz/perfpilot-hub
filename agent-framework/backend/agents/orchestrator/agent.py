@@ -669,6 +669,27 @@ async def delegate_to_specialist(
 
     body = dict(payload or {})
 
+    # Web-UI: forward the names-only secrets briefing so specialists
+    # (e.g. reporting-agent) see confluence_mode / bindings and do not
+    # re-ask cloud vs onprem. A2A never sets surface=web_ui.
+    if (
+        _caller_identity.get("surface") == "web_ui"
+        and "webui_secrets_hint" not in body
+    ):
+        hint_user = _caller_identity.get("user_id")
+        if hint_user:
+            try:
+                from services.mcp_client import build_webui_secrets_hint
+
+                secrets_hint = await build_webui_secrets_hint(hint_user)
+                if secrets_hint:
+                    body["webui_secrets_hint"] = secrets_hint
+            except Exception:
+                log.debug(
+                    "delegate_to_specialist: secrets hint skipped",
+                    exc_info=True,
+                )
+
     # Auto-inject the normalized test spec file path into the child
     # task's payload so the specialist agent can use it directly for
     # browser automation without calling get_test_specs.
