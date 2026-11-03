@@ -66,6 +66,10 @@ BLAZEMETER_ACCOUNT_ID=your_blazemeter_account_id_here
 BLAZEMETER_WORKSPACE_ID=your_blazemeter_workspace_id_here
 ```
 
+Those environment variables are the **A2A** credential path. A Web-UI
+call that arrives with `Authorization: Bearer` uses the active
+project's Settings secret instead and does not fall back to this `.env`.
+
 ---
 
 ## ▶️ Running the MCP Server

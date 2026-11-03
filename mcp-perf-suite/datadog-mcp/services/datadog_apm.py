@@ -9,7 +9,7 @@ from pathlib import Path
 from fastmcp import FastMCP, Context
 from utils.config import load_config
 from utils.datadog_config_loader import load_environment_json, load_custom_queries_json
-from services.datadog_api import get_ssl_verify_setting
+from services.datadog_api import get_auth_headers, get_ssl_verify_setting
 
 # -----------------------------------------------
 # Bootstrap
@@ -288,12 +288,9 @@ async def collect_apm_traces(env_name: str, start_time: str, end_time: str, quer
 
         # API request setup
         url = V2_APM_SPANS_URL
-        headers = {
-            'DD-API-KEY': DD_API_KEY,
-            'DD-APPLICATION-KEY': DD_APP_KEY,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
+        headers = await get_auth_headers()
+        headers['Content-Type'] = 'application/json'
+        headers['Accept'] = 'application/json'
         
         # Convert timestamps to milliseconds epoch for APM API
         start_dt = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))

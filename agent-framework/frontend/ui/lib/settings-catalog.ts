@@ -1,8 +1,9 @@
 /**
- * Frontend catalogs for the Settings visual shell.
+ * Frontend catalogs for Settings components, fields, and focus areas.
  *
- * No project rows or secret values live here. Persistence and credential
- * storage belong to the later BYOT / backend integration work.
+ * Project rows and secret values live on the AG-UI APIs. This file only
+ * names the component ids and field labels so the UI stays aligned with
+ * the backend settings catalog.
  */
 
 export const NONE_SELECTED = "";
@@ -136,6 +137,20 @@ export function focusAreaById(id: FocusAreaId): FocusArea {
     throw new Error(`Unknown focus area: ${id}`);
   }
   return area;
+}
+
+export function focusAreaForComponent(
+  component: SecretComponent,
+  fallback?: string
+): FocusAreaId {
+  const known = FOCUS_AREAS.find((item) => item.id === fallback);
+  if (known) {
+    return known.id;
+  }
+  const byComponent = FOCUS_AREAS.find((item) =>
+    item.components.includes(component)
+  );
+  return byComponent?.id ?? "tracking";
 }
 
 export function tokenNamesForIntegration(

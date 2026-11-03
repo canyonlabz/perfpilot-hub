@@ -1,6 +1,6 @@
 # 🧰 PerfPilot Technology Stack
 
-Last updated: October 25, 2026
+Last updated: November 2, 2026
 
 ## 🎯 Purpose
 
@@ -9,9 +9,10 @@ to consult when changing an integration. See [Development workflow](development-
 for coding, testing, logging, and documentation conventions.
 
 Installed versions below come from maintainer-supplied local command output on
-October 25, 2026. They describe the inspected local environment, not verified
-container versions. Dependency constraints describe allowed versions; they are
-not exact installation pins.
+October 25, 2026, except `fastmcp`, which was observed as `3.4.11` in Aspire
+startup logs on November 1, 2026. They describe the inspected local
+environment, not independently verified image contents. Dependency constraints
+describe allowed versions; they are not exact installation pins.
 
 ## 🧩 Components and locations
 
@@ -46,7 +47,7 @@ Do not infer the Node.js runtime from `@types/node`.
 | --- | --- | --- |
 | `ag2[ag-ui]` | `>=0.13.3,<0.14` | `ag2==0.13.3` |
 | `ag-ui-protocol` | No separate direct requirement supplied | `0.1.19` |
-| `fastmcp` | `>=3.4.2,<4` | `3.4.2` |
+| `fastmcp` | `>=3.4.2,<4` | `3.4.11` |
 | `fastapi` | `>=0.115.0` | `0.136.3` |
 | `starlette` | `>=1.2.1` | `1.2.1` |
 | `structlog` | `>=24.0.0` | `26.1.0` |
@@ -64,6 +65,13 @@ Other supplied backend requirements:
 | `pyyaml` | `>=6.0.2` |
 | `python-dotenv` | `>=1.2.1` |
 | `tiktoken` | `>=0.12.0` |
+| `cryptography` | `>=43.0.0` |
+| `PyJWT` | `>=2.9.0` |
+
+`cryptography` and `PyJWT` are also declared on the GitHub, BlazeMeter,
+Datadog, and Confluence MCP requirement files (`>=43.0.0` and `>=2.9.0`).
+Those four MCPs also declare `asyncpg>=0.30.0` for Web-UI secret reads.
+Installed versions were not re-checked in this update.
 
 No A2A SDK package is installed according to the maintainer. Follow the existing
 server implementation; do not assume SDK-specific classes or install an SDK as
@@ -153,10 +161,13 @@ code. Preserve the AG-UI event contract and keep credentials out of browser code
 
 ### FastMCP
 
-Target the approved version-3 implementation and `>=3.4.2,<4` requirement. Use
-version-3 documentation or matching release source, not examples from another
-major release. Preserve existing gateway, namespace, tool, and transport contracts.
-Future readiness does not authorize a v4 migration or speculative compatibility code.
+Target the approved version-3 implementation and `>=3.4.2,<4` requirement.
+Observed local Aspire runtime as of November 1, 2026 is FastMCP `3.4.11`
+([release notes](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.11)).
+Use version-3 documentation or the matching 3.4.x release source, not examples
+from another major release. Preserve existing gateway, namespace, tool, and
+transport contracts. Future readiness does not authorize a v4 migration or
+speculative compatibility code.
 
 ### Logging and containers
 
@@ -185,7 +196,7 @@ non-trivial implementation plans.
 | CopilotKit | https://docs.copilotkit.ai/ | Match installed 1.60.1 packages |
 | Next.js | https://nextjs.org/docs | Match Next.js 15.5.19; select v15 guidance |
 | React | https://react.dev/ | Match React 19 behavior |
-| FastMCP | https://gofastmcp.com/ and https://github.com/PrefectHQ/fastmcp | Select v3 documentation or matching release source |
+| FastMCP | https://gofastmcp.com/v3/ and https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.11 | Declared `>=3.4.2,<4`; observed Aspire install `3.4.11` |
 | Python | https://docs.python.org/3.12/ | Python 3.12 |
 | Node.js | https://nodejs.org/docs/latest-v25.x/api/ | Node.js v25; verify patch-specific behavior if relevant |
 | Docker | https://docs.docker.com/ | Match the actual Engine/Compose versions |

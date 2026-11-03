@@ -16,6 +16,7 @@ The source of truth is ``config/environments.yaml`` (with
 Public API::
 
     load_environments_config(...)                    -> raw dict
+    list_project_catalog(...)                        -> list[ProjectCatalogEntry]
     resolve_environment(name, ..., overrides=...)    -> ResolvedEnvironment
     get_cert_profile(profile_name, ...)              -> CertProfile
     clear_environments_cache()
@@ -111,6 +112,19 @@ class ResolvedEnvironment:
     cert_profile: Optional[CertProfile]
     tags: tuple[str, ...] = ()
     metadata: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ProjectCatalogEntry:
+    """One project row for Settings bindings.
+
+    ``project_key`` is the YAML key stored on ``user_project_bindings``.
+    Display name and aliases are read-only identity from the file.
+    """
+
+    project_key: str
+    name: str
+    aliases: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +226,79 @@ def load_environments_config(
         _config_cache = result
         _config_framework_dir = framework_dir
     return result
+
+
+# ---------------------------------------------------------------------------
+# Project catalog (Settings bindings)
+# ---------------------------------------------------------------------------
+
+
+def list_project_catalog(
+    *,
+    framework_dir: Optional[Path] = None,
+) -> list[ProjectCatalogEntry]:
+    """List project keys the Settings Projects tab can bind to.
+
+    Prefers a top-level ``projects:`` map (display name + aliases). When
+    that section is absent, falls back to ``environments:`` keys so an
+    operator file that only names QA / UAT / PERF still produces rows.
+    Does not invent keys when both sections are missing or empty.
+    """
+    config = load_environments_config(framework_dir=framework_dir)
+    projects = config.get("projects")
+    if isinstance(projects, dict) and projects:
+        entries: list[ProjectCatalogEntry] = []
+        for raw_key, raw_entry in projects.items():
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            if isinstance(raw_entry, dict):
+                name_val = raw_entry.get("name")
+                name = str(name_val).strip() if name_val else key
+                aliases_raw = raw_entry.get("aliases") or ()
+                if isinstance(aliases_raw, list):
+                    aliases = tuple(
+                        str(item).strip()
+                        for item in aliases_raw
+                        if item is not None and str(item).strip()
+                    )
+                else:
+                    aliases = ()
+            else:
+                name = key
+                aliases = ()
+            entries.append(
+                ProjectCatalogEntry(project_key=key, name=name, aliases=aliases)
+            )
+        return entries
+
+    envs = config.get("environments")
+    if not isinstance(envs, dict) or not envs:
+        return []
+    entries = []
+    for raw_key in envs:
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        entries.append(ProjectCatalogEntry(project_key=key, name=key, aliases=()))
+    return entries
+
+
+def resolve_project_key(
+    project_key: str,
+    *,
+    framework_dir: Optional[Path] = None,
+) -> Optional[ProjectCatalogEntry]:
+    """Return the catalog entry whose key matches ``project_key`` (case-insensitive)."""
+    if not project_key or not isinstance(project_key, str):
+        return None
+    needle = project_key.strip().lower()
+    if not needle:
+        return None
+    for entry in list_project_catalog(framework_dir=framework_dir):
+        if entry.project_key.lower() == needle:
+            return entry
+    return None
 
 
 # ---------------------------------------------------------------------------

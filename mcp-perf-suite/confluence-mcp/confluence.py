@@ -88,20 +88,45 @@ def validate_page_title(title: str) -> dict:
     
     return {"valid": True, "error": None}
 
+
+async def _effective_mode(mode: str | None) -> str:
+    """Prefer Web-UI Settings component; A2A still requires explicit mode."""
+    from utils.credential_resolver import (
+        CredentialResolveError,
+        resolve_confluence_mode,
+    )
+
+    try:
+        derived = await resolve_confluence_mode()
+    except CredentialResolveError as exc:
+        raise ValueError(str(exc)) from exc
+    if derived is not None:
+        return derived
+    if mode in ("cloud", "onprem"):
+        return mode
+    raise ValueError(
+        "mode must be 'cloud' or 'onprem' when no Web-UI Confluence "
+        "Settings binding is present."
+    )
+
+
 # -----------------------------
 # MCP Tool Definitions
 # -----------------------------
 
 @mcp.tool
-async def list_spaces(mode: str, ctx: Context) -> list:
+async def list_spaces(ctx: Context, mode: str | None = None) -> list:
     """
-    Lists available Confluence spaces accessible in the given mode (cloud/onprem).
+    Lists available Confluence spaces.
+
+    Prefer omitting ``mode``. On the Web-UI path the server selects
+    cloud vs onprem from the active Settings secret. Do not ask the
+    user for cloud vs onprem before calling this tool.
 
     Args:
-        mode (str): Which Confluence API to use. Options:
-            - "cloud": Use Confluence Cloud v2 API (uses 'space_id').
-            - "onprem": Use on-premises Confluence v1 API (uses 'space_key').
         ctx (Context): FastMCP invocation context. Stores retrieved spaces for reuse.
+        mode (str, optional): ``cloud`` (v2) or ``onprem`` (v1). Omit on
+            Web-UI; required only for A2A when no Settings binding exists.
 
     Returns:
         List[dict]: Spaces with keys:
@@ -109,19 +134,22 @@ async def list_spaces(mode: str, ctx: Context) -> list:
             - 'name': Human-friendly display name.
             - 'type': Space type, if available.
     """
+    mode = await _effective_mode(mode)
     if mode == "cloud":
         return await list_spaces_v2(ctx)
     return await list_spaces_v1(ctx)
 
 @mcp.tool()
-async def get_space_details(space_ref: str, mode: str, ctx: Context) -> dict:
+async def get_space_details(
+    space_ref: str, ctx: Context, mode: str | None = None
+) -> dict:
     """
     Retrieves metadata and configuration details for a specific Confluence space.
 
     Args:
         space_ref (str): Identifier for the Confluence space (space_id for cloud or space_key for on-prem).
-        mode (str): "cloud" (Confluence v2 API) or "onprem" (Confluence v1 API).
         ctx (Context): FastMCP context for workflow chaining and error reporting.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
 
     Returns:
         dict: Space metadata, including:
@@ -132,19 +160,22 @@ async def get_space_details(space_ref: str, mode: str, ctx: Context) -> dict:
             - 'status'
             - Additional API-provided metadata (e.g., permissions, categories, homepage)
     """
+    mode = await _effective_mode(mode)
     if mode == "cloud":
         return await get_space_details_v2(space_ref, ctx)
     return await get_space_details_v1(space_ref, ctx)
 
 @mcp.tool
-async def list_pages(space_ref: str, mode: str, ctx: Context) -> list:
+async def list_pages(
+    space_ref: str, ctx: Context, mode: str | None = None
+) -> list:
     """
     Lists pages in a Confluence space. Use 'space_ref' output from list_spaces.
 
     Args:
         space_ref (str): Unique reference for the Confluence space (either space_id or space_key).
-        mode (str): "cloud" for v2 API; "onprem" for v1 API.
         ctx (Context): FastMCP invocation context. Page list will be stored for further workflow steps.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
 
     Returns:
         List of page metadata dicts with:
@@ -154,20 +185,23 @@ async def list_pages(space_ref: str, mode: str, ctx: Context) -> list:
             - url: Direct link to page
             - Additional fields depending on API version
     """
+    mode = await _effective_mode(mode)
     if mode == "cloud":
         return await list_pages_v2(space_ref, ctx)
     else:
         return await list_pages_v1(space_ref, ctx)
 
 @mcp.tool()
-async def get_page_by_id(page_ref: str, mode: str, ctx: Context) -> dict:
+async def get_page_by_id(
+    page_ref: str, ctx: Context, mode: str | None = None
+) -> dict:
     """
     Retrieves detailed metadata for a specific Confluence page by ID.
     
     Args:
         page_ref (str): Unique page identifier (page ID).
-        mode (str): "cloud" (Confluence v2 API) or "onprem" (Confluence v1 API).
         ctx (Context): FastMCP invocation context for workflow chaining and logging.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
     
     Returns:
         dict: Page metadata including:
@@ -180,13 +214,16 @@ async def get_page_by_id(page_ref: str, mode: str, ctx: Context) -> dict:
             - author/owner information
             - url: Direct link to page
     """
+    mode = await _effective_mode(mode)
     if mode == "cloud":
         return await get_page_by_id_v2(page_ref, ctx)
     else:
         return await get_page_by_id_v1(page_ref, ctx)
 
 @mcp.tool()
-async def get_page_content(page_ref: str, mode: str, ctx: Context) -> dict:
+async def get_page_content(
+    page_ref: str, ctx: Context, mode: str | None = None
+) -> dict:
     """
     Retrieves the full content body of a Confluence page in storage format (XHTML).
     
@@ -198,8 +235,8 @@ async def get_page_content(page_ref: str, mode: str, ctx: Context) -> dict:
     
     Args:
         page_ref (str): Unique page identifier (page ID).
-        mode (str): "cloud" (Confluence v2 API) or "onprem" (Confluence v1 API).
         ctx (Context): FastMCP invocation context for workflow chaining and logging.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
     
     Returns:
         dict: Page content including:
@@ -210,13 +247,23 @@ async def get_page_content(page_ref: str, mode: str, ctx: Context) -> dict:
             - representation: Content representation type (typically "storage")
             - url: Direct link to page
     """
+    mode = await _effective_mode(mode)
     if mode == "cloud":
         return await get_page_content_v2(page_ref, ctx)
     else:
         return await get_page_content_v1(page_ref, ctx)
 
 @mcp.tool
-async def create_page(space_ref: str, test_run_id: str, filename: str, mode: str, ctx: Context, parent_id: str, title: str = None, report_type: str = "single_run") -> dict:
+async def create_page(
+    space_ref: str,
+    test_run_id: str,
+    filename: str,
+    ctx: Context,
+    parent_id: str,
+    mode: str | None = None,
+    title: str = None,
+    report_type: str = "single_run",
+) -> dict:
     """
     Creates a new Confluence page by importing a Markdown performance report.
     
@@ -224,9 +271,9 @@ async def create_page(space_ref: str, test_run_id: str, filename: str, mode: str
         space_ref (str): Space identifier (space_id for cloud, space_key for on-prem) from list_spaces.
         test_run_id (str): ID of the test run or comparison_id (used for artifact path).
         filename (str): Markdown report filename, as returned by get_available_reports.
-        mode (str): "cloud" or "onprem".
         ctx (Context): FastMCP context for error/status reporting.
         parent_id (str): Parent page ID to nest the new page under.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
         title (str, optional): Custom page title. If not provided, title is extracted from 
             the markdown H1 heading, or falls back to the filename. Allowed characters:
             alphanumeric, whitespace, underscores, dashes, parentheses, square brackets,
@@ -310,7 +357,8 @@ async def create_page(space_ref: str, test_run_id: str, filename: str, mode: str
         return xhtml_result
     
     storage_xhtml = xhtml_result
-    
+    mode = await _effective_mode(mode)
+
     # Create page using appropriate API
     if mode == "cloud":
         result = await create_page_v2(space_ref, title, storage_xhtml, ctx, parent_id)
@@ -324,7 +372,13 @@ async def create_page(space_ref: str, test_run_id: str, filename: str, mode: str
     return result
 
 @mcp.tool
-async def attach_images(page_ref: str, test_run_id: str, mode: str, ctx: Context, report_type: str = "single_run") -> dict:
+async def attach_images(
+    page_ref: str,
+    test_run_id: str,
+    ctx: Context,
+    mode: str | None = None,
+    report_type: str = "single_run",
+) -> dict:
     """
     Attaches all PNG chart images from a test run to an existing Confluence page.
     
@@ -334,8 +388,8 @@ async def attach_images(page_ref: str, test_run_id: str, mode: str, ctx: Context
     Args:
         page_ref (str): Page ID to attach images to (from create_page or list_pages).
         test_run_id (str): Test run ID or comparison_id whose charts to upload.
-        mode (str): "cloud" or "onprem".
         ctx (Context): FastMCP context for chaining/error handling.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
         report_type (str): Type of report - "single_run" (default) or "comparison".
             - "single_run": Path is artifacts/{test_run_id}/charts/
             - "comparison": Path is artifacts/comparisons/{test_run_id}/charts/
@@ -410,7 +464,8 @@ async def attach_images(page_ref: str, test_run_id: str, mode: str, ctx: Context
         }
     
     await ctx.info(f"Found {len(png_files)} PNG files to attach in {charts_folder}")
-    
+
+    mode = await _effective_mode(mode)
     # Select the appropriate attach function based on mode
     attach_func = attach_file_v2 if mode == "cloud" else attach_file_v1
     
@@ -461,7 +516,14 @@ async def attach_images(page_ref: str, test_run_id: str, mode: str, ctx: Context
 
 
 @mcp.tool
-async def update_page(page_ref: str, test_run_id: str, mode: str, ctx: Context, use_revised: bool = False, report_type: str = "single_run") -> dict:
+async def update_page(
+    page_ref: str,
+    test_run_id: str,
+    ctx: Context,
+    mode: str | None = None,
+    use_revised: bool = False,
+    report_type: str = "single_run",
+) -> dict:
     """
     Updates a Confluence page by replacing chart placeholders with embedded images.
     
@@ -481,8 +543,8 @@ async def update_page(page_ref: str, test_run_id: str, mode: str, ctx: Context, 
     Args:
         page_ref (str): Page ID to update (from create_page).
         test_run_id (str): Test run ID or comparison_id whose XHTML and charts to use.
-        mode (str): "cloud" or "onprem".
         ctx (Context): FastMCP context.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
         use_revised (bool): If True, use the AI-revised XHTML file (*_revised.xhtml).
             If False (default), use the main report XHTML.
             This allows publishing revised content to an existing page.
@@ -676,7 +738,8 @@ async def update_page(page_ref: str, test_run_id: str, mode: str, ctx: Context, 
     
     # Flatten XHTML for API submission
     flattened_xhtml = _flatten_xhtml(xhtml_with_images)
-    
+
+    mode = await _effective_mode(mode)
     # Update the page
     if mode == "cloud":
         result = await update_page_v2(page_ref, flattened_xhtml, ctx)
@@ -763,7 +826,12 @@ async def convert_markdown_to_xhtml(test_run_id: str, filename: str, ctx: Contex
     return await markdown_to_confluence_xhtml(test_run_id, filename, ctx, report_type)
 
 @mcp.tool()
-async def search_pages(query: str, mode: str, ctx: Context, space_ref: str = None) -> list:
+async def search_pages(
+    query: str,
+    ctx: Context,
+    mode: str | None = None,
+    space_ref: str = None,
+) -> list:
     """
     Searches for Confluence pages using CQL (Confluence Query Language).
     
@@ -771,8 +839,8 @@ async def search_pages(query: str, mode: str, ctx: Context, space_ref: str = Non
     
     Args:
         query (str): Search term or phrase (e.g., "performance test", "QA Testing Process").
-        mode (str): "cloud" or "onprem".
         ctx (Context): FastMCP context.
+        mode (str, optional): "cloud" or "onprem". Web-UI may omit; Settings component selects the API.
         space_ref (str, optional): Limit search to specific space (space key for both v1 and cloud).
     
     Returns:
@@ -786,9 +854,10 @@ async def search_pages(query: str, mode: str, ctx: Context, space_ref: str = Non
             - last_modified: Last modification date
     
     Examples:
-        - search_pages("performance test", "cloud")
-        - search_pages("QA Testing Process", "onprem", space_ref="NPQA")
+        - search_pages("performance test", mode="cloud")
+        - search_pages("QA Testing Process", mode="onprem", space_ref="NPQA")
     """
+    mode = await _effective_mode(mode)
     if mode == "cloud":
         return await search_content_v2(query, space_ref, ctx)
     else:

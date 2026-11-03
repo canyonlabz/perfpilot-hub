@@ -142,6 +142,15 @@ dotnet user-secrets set "Parameters:confluence-v2-api-token" "<confluence-api-to
 
 # ── AI Assistant / SCM integration ───────────────────────────────────────
 dotnet user-secrets set "Parameters:github-personal-access-token" "<github-personal-access-token>" --id perfpilot-aspire-apphost
+
+# ── Web-UI user secrets (AES-256 master key, base64 32 bytes) ────────────
+# Required for Settings secrets encrypt/decrypt. Generate once, for example:
+#   python -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+# Aspire injects this as PERFPLOT_SECRETS_MASTER_KEY on perfpilot-agui and
+# the GitHub, BlazeMeter, Datadog, and Confluence MCP containers only.
+# Losing it means stored tokens cannot be decrypted. Do not reuse the
+# Postgres password. Do not commit the value.
+dotnet user-secrets set "Parameters:perfpilot-secrets-master-key" "<base64-32-byte-key>" --id perfpilot-aspire-apphost
 ```
 
 ### Optional secrets (commented out in `apphost.cs`)
@@ -369,6 +378,20 @@ uncommented in `apphost.cs` and the matching secrets are set. See
 [Optional secrets](#optional-secrets-commented-out-in-apphostcs) above.
 
 ---
+
+## Docker Compose and other runtimes
+
+Aspire injects `PERFPLOT_SECRETS_MASTER_KEY` from user-secrets. When you
+run Docker Compose instead:
+
+1. Generate the same 32-byte base64 key (or reuse the Aspire value).
+2. Put `PERFPLOT_SECRETS_MASTER_KEY=` in `docker/.env` (see
+   `docker/.env.example`) and in `agent-framework/backend/.env` for a
+   host-side AG-UI process.
+3. Full-stack Compose interpolates that key plus `PERFAGENT_STATE_*`
+   onto `perfpilot-agui` and the GitHub, BlazeMeter, Datadog, and
+   Confluence MCP services only. Other services unset the key, including
+   A2A, the gateway, and the frontend.
 
 ---
 

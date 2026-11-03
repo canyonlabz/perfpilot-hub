@@ -30,6 +30,7 @@ are retired, and inbound messages follow A2A v1.0.0.
 - [🚀 16. .NET Aspire orchestration](#16-net-aspire-orchestration)
 - [🎨 17. Web UI visual port](#17-web-ui-visual-port)
 - [🔐 18. Settings Secrets catalog and header GitHub retirement](#18-settings-secrets-catalog-and-header-github-retirement)
+- [🔑 19. Web-UI bring-your-own tokens](#19-web-ui-bring-your-own-tokens)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -294,6 +295,41 @@ The live frontend now matches the approved chat and Settings mocks, plus Aspire 
 
 ---
 
+## 🔑 19. Web-UI bring-your-own tokens
+
+Web-UI users store named personal tokens on the server. A2A credential
+behavior is unchanged: those callers keep using environment variables
+and never receive a context JWT.
+
+- Settings → Profile, Secrets, and Projects persist through AG-UI
+  (`GET`/`PATCH /api/me`, `GET`/`POST`/`DELETE /api/secrets`,
+  `GET`/`PUT /api/project-bindings`). Preferences theme stays in
+  `localStorage`. Saved secret values are not returned after create.
+- Tokens are encrypted with AES-256-GCM under one operator key,
+  `PERFPLOT_SECRETS_MASTER_KEY` (32-byte base64). Project identity
+  stays in `environments.yaml`; the database stores per-user enable /
+  active flags and token **names**.
+- The Web-UI → MCP hop sends `Authorization: Bearer` (HS256 JWT with
+  user identity only). GitHub, BlazeMeter, Datadog, and Confluence
+  decrypt the active project's bound secret themselves. A missing
+  binding is a names-only orchestrator message, not an env fallback.
+  An invalid vendor token still surfaces as a vendor 401. GitHub
+  `token=` is ignored on the Web-UI path.
+- Aspire and full-stack Compose inject the master key and
+  `PERFAGENT_STATE_*` onto AG-UI and those four MCPs only. A2A, the
+  gateway, the frontend, and the other MCPs do not receive the key.
+- Schema files `012`–`015` add `users`, `user_secrets`,
+  `user_secret_fields`, and `user_project_bindings`. There is no live
+  PAT validation on save.
+
+**Operator notes:** set the master key in Aspire user-secrets
+(`Parameters:perfpilot-secrets-master-key`) or `docker/.env`. Rebuild
+AG-UI and the four API MCP images so `cryptography`, `PyJWT`, and
+`asyncpg` are installed. Apply SQL `012`–`015` if they are not already
+on `perfagent_state`.
+
+---
+
 ## 📚 Previous Changelogs
 
 | Month | Link | Highlights |
@@ -310,4 +346,4 @@ The live frontend now matches the approved chat and Settings mocks, plus Aspire 
 
 ---
 
-*Last Updated: November 1, 2026* ✨
+*Last Updated: November 2, 2026* ✨

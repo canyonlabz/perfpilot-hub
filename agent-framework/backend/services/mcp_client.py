@@ -197,6 +197,173 @@ def _tool_name(tool: Any) -> str | None:
 
 
 # =============================================================================
+# Web-UI hop (JWT, binding preflight, redact). A2A leaves surface unset.
+# =============================================================================
+
+_SECRET_KEYS = frozenset({
+    "token", "user_id", "api_key", "api_secret", "app_key",
+    "password", "authorization", "pat", "secret",
+})
+
+
+class McpPreflightError(Exception):
+    """Web-UI BYOT binding or JWT missing. Do not call the MCP."""
+
+
+def _caller_field(key: str) -> Any:
+    try:
+        from agents.orchestrator.agent import _caller_identity
+    except Exception:
+        return None
+    return _caller_identity.get(key)
+
+
+def _is_web_ui() -> bool:
+    return _caller_field("surface") == "web_ui"
+
+
+def _web_ui_user_id() -> str | None:
+    value = _caller_field("user_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _byot_name(tool_name: str) -> str | None:
+    from services.settings_catalog import INTEGRATION_COMPONENTS
+
+    if not tool_name or "_" not in tool_name:
+        return None
+    prefix = tool_name.split("_", 1)[0]
+    return prefix if prefix in INTEGRATION_COMPONENTS else None
+
+
+def redact_tool_args(args: dict | None) -> dict:
+    """Copy args with secret-like values replaced. Never logs the original."""
+    if not isinstance(args, dict):
+        return {}
+    return {
+        key: ("***" if str(key).lower() in _SECRET_KEYS else value)
+        for key, value in args.items()
+    }
+
+
+def _strip_secret_kwargs(args: dict | None) -> dict:
+    if not isinstance(args, dict):
+        return {}
+    return {
+        key: value
+        for key, value in args.items()
+        if str(key).lower() not in _SECRET_KEYS
+    }
+
+
+async def resolve_mcp_http_headers() -> dict[str, str]:
+    """Mint ``Authorization: Bearer`` for Web-UI. Empty dict for A2A."""
+    if not _is_web_ui():
+        return {}
+    user_id = _web_ui_user_id()
+    if not user_id:
+        return {}
+    name = ""
+    email = ""
+    try:
+        from stores import user_store
+
+        profile = await user_store.get_user(user_id)
+        if profile is not None:
+            name = profile.display_name or ""
+            email = profile.email or ""
+    except Exception:
+        log.debug("JWT profile lookup skipped", exc_info=True)
+    try:
+        from services.mcp_context_jwt import mint_mcp_context_jwt
+
+        token = mint_mcp_context_jwt(user_id=user_id, name=name, email=email)
+    except Exception as exc:
+        log.info("JWT not minted (%s)", type(exc).__name__)
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def prepare_mcp_call(tool_name: str, args: dict | None) -> dict:
+    """Web-UI: preflight BYOT tools and strip secret kwargs. A2A: pass through."""
+    if not _is_web_ui():
+        return dict(args) if isinstance(args, dict) else {}
+    byot = _byot_name(tool_name)
+    if byot:
+        user_id = _web_ui_user_id()
+        from stores import user_project_binding_store
+
+        binding = (
+            await user_project_binding_store.get_active_binding(user_id)
+            if user_id
+            else None
+        )
+        token_name = (
+            getattr(binding, f"{byot}_token_name", None) if binding else None
+        )
+        if not token_name or not str(token_name).strip():
+            project = binding.project_key if binding else "(none active)"
+            raise McpPreflightError(
+                f"No token configured for {byot} on project {project}."
+            )
+        headers = await resolve_mcp_http_headers()
+        if "Authorization" not in headers:
+            raise McpPreflightError(
+                f"Web-UI cannot call {byot} because the secrets "
+                "master key is not available."
+            )
+    return _strip_secret_kwargs(args)
+
+
+async def build_webui_secrets_hint(user_id: str) -> str | None:
+    """Names-only. No values, JWT, or ciphertext."""
+    if not user_id:
+        return None
+    try:
+        from services.settings_catalog import INTEGRATION_COMPONENTS
+        from stores import user_project_binding_store, user_secret_store
+
+        binding = await user_project_binding_store.get_active_binding(user_id)
+        secrets = await user_secret_store.list_secrets(user_id)
+    except Exception:
+        log.debug("secrets hint skipped", exc_info=True)
+        return None
+    names = sorted({item.name for item in secrets if item.name})
+    named = ", ".join(names) if names else "(none)"
+    if binding is None:
+        return (
+            f"Web-UI secrets: no active project. Token names on file: {named}. "
+            "Do not invent credentials. Do not put a PAT on a tool argument."
+        )
+    flags = "; ".join(
+        f"{key}="
+        + (getattr(binding, f"{key}_token_name", None) or "not configured")
+        for key in INTEGRATION_COMPONENTS
+    )
+    confluence_mode_hint = ""
+    confluence_token = getattr(binding, "confluence_token_name", None)
+    if confluence_token:
+        for item in secrets:
+            if item.name != confluence_token:
+                continue
+            if item.component == "confluence-cloud":
+                confluence_mode_hint = " confluence_mode=cloud."
+            elif item.component == "confluence-onprem":
+                confluence_mode_hint = " confluence_mode=onprem."
+            break
+    return (
+        f"Web-UI secrets: active project {binding.project_key}. {flags}."
+        f"{confluence_mode_hint} "
+        f"Stored token names: {named}. "
+        "Never put a PAT, JWT, or secret value in a tool argument. "
+        "For Confluence tools, omit mode when confluence_mode is set; "
+        "the MCP resolves cloud vs onprem from Settings."
+    )
+
+
+# =============================================================================
 # Real FastMCP client (PBI 3.8.2)
 # =============================================================================
 
@@ -248,7 +415,14 @@ class MCPClient:
         from fastmcp import Client
         from fastmcp.client.transports import StreamableHttpTransport
 
-        self._transport = StreamableHttpTransport(url=self._config.gateway_url)
+        headers = await resolve_mcp_http_headers()
+        if headers:
+            self._transport = StreamableHttpTransport(
+                url=self._config.gateway_url,
+                headers=headers,
+            )
+        else:
+            self._transport = StreamableHttpTransport(url=self._config.gateway_url)
         self._client = Client(self._transport)
         await self._client.__aenter__()
         log.debug(
@@ -320,8 +494,9 @@ class MCPClient:
                 "Adjust the agent's config.yaml->mcp_tools.allowed_namespaces "
                 "if this is a legitimate addition."
             )
-        log.debug("MCPClient.call_tool(%s, %s)", name, args)
-        return await self._client.call_tool(name, args or {})
+        dispatch_args = await prepare_mcp_call(name, args)
+        log.debug("MCPClient.call_tool(%s, %s)", name, redact_tool_args(args))
+        return await self._client.call_tool(name, dispatch_args)
 
     def _require_connected(self) -> None:
         if self._client is None:

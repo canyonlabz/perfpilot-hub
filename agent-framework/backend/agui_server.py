@@ -23,6 +23,9 @@ URL conventions:
   /api/runs[/{test_run_id}]   - Test-run grouping over agent_tasks
   /api/hitl/{approve,reject}  - HITL CRUD over hitl_approvals
   /api/events                 - AG-UI SSE event stream from task_executor
+  /api/me                     - Web-UI profile (lazy-create)
+  /api/secrets                - Encrypted user-secret metadata
+  /api/project-bindings       - Per-user project enable/active + token names
   /health                     - Liveness probe
 
 Deliberately NOT prefixed with `/api/perfpilot/*`. The shorter `/api/*`
@@ -56,7 +59,7 @@ if __package__ is None:
 import asyncio
 import json
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
@@ -66,7 +69,7 @@ from utils import (
     agents_config,
     auth,
 )
-from services import task_executor
+from services import env_resolver, settings_catalog, task_executor, user_identity
 from stores import (
     conversation_store,
     db,
@@ -74,7 +77,11 @@ from stores import (
     session_store,
     task_store,
     thread_store,
+    user_project_binding_store,
+    user_secret_store,
+    user_store,
 )
+from utils.secret_crypto import SecretCryptoError
 from utils.paths import get_framework_dir
 from services.session_middleware import SessionMiddleware
 
@@ -358,8 +365,10 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
             #   - delegate_to_specialist can forward the candidate list to
             #     specialists on comparison intents.
             from services.helpers.webui_resolve import resolve_test_run_id_for_webui
+            from services.mcp_client import build_webui_secrets_hint
             from agents.orchestrator.agent import (
                 set_caller_identity,
+                set_caller_surface,
                 set_known_test_run_ids,
                 clear_caller_identity,
             )
@@ -374,6 +383,7 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                 session_id=str(session_id_val) if session_id_val else None,
                 test_run_id=webui_resolve.test_run_id,
             )
+            set_caller_surface("web_ui")
             set_known_test_run_ids(webui_resolve.known_test_run_ids)
 
             # Inject the ask-user hint (when the thread has multiple known
@@ -396,6 +406,25 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                 except Exception:
                     log.exception(
                         "/copilotkit: failed to inject webui_resolve system hint; "
+                        "continuing without it"
+                    )
+
+            secrets_hint = await build_webui_secrets_hint(requesting_user)
+            if secrets_hint:
+                try:
+                    from ag_ui.core import SystemMessage
+
+                    combined_messages = [
+                        SystemMessage(
+                            id="webui-secrets-names-hint",
+                            role="system",
+                            content=secrets_hint,
+                        ),
+                        *combined_messages,
+                    ]
+                except Exception:
+                    log.exception(
+                        "/copilotkit: failed to inject secrets names hint; "
                         "continuing without it"
                     )
 
@@ -648,6 +677,67 @@ class ThreadUpdate(BaseModel):
     status: Optional[str] = None
 
 
+class ProfileUpdate(BaseModel):
+    """Body for PATCH /api/me. Omitted fields are left unchanged."""
+
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+
+
+class ProfileResume(BaseModel):
+    """Body for POST /api/me/resume. Email is self-asserted."""
+
+    email: str
+
+
+class SecretCreate(BaseModel):
+    """Body for POST /api/secrets. ``fields`` is plaintext only in this request."""
+
+    component: str
+    name: str
+    fields: dict[str, str] = Field(default_factory=dict)
+
+
+class ProjectBindingItem(BaseModel):
+    """One row in PUT /api/project-bindings."""
+
+    project_key: str
+    is_enabled: bool = False
+    is_active: bool = False
+    confluence_token_name: Optional[str] = None
+    blazemeter_token_name: Optional[str] = None
+    datadog_token_name: Optional[str] = None
+    github_token_name: Optional[str] = None
+
+
+class ProjectBindingsReplace(BaseModel):
+    """Body for PUT /api/project-bindings."""
+
+    bindings: list[ProjectBindingItem] = Field(default_factory=list)
+
+
+def _require_user_id(request: Request) -> str:
+    """Return ``request.state.user_id`` or raise 401."""
+    requesting_user = getattr(request.state, "user_id", None)
+    if requesting_user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="No user identity resolved on this request.",
+        )
+    return requesting_user
+
+
+def _apply_user_cookie(response: Response, user_id: str) -> None:
+    cookie = agents_config.get_session_cookie_config(FRAMEWORK_DIR)
+    user_identity.set_user_id_cookie(
+        response,
+        user_id,
+        secure=cookie.secure,
+        samesite=cookie.samesite,
+        max_age_days=cookie.max_age_days,
+    )
+
+
 # =============================================================================
 # Route registration
 # =============================================================================
@@ -668,6 +758,199 @@ def _register_routes(app: FastAPI) -> None:
                 "enabled": agents_config.get_context_indicator_enabled(FRAMEWORK_DIR),
             },
         }
+
+    @app.get("/api/me", tags=["profile"])
+    async def get_me_route(request: Request) -> dict:
+        """Return the current user's profile, creating an empty row if needed."""
+        user_id = _require_user_id(request)
+        profile = await user_store.get_or_create_user(user_id)
+        return user_store.profile_to_dict(profile)
+
+    @app.patch("/api/me", tags=["profile"])
+    async def patch_me_route(body: ProfileUpdate, request: Request) -> dict:
+        """Update display name and/or email for the current cookie user."""
+        user_id = _require_user_id(request)
+        await user_store.get_or_create_user(user_id)
+        provided = body.model_fields_set
+        profile = await user_store.update_user(
+            user_id,
+            display_name=body.display_name,
+            email=body.email,
+            update_display_name="display_name" in provided,
+            update_email="email" in provided,
+        )
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+        return user_store.profile_to_dict(profile)
+
+    @app.post("/api/me/resume", tags=["profile"])
+    async def resume_me_route(
+        body: ProfileResume,
+        request: Request,
+        response: Response,
+    ) -> dict:
+        """Point this browser at the newest profile with this self-asserted email."""
+        _require_user_id(request)
+        match = await user_store.find_by_email(body.email)
+        if match is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No profile found for that email.",
+            )
+        _apply_user_cookie(response, match.user_id)
+        return user_store.profile_to_dict(match)
+
+    @app.get("/api/secrets", tags=["secrets"])
+    async def list_secrets_route(request: Request) -> dict:
+        """List secret metadata for the current user. Never returns values."""
+        user_id = _require_user_id(request)
+        await user_store.get_or_create_user(user_id)
+        secrets = await user_secret_store.list_secrets(user_id)
+        items = []
+        for item in secrets:
+            try:
+                area = settings_catalog.focus_area_for(item.component)
+            except settings_catalog.UnknownComponentError:
+                area = item.component
+            items.append(user_secret_store.secret_to_dict(item, focus_area=area))
+        return {"secrets": items}
+
+    @app.post("/api/secrets", tags=["secrets"], status_code=201)
+    async def create_secret_route(body: SecretCreate, request: Request) -> dict:
+        """Encrypt and store a named secret. Duplicate (component, name) is 409."""
+        user_id = _require_user_id(request)
+        name = (body.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required.")
+        try:
+            fields = settings_catalog.validate_secret_fields(
+                body.component, body.fields
+            )
+        except settings_catalog.UnknownComponentError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await user_store.get_or_create_user(user_id)
+        try:
+            secret = await user_secret_store.create_secret(
+                user_id,
+                component=body.component,
+                name=name,
+                fields=fields,
+            )
+        except user_secret_store.DuplicateSecretError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SecretCryptoError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return user_secret_store.secret_to_dict(
+            secret,
+            focus_area=settings_catalog.focus_area_for(secret.component),
+        )
+
+    @app.delete("/api/secrets/{secret_id}", tags=["secrets"])
+    async def delete_secret_route(secret_id: str, request: Request) -> dict:
+        """Delete one owned secret and clear project bindings that used its name."""
+        user_id = _require_user_id(request)
+        try:
+            sid = UUID(secret_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Malformed secret id.") from exc
+        try:
+            deleted = await user_secret_store.delete_secret(user_id, sid)
+        except user_secret_store.SecretNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        await user_project_binding_store.clear_token_name(user_id, deleted.name)
+        return {"deleted": True, "id": str(deleted.id)}
+
+    @app.get("/api/project-bindings", tags=["projects"])
+    async def list_project_bindings_route(request: Request) -> dict:
+        """Merge YAML project identity with this user's binding rows."""
+        user_id = _require_user_id(request)
+        await user_store.get_or_create_user(user_id)
+        catalog = env_resolver.list_project_catalog()
+        stored = {
+            row.project_key.lower(): row
+            for row in await user_project_binding_store.list_bindings(user_id)
+        }
+        projects = []
+        for entry in catalog:
+            binding = stored.get(entry.project_key.lower())
+            projects.append(
+                {
+                    "project_key": entry.project_key,
+                    "name": entry.name,
+                    "aliases": list(entry.aliases),
+                    "is_enabled": binding.is_enabled if binding else False,
+                    "is_active": binding.is_active if binding else False,
+                    "confluence_token_name": (
+                        binding.confluence_token_name if binding else None
+                    ),
+                    "blazemeter_token_name": (
+                        binding.blazemeter_token_name if binding else None
+                    ),
+                    "datadog_token_name": (
+                        binding.datadog_token_name if binding else None
+                    ),
+                    "github_token_name": (
+                        binding.github_token_name if binding else None
+                    ),
+                }
+            )
+        return {"projects": projects}
+
+    @app.put("/api/project-bindings", tags=["projects"])
+    async def put_project_bindings_route(
+        body: ProjectBindingsReplace,
+        request: Request,
+    ) -> dict:
+        """Upsert bindings. ``project_key`` must exist in the YAML catalog."""
+        user_id = _require_user_id(request)
+        await user_store.get_or_create_user(user_id)
+        prepared: list[dict] = []
+        for item in body.bindings:
+            catalog_entry = env_resolver.resolve_project_key(item.project_key)
+            if catalog_entry is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown project_key: {item.project_key}",
+                )
+            token_checks = (
+                ("confluence", item.confluence_token_name),
+                ("blazemeter", item.blazemeter_token_name),
+                ("datadog", item.datadog_token_name),
+                ("github", item.github_token_name),
+            )
+            for integration, token_name in token_checks:
+                if not token_name or not token_name.strip():
+                    continue
+                components = settings_catalog.INTEGRATION_COMPONENTS[integration]
+                exists = await user_secret_store.name_exists(
+                    user_id, token_name.strip(), components
+                )
+                if not exists:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"No {integration} secret named "
+                            f"'{token_name.strip()}'."
+                        ),
+                    )
+            prepared.append(
+                {
+                    "project_key": catalog_entry.project_key,
+                    "is_enabled": item.is_enabled,
+                    "is_active": item.is_active,
+                    "confluence_token_name": item.confluence_token_name,
+                    "blazemeter_token_name": item.blazemeter_token_name,
+                    "datadog_token_name": item.datadog_token_name,
+                    "github_token_name": item.github_token_name,
+                }
+            )
+        try:
+            await user_project_binding_store.replace_bindings(user_id, prepared)
+        except user_project_binding_store.BindingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await list_project_bindings_route(request)
 
     # -- AG-UI SSE event stream (PBI 3.6.2) --------------------------------------
     # Browser clients (typically CopilotKit's React UI) follow a task they

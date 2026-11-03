@@ -364,7 +364,7 @@ imports, four-file pattern), and per-agent config schema, see
 | 🔍 Analysis agent | ✅ Working | Multi-source correlation (BlazeMeter + Datadog), bottleneck identification, SLA verdict via the `perfanalysis` MCP namespace |
 | 📄 Reporting agent (with multi-round HITL revision) | ✅ Working | Drafts performance reports via `perfreport` MCP namespace; publishes to Confluence via `confluence` namespace; supports multi-round HITL revision workflow |
 | 📣 Notifications agent (vendor-neutral events) | 🔮 Pending | Emits `TestRunCompleted` events; MS Teams and SharePoint adapters wired via `msteams` and `sharepoint` MCP namespaces |
-| CopilotKit React frontend (Next.js 15 + AG-UI) | 🟡 In progress | Chat interface, thread management, persistent history, and streaming all working; agent catalog, task streaming, HITL UI, token usage indicator, and results display coming next. See [`frontend/ui/README.md`](./frontend/ui/README.md) |
+| CopilotKit React frontend (Next.js 15 + AG-UI) | 🟡 In progress | Chat, threads, history, streaming, and Settings persistence (Profile / Secrets / Projects) are working. Agent catalog polish, task streaming, HITL UI, token usage indicator, and results display are still in progress. See [`frontend/ui/README.md`](./frontend/ui/README.md) |
 | Docker Compose / Aspire orchestration | ✅ Working | Full stack via `aspire run` (recommended) or `docker compose` (alternative). Platform variants for Windows and macOS |
 | Auth + OpenTelemetry hooks (default-off) | 🟡 Hooks reserved | Placeholders in place; activation deferred to cloud deployment |
 | Cloud deployment | 🔮 Planned | Vendor-agnostic by design — any cloud and auth provider are first-class targets |

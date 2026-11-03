@@ -30,6 +30,7 @@ services:
     environment:
       - A2A_PORT=8101
       - HEALTHCHECK_PORT=8101
+      - PERFPLOT_SECRETS_MASTER_KEY=
     ports:
       - "8101:8101"
     restart: unless-stopped
@@ -49,6 +50,13 @@ services:
     environment:
       - AGUI_PORT=8102
       - HEALTHCHECK_PORT=8102
+      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-host.docker.internal}
+      - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
+      - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
+      - PERFAGENT_STATE_USER=${PERFAGENT_STATE_USER}
+      - PERFAGENT_STATE_PASSWORD=${PERFAGENT_STATE_PASSWORD}
+      - PERFAGENT_STATE_SSLMODE=${PERFAGENT_STATE_SSLMODE:-prefer}
     ports:
       - "8102:8102"
     depends_on:

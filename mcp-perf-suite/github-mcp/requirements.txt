@@ -14,3 +14,8 @@ python-dotenv>=1.0.0
 
 # Configuration
 pyyaml>=6.0
+
+# Web-UI BYOT resolve (JWT + decrypt from perfagent_state)
+asyncpg>=0.30.0
+cryptography>=43.0.0
+PyJWT>=2.9.0

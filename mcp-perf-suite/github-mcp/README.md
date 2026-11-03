@@ -13,10 +13,11 @@ PRs, or read history.
 - Idempotently create a branch off the repo default (`ensure_branch`).
 - Discover the repo default branch for URL / branch defaulting
   (`get_repo_default_branch`).
-- Per-request token support: pass `token` on any tool call to
-  override the server-side env var. When the env var fallback fires,
-  every response carries `no_user_attribution=true` so upstream can
-  flag "system-token push".
+- Token resolution is path-specific. A Web-UI context JWT uses the
+  active project's bound Settings secret and ignores `token=`. A2A
+  (no JWT) still accepts a per-call `token`, then the server env var.
+  When the env var fallback fires, every response carries
+  `no_user_attribution=true` so upstream can flag a system-token push.
 
 ## Prerequisites
 
@@ -59,18 +60,21 @@ the same convention as `blazemeter-mcp` and `confluence-mcp`:
 
 Every tool call resolves the token in this order:
 
-1. Explicit `token` argument on the tool call (Web UI or user-attributed
-   A2A path).
-2. `GITHUB_PERSONAL_ACCESS_TOKEN` env var (user-agnostic A2A fallback,
+1. Web-UI hop: `Authorization: Bearer` JWT is present. Decrypt the
+   active project's GitHub Settings secret. Ignore `token=`. A missing
+   or invalid JWT / binding is an error — no env fallback.
+2. A2A (no `Authorization` header): explicit `token` argument on the
+   tool call.
+3. `GITHUB_PERSONAL_ACCESS_TOKEN` env var (user-agnostic A2A fallback,
    local dev).
-3. `GITHUB_TOKEN` env var (last-resort backup).
+4. `GITHUB_TOKEN` env var (last-resort A2A backup).
 
 If none are present the tool raises `GitHubAuthError` immediately
 rather than issuing an unauthenticated request that GitHub would
 reject with a misleading 404.
 
-Tokens are never logged or written to disk. Error messages redact any
-URL user-info.
+Tokens, JWTs, and the operator master key are never logged or written
+to disk. Error messages redact any URL user-info.
 
 ## Related Projects
 

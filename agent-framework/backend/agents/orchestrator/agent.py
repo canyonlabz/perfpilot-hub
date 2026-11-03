@@ -150,6 +150,9 @@ _caller_identity: dict[str, Any] = {
     # for comparison-report intents so specialists see the full candidate
     # list. Empty list = no prior candidates / not populated.
     "known_test_run_ids": [],
+    # Inbound surface. ``web_ui`` enables JWT mint and BYOT preflight.
+    # A2A leaves this unset so MCP hops stay env-var credentials.
+    "surface": None,
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -184,6 +187,19 @@ def set_caller_identity(
     _caller_identity["test_run_id"] = test_run_id
 
 
+def set_caller_surface(surface: Optional[str]) -> None:
+    """Mark the inbound surface. Dedicated so ``set_caller_identity`` stays unchanged.
+
+    ``web_ui`` enables JWT headers and BYOT binding preflight. A2A never
+    calls this, so those hops keep env-var credentials.
+    """
+    if not surface or not isinstance(surface, str):
+        _caller_identity["surface"] = None
+        return
+    cleaned = surface.strip()
+    _caller_identity["surface"] = cleaned or None
+
+
 def set_known_test_run_ids(ids: Optional[list[str]]) -> None:
     """Populate the thread's known ``test_run_id`` candidates.
 
@@ -215,6 +231,7 @@ def clear_caller_identity() -> None:
     _caller_identity["task_id"] = None
     _caller_identity["test_run_id"] = None
     _caller_identity["known_test_run_ids"] = []
+    _caller_identity["surface"] = None
 
 
 # =============================================================================
@@ -651,6 +668,29 @@ async def delegate_to_specialist(
         })
 
     body = dict(payload or {})
+
+    # Web-UI: stamp surface + user on the child payload and forward the
+    # names-only secrets briefing. AG-UI clears module-level caller
+    # identity when the orchestrator SSE stream ends; specialists must
+    # restore surface from this payload so JWT minting still works.
+    # A2A never sets surface=web_ui.
+    if _caller_identity.get("surface") == "web_ui":
+        body.setdefault("caller_surface", "web_ui")
+        hint_user = _caller_identity.get("user_id")
+        if hint_user:
+            body.setdefault("caller_user_id", hint_user)
+        if hint_user and "webui_secrets_hint" not in body:
+            try:
+                from services.mcp_client import build_webui_secrets_hint
+
+                secrets_hint = await build_webui_secrets_hint(hint_user)
+                if secrets_hint:
+                    body["webui_secrets_hint"] = secrets_hint
+            except Exception:
+                log.debug(
+                    "delegate_to_specialist: secrets hint skipped",
+                    exc_info=True,
+                )
 
     # Auto-inject the normalized test spec file path into the child
     # task's payload so the specialist agent can use it directly for

@@ -34,6 +34,59 @@ log = logging.getLogger(__name__)
 STUB_TOTAL_RUNTIME_SECONDS = 3.0
 
 
+def _restore_web_ui_caller(task: task_store.AgentTask, payload: dict) -> bool:
+    """Re-apply Web-UI surface for JWT minting during specialist MCP calls.
+
+    AG-UI clears module-level ``_caller_identity`` when the orchestrator
+    SSE stream ends. Child tasks stamp ``caller_surface`` /
+    ``caller_user_id`` at delegate time; restore them here for the
+    duration of this specialist run. Returns True if restored.
+    """
+    if payload.get("caller_surface") != "web_ui":
+        return False
+    user_id = payload.get("caller_user_id")
+    if not isinstance(user_id, str) or not user_id.strip():
+        return False
+    try:
+        from agents.orchestrator.agent import (
+            set_caller_identity,
+            set_caller_surface,
+        )
+    except Exception:
+        log.debug("web_ui caller restore import failed", exc_info=True)
+        return False
+    thread_id = None
+    if isinstance(getattr(task, "thread_id", None), str) and task.thread_id.strip():
+        thread_id = task.thread_id.strip()
+    else:
+        for key in ("thread_id", "external_thread_id"):
+            raw = payload.get(key)
+            if isinstance(raw, str) and raw.strip():
+                thread_id = raw.strip()
+                break
+    set_caller_identity(
+        user_id=user_id.strip(),
+        thread_id=thread_id,
+        session_id=str(task.session_id) if task.session_id else None,
+        task_id=str(task.task_id),
+        test_run_id=(
+            payload.get("test_run_id")
+            if isinstance(payload.get("test_run_id"), str)
+            else None
+        ),
+    )
+    set_caller_surface("web_ui")
+    return True
+
+
+def _clear_web_ui_caller() -> None:
+    try:
+        from agents.orchestrator.agent import clear_caller_identity
+    except Exception:
+        return
+    clear_caller_identity()
+
+
 EXECUTION_AGENT_NAME = "execution-agent"
 MONITORING_AGENT_NAME = "monitoring-agent"
 MONITORING_AGENT_MCP_PREFIXES: tuple[str, ...] = ("datadog_",)
@@ -271,6 +324,7 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
 
     # ---- MCP pass-through dispatch ------------------------------------
     if is_mcp_passthrough:
+        restored = _restore_web_ui_caller(task, payload)
         await _broadcast(
             task.task_id,
             TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
@@ -290,6 +344,9 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
                 },
             }
             return envelope
+        finally:
+            if restored:
+                _clear_web_ui_caller()
 
         await _broadcast(
             task.task_id,
@@ -469,7 +526,15 @@ def _compose_specialist_prompt(payload: dict) -> str:
             user_msg = val
             break
 
-    message_keys = {"user_message", "message", "text", "prompt"}
+    message_keys = {
+        "user_message",
+        "message",
+        "text",
+        "prompt",
+        "webui_secrets_hint",
+        "caller_surface",
+        "caller_user_id",
+    }
     context = {
         k: v for k, v in payload.items()
         if k not in message_keys and not k.startswith("_") and v is not None
@@ -627,7 +692,16 @@ async def _run_mcp_specialist_agent(
         return envelope
 
     # ---- Agent invocation ---------------------------------------------
-    messages_for_llm = [{"role": "user", "content": user_prompt}]
+    # Web-UI secrets briefing (names only) is injected by
+    # delegate_to_specialist. Keep it as a system turn so specialists
+    # do not re-ask cloud vs onprem when confluence_mode is set.
+    messages_for_llm: list[dict] = []
+    secrets_hint = payload.get("webui_secrets_hint")
+    if isinstance(secrets_hint, str) and secrets_hint.strip():
+        messages_for_llm.append(
+            {"role": "system", "content": secrets_hint.strip()}
+        )
+    messages_for_llm.append({"role": "user", "content": user_prompt})
 
     await _broadcast(
         task.task_id,
@@ -732,6 +806,7 @@ async def _run_mcp_specialist_agent(
                 stateful_client_holder["client"] = None
 
     # ---- Run multi-turn tool execution loop ---------------------------
+    restored_web_ui = _restore_web_ui_caller(task, payload)
     try:
         reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
             await run_multi_turn_tool_loop(
@@ -754,6 +829,8 @@ async def _run_mcp_specialist_agent(
         log.exception("%s agent invocation failed for task %s", agent_name, task.task_id)
         raise RuntimeError(f"{agent_name} agent invocation failed: {exc}") from exc
     finally:
+        if restored_web_ui:
+            _clear_web_ui_caller()
         if stateful_client_ctx is not None:
             try:
                 await stateful_client_ctx.__aexit__(None, None, None)

@@ -29,6 +29,35 @@ def _otel_shape(_, __, event_dict):
     return event_dict
 
 
+
+class _ClosedResourceTeardownFilter(logging.Filter):
+    """Suppress MCP streamable-HTTP session teardown ClosedResourceError.
+
+    FastMCP 3.4.x still logs standalone SSE writer ClosedResourceError at
+    ERROR on DELETE. Upstream MCP SDK treats that teardown as expected.
+    This is log hygiene only — not an application failure.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Handler level checks run before filters, so demoting levelno is
+        # too late. Drop expected teardown noise instead.
+        if record.exc_info and record.exc_info[0] is not None:
+            try:
+                from anyio import ClosedResourceError
+            except ImportError:
+                ClosedResourceError = None
+            if ClosedResourceError is not None and issubclass(
+                record.exc_info[0], ClosedResourceError
+            ):
+                return False
+        if (
+            record.name == "mcp.server.streamable_http"
+            and "Error in standalone SSE writer" in record.getMessage()
+        ):
+            return False
+        return True
+
+
 def configure_logging() -> None:
     mode = os.environ.get("DEPLOYMENT_MODE", "local").lower()
     shared = [
@@ -68,5 +97,6 @@ def configure_logging() -> None:
     )
     root = logging.getLogger()
     root.handlers.clear()
+    handler.addFilter(_ClosedResourceTeardownFilter())
     root.addHandler(handler)
     root.setLevel(logging.INFO)

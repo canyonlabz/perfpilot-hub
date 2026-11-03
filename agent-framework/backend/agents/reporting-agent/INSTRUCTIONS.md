@@ -41,11 +41,21 @@ namespaces:
 
 ### Confluence MCP (`confluence_*`)
 
-**When:** Only execute if Confluence details were provided in Collect Inputs.
+**When:** Publishing a report (needs space/parent from Collect Inputs),
+or answering discovery questions such as listing spaces/pages.
 
-**Prerequisites:**
+**Confluence `mode` (cloud vs onprem) — hard rule:**
+- **Never ask the user** whether to use `"cloud"` or `"onprem"`.
+- Call Confluence tools **without** a `mode` argument. The MCP resolves
+  mode from the Web-UI Settings secret component when a JWT is present.
+- If a system message includes `confluence_mode=cloud` or
+  `confluence_mode=onprem`, treat that as confirmation and still omit
+  `mode` on the tool call (the MCP already knows).
+- Only if a Confluence tool **returns an error** that mode is required
+  (typical A2A / no Settings binding) may you then ask the user once.
+
+**Prerequisites for publishing:**
 - `test_run_id` = same as PerfReport `run_id`
-- `confluence_mode` = `"cloud"` or `"onprem"`
 - `confluence_space` = space name from user
 - `parent_page_name` or `parent_page_id` from user
 
@@ -56,6 +66,8 @@ namespaces:
 - **Image attachment** — attaches chart PNG files to the Confluence page.
 - **Content update** — updates an existing page with revised content.
 - **Space navigation** — lists spaces and pages for target selection.
+  For "what spaces are available?" call `list_spaces` immediately with
+  no `mode` argument.
 
 **You do not need to hard-code tool names or parameter lists.** Your
 registered tool schemas are the source of truth at inference time.

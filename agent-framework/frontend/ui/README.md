@@ -144,7 +144,17 @@ Once running, open the frontend in your browser. You should see:
 | YAML-aligned light/dark/auto theme (pre-paint) | Done |
 | Chat shell matching the approved mock | Done |
 | Composer autosize (`field-sizing` + fallback) | Done |
-| Settings page shell (Projects / Secrets / Preferences / Profile) | Done — empty visual shells; in-session preview only | 
+| Settings page (Projects / Secrets / Preferences / Profile) | Done — Profile, Secrets, and Projects persist through AG-UI APIs; Preferences stay local |
+
+### Settings persistence
+
+Profile, Secrets, and Projects call the same-origin `/api/*` rewrites
+to AG-UI. The browser cookie identifies the user. Secret **values** are
+sent once on create and never listed again (name, component, and a mask
+only). Project rows come from the backend catalog (`environments.yaml`);
+each enabled row binds Confluence, BlazeMeter, Datadog, and GitHub to a
+token **name**. Preferences theme remains `localStorage`. A2A callers do
+not use these Settings tokens. 
 
 ### Architecture
 
@@ -175,11 +185,12 @@ Browser (localhost:3000)
 | `components/chat/chat-panel.tsx` | Unified chat panel — DB history + live streaming + react-markdown |
 | `components/sidebar/thread-sidebar.tsx` | Thread list with CRUD operations |
 | `components/layout/header.tsx` | PerfPilot header — Runs / Agents / Tasks + Settings pill + status |
-| `app/settings/page.tsx` | Settings shell — Projects, Secrets, Preferences, Profile (visual tabs; theme control is live) |
+| `app/settings/page.tsx` | Settings route — Projects, Secrets, Preferences, Profile |
+| `components/settings/` | Settings tabs: Profile/Secrets/Projects persist via AG-UI; Preferences stay local |
 | `lib/settings-catalog.ts` | Focus-area / component catalogs (including Datadog) and token-name dropdown helpers |
 | `lib/theme-config.ts` | Theme palettes and `perfpilot.theme` contract |
 | `lib/theme-applier.ts` | Pre-paint script that sets CSS variables on `<html>` |
-| `lib/api.ts` | API helpers (health, threads, messages) |
+| `lib/api.ts` | API helpers (health, threads, messages, Settings profile/secrets/projects) |
 | `lib/types.ts` | TypeScript interfaces (Thread, Message, etc.) |
 | `next.config.js` | Proxy rewrites + webpack config for CopilotKit v2 CSS exclusion |
 

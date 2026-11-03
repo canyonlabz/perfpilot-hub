@@ -56,6 +56,7 @@ async def call_mcp_tool_passthrough_for_specialist(
     """
     from services.mcp_client import MCPClient, build_client_config
     from services.mcp_tool_registry import _is_api_based
+    from services.mcp_client import McpPreflightError
 
     is_api = _is_api_based(tool_name)
     max_attempts = 3 if is_api else 1
@@ -76,6 +77,16 @@ async def call_mcp_tool_passthrough_for_specialist(
                 return {"ok": True, "tool": tool_name, "result": payload, "attempts": attempt}
             except PermissionError:
                 raise
+            except McpPreflightError as e:
+                return {
+                    "ok": False,
+                    "tool": tool_name,
+                    "error": {
+                        "type": "MissingSecretBinding",
+                        "message": str(e)[:500],
+                    },
+                    "attempts": attempt,
+                }
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts:
@@ -103,6 +114,7 @@ async def call_mcp_tool_passthrough(tool_name: str, args: dict) -> dict:
     (code-based, deterministic).
     """
     from services.mcp_client import MCPClient, build_client_config
+    from services.mcp_client import McpPreflightError
 
     is_code_based = tool_name.startswith("jmeter_")
     max_attempts = 1 if is_code_based else 3
@@ -123,6 +135,16 @@ async def call_mcp_tool_passthrough(tool_name: str, args: dict) -> dict:
                 return {"ok": True, "tool": tool_name, "result": payload, "attempts": attempt}
             except PermissionError:
                 raise
+            except McpPreflightError as e:
+                return {
+                    "ok": False,
+                    "tool": tool_name,
+                    "error": {
+                        "type": "MissingSecretBinding",
+                        "message": str(e)[:500],
+                    },
+                    "attempts": attempt,
+                }
             except Exception as e:
                 last_error = e
                 if attempt < max_attempts:

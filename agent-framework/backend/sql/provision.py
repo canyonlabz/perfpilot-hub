@@ -40,17 +40,26 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
 log = logging.getLogger("provision")
 
-# File order; the per-table scripts (002 - 008) all run against the
-# perfagent_state database after CREATE DATABASE. F3.3 landed 002 - 007;
-# F3.7.0 added 008 (agent_threads, the persistent conversation container).
+# File order after CREATE DATABASE. Keep this tuple aligned with every
+# numbered script in this directory except 001 (CREATE DATABASE itself).
+# 003b / 010 / 011 are ALTERs; the rest create tables. All scripts are
+# written to be re-runnable (IF NOT EXISTS / DROP CONSTRAINT IF EXISTS).
 PER_TABLE_SQL_FILES = (
     "002_create_agent_sessions.sql",
     "003_create_agent_tasks.sql",
+    "003b_add_thread_id_to_agent_tasks.sql",
     "004_create_agent_checkpoints.sql",
     "005_create_conversation_messages.sql",
     "006_create_tool_call_traces.sql",
     "007_create_hitl_approvals.sql",
     "008_create_agent_threads.sql",
+    "009_create_token_ledger.sql",
+    "010_add_parent_task_id.sql",
+    "011_extend_agent_tasks_status.sql",
+    "012_create_users.sql",
+    "013_create_user_secrets.sql",
+    "014_create_user_secret_fields.sql",
+    "015_create_user_project_bindings.sql",
 )
 
 TARGET_DB_NAME = "perfagent_state"
@@ -158,7 +167,7 @@ def _ensure_database(settings: dict[str, str]) -> bool:
 
 
 def _apply_table_sql(sql_dir: Path, settings: dict[str, str]) -> None:
-    """Apply files 002 - 007 against the perfagent_state database in order."""
+    """Apply PER_TABLE_SQL_FILES against the perfagent_state database in order."""
     log.info("Applying %d table-creation scripts to '%s' ...", len(PER_TABLE_SQL_FILES), TARGET_DB_NAME)
     with _connect(TARGET_DB_NAME, settings) as conn:
         with conn.cursor() as cur:
@@ -174,7 +183,7 @@ def _apply_table_sql(sql_dir: Path, settings: dict[str, str]) -> None:
 
 
 def _verify_schema(settings: dict[str, str]) -> bool:
-    """Confirm all seven tables exist in the perfagent_state database."""
+    """Confirm the expected tables exist in the perfagent_state database."""
     expected_tables = (
         "agent_sessions",
         "agent_tasks",
@@ -183,6 +192,11 @@ def _verify_schema(settings: dict[str, str]) -> bool:
         "tool_call_traces",
         "hitl_approvals",
         "agent_threads",
+        "token_ledger",
+        "users",
+        "user_secrets",
+        "user_secret_fields",
+        "user_project_bindings",
     )
     with _connect(TARGET_DB_NAME, settings) as conn:
         with conn.cursor() as cur:

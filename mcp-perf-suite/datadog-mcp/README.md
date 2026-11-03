@@ -69,6 +69,10 @@ DD_APP_KEY=your_datadog_application_key_here
 DD_API_BASE_URL=your_datadog_base_url_here
 ```
 
+Those environment variables are the **A2A** credential path. A Web-UI
+call that arrives with `Authorization: Bearer` uses the active
+project's Settings secret instead and does not fall back to this `.env`.
+
 
 ### 4. Configure Your Infrastructure
 

@@ -48,7 +48,9 @@ alwaysApply: true
 8. Redact private user, company, corporate, endpoint, hostname, and service data
    from shared material. Ask when uncertain whether a value is private.
 9. Validate each enhancement before moving to the next. Run only approved tests
-   and report what was and was not verified.
+   and report what was and was not verified. Own the change as SDET-style QA:
+   check backend and frontend paths the work can affect. See
+   `.cursor/rules/owner-verification.mdc`.
 
 ## Feature-branch requirement
 

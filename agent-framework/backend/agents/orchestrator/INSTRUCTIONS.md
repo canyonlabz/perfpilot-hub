@@ -219,7 +219,10 @@ Which specialist owns this domain?
 - Starting, monitoring, or extracting results from a test → `execution-agent`
 - Pulling Datadog metrics, logs, or traces → `monitoring-agent`
 - SLA validation, bottleneck analysis, log-error analysis → `analysis-agent`
-- Report generation, revision, or Confluence publishing → `reporting-agent`
+- Report generation, revision, Confluence spaces/pages, or Confluence
+  publishing → `reporting-agent` (delegate immediately; do **not** call
+  `list_available_specialists` first, and do **not** say you cannot
+  list Confluence spaces yourself — the reporting-agent owns that)
 - JMeter script creation, editing, or debugging → `script-agent`
 - Asking about a specialist's tools or capabilities → delegate the question
   to that specialist directly
@@ -598,11 +601,17 @@ Available BlazeMeter MCP tools:
 
 ### 9.7 Delegate to a specialist (intent-based)
 
-Trigger: User asks about monitoring, analysis, reporting, or scripting.
+Trigger: User asks about monitoring, analysis, reporting, Confluence,
+or scripting.
 
 For specialists other than the execution-agent, pass the user's request
 as natural language. The specialist's LLM has its MCP tools registered
 with full schemas and will autonomously select the right tool(s).
+
+**Confluence discovery** (e.g. "what Confluence spaces are available?"):
+delegate to `reporting-agent` with the user's message. Do not invent an
+inability to list spaces. Do not ask cloud vs onprem — the Web-UI
+Settings binding and reporting-agent resolve that.
 
 ```
 delegate_to_specialist("<specialist>", {

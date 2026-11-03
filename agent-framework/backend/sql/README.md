@@ -1,7 +1,7 @@
 # `perfagent_state` SQL
 
-DDL for the PerfPilot Agents runtime-state database. Eight JSONB-only tables on
-the same PostgreSQL instance as `perfmemory`. No pgvector, no Apache AGE.
+DDL for the PerfPilot Agents runtime-state database on the same PostgreSQL
+instance as `perfmemory`. No pgvector, no Apache AGE.
 
 ## File order
 
@@ -18,9 +18,15 @@ the same PostgreSQL instance as `perfmemory`. No pgvector, no Apache AGE.
 | 008 | [`008_create_agent_threads.sql`](./008_create_agent_threads.sql) | `perfagent_state` | Persistent conversation threads |
 | 009 | [`009_create_token_ledger.sql`](./009_create_token_ledger.sql) | `perfagent_state` | LLM token usage tracking |
 | 010 | [`010_add_parent_task_id.sql`](./010_add_parent_task_id.sql) | `perfagent_state` | Add parent_task_id for task hierarchies |
+| 011 | [`011_extend_agent_tasks_status.sql`](./011_extend_agent_tasks_status.sql) | `perfagent_state` | A2A v1 task status values |
+| 012 | [`012_create_users.sql`](./012_create_users.sql) | `perfagent_state` | Web-UI user profile |
+| 013 | [`013_create_user_secrets.sql`](./013_create_user_secrets.sql) | `perfagent_state` | Named secret metadata |
+| 014 | [`014_create_user_secret_fields.sql`](./014_create_user_secret_fields.sql) | `perfagent_state` | Encrypted secret field values |
+| 015 | [`015_create_user_project_bindings.sql`](./015_create_user_project_bindings.sql) | `perfagent_state` | Per-user project token bindings |
 
-Files 002 - 010 use `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`
-so re-running them is safe. File 001 is gated by an existence check in
+Files 002 onward use `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`,
+or equivalent `IF NOT EXISTS` / `DROP CONSTRAINT IF EXISTS` guards so
+re-running them is safe. File 001 is gated by an existence check in
 [`provision.py`](./provision.py) because PostgreSQL does not support
 `CREATE DATABASE IF NOT EXISTS`.
 
@@ -29,20 +35,24 @@ so re-running them is safe. File 001 is gated by an existence check in
 ### Against an already-running `perfmemory-db` container (development)
 
 ```powershell
-# from the repo root, with agent-framework/.env populated
-python agent-framework/sql/provision.py
+# from the repo root, with agent-framework/backend/.env populated
+python agent-framework/backend/sql/provision.py
 ```
 
-`provision.py` reads `agent-framework/.env`, connects with admin credentials,
-creates the `perfagent_state` database if it does not exist, then applies
-files 002 - 007 in order. Idempotent.
+`provision.py` reads `agent-framework/backend/.env`, connects with admin
+credentials, creates the `perfagent_state` database if it does not exist,
+then applies files 002 - 015 (including 003b) in order. Idempotent.
 
-### Against a fresh `perfmemory-db` container (Feature 3.12)
+Target engine: **PostgreSQL 18** (image `pgvector/pgvector:pg18` / container
+`perfmem-pgvector-age`). An operator runs this script. Do not apply it from
+unattended automation without review.
 
-In Feature 3.12 the `docker-compose-a2a-local-{windows,mac}.yaml` files mount
-this directory into the Postgres container's `/docker-entrypoint-initdb.d/`
-so files 001 - 007 run automatically on first container init. The provisioning
-script `provision.py` is not needed in that path.
+### Against a fresh Postgres container
+
+Some Compose files mount this directory into the container's
+`/docker-entrypoint-initdb.d/` so the numbered scripts run on first init.
+On that path `provision.py` is optional; confirm the mount includes every
+script you need (this folder now goes through 015).
 
 ## Idempotency
 

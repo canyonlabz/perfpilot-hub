@@ -356,6 +356,7 @@ docker/github-mcp/config/config.yaml
 agent-framework/backend/.env
 agent-framework/backend/config/agents.yaml
 agent-framework/backend/config/hitl.yaml
+agent-framework/backend/config/environments.yaml
 agent-framework/backend/agents/*/config.yaml
 
 # Re-include the Next.js frontend lib/ directory (excluded by the bare `lib/`

@@ -13,6 +13,11 @@ structlog>=24.0.0
 # Environment variable management
 python-dotenv>=1.0.0
 
+# Web-UI BYOT resolve (JWT + decrypt from perfagent_state)
+asyncpg>=0.30.0
+cryptography>=43.0.0
+PyJWT>=2.9.0
+
 # Additional dependencies found in code
 # (These are part of Python standard library, no additional packages needed)
 # - os, json, csv, time, zipfile, shutil, base64, datetime, typing

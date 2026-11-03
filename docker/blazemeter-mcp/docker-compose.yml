@@ -18,6 +18,14 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-host.docker.internal}
+      - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
+      - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
+      - PERFAGENT_STATE_USER=${PERFAGENT_STATE_USER}
+      - PERFAGENT_STATE_PASSWORD=${PERFAGENT_STATE_PASSWORD}
+      - PERFAGENT_STATE_SSLMODE=${PERFAGENT_STATE_SSLMODE:-prefer}
     ports:
       - "8110:8110"
     volumes:

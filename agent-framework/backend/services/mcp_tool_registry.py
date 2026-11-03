@@ -165,6 +165,39 @@ def _is_stateful(tool_name: str) -> bool:
 # Tool wrapper factories (proper closure capture, no default-arg hack)
 # ---------------------------------------------------------------------------
 
+async def _call_gateway_tool(
+    tool_name: str,
+    gateway_url: str,
+    kwargs: dict[str, Any],
+) -> str:
+    """One gateway round-trip with Web-UI JWT headers when present."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    from services.mcp_client import prepare_mcp_call, resolve_mcp_http_headers
+
+    dispatch_args = await prepare_mcp_call(tool_name, kwargs)
+    headers = await resolve_mcp_http_headers()
+    if headers:
+        transport = StreamableHttpTransport(url=gateway_url, headers=headers)
+        async with Client(transport) as c:
+            result = await c.call_tool(tool_name, dispatch_args)
+    else:
+        async with Client(gateway_url) as c:
+            result = await c.call_tool(tool_name, dispatch_args)
+    return _extract_and_normalize(result)
+
+
+def _preflight_error_json(exc: BaseException) -> str:
+    return json.dumps({
+        "ok": False,
+        "error": {
+            "type": "MissingSecretBinding",
+            "message": str(exc)[:500],
+        },
+    })
+
+
 def _make_api_tool_wrapper(
     tool_name: str,
     gateway_url: str,
@@ -175,14 +208,14 @@ def _make_api_tool_wrapper(
     wrapper is fully isolated regardless of loop iteration order.
     """
     async def _call_tool(**kwargs: Any) -> str:
-        from fastmcp import Client
+        from services.mcp_client import McpPreflightError
 
         last_error: BaseException | None = None
         for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
             try:
-                async with Client(gateway_url) as c:
-                    result = await c.call_tool(tool_name, kwargs)
-                return _extract_and_normalize(result)
+                return await _call_gateway_tool(tool_name, gateway_url, kwargs)
+            except McpPreflightError as e:
+                return _preflight_error_json(e)
             except Exception as e:
                 last_error = e
                 if attempt < _MAX_RETRY_ATTEMPTS:
@@ -208,12 +241,12 @@ def _make_code_tool_wrapper(
     Per ``mcp-error-handling``: code-based MCPs do NOT retry on failure.
     """
     async def _call_tool(**kwargs: Any) -> str:
-        from fastmcp import Client
+        from services.mcp_client import McpPreflightError
 
         try:
-            async with Client(gateway_url) as c:
-                result = await c.call_tool(tool_name, kwargs)
-            return _extract_and_normalize(result)
+            return await _call_gateway_tool(tool_name, gateway_url, kwargs)
+        except McpPreflightError as e:
+            return _preflight_error_json(e)
         except Exception as e:
             return json.dumps({
                 "ok": False,
@@ -258,9 +291,16 @@ def _make_stateful_tool_wrapper(
                 },
             })
         try:
-            result = await client.call_tool(tool_name, kwargs)
+            from services.mcp_client import prepare_mcp_call
+
+            dispatch_args = await prepare_mcp_call(tool_name, kwargs)
+            result = await client.call_tool(tool_name, dispatch_args)
             return _extract_and_normalize(result)
         except Exception as e:
+            from services.mcp_client import McpPreflightError
+
+            if isinstance(e, McpPreflightError):
+                return _preflight_error_json(e)
             return json.dumps({
                 "ok": False,
                 "error": {

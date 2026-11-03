@@ -44,9 +44,27 @@ CA_BUNDLE = os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE")
 # Helper Functions
 # ===============================================
 
-def get_headers(extra: dict = None):
-    # Basic Auth header BlazeMeter expects
-    auth = base64.b64encode(f"{BLAZEMETER_API_KEY}:{BLAZEMETER_API_SECRET}".encode()).decode()
+async def get_headers(extra: dict = None):
+    from utils.credential_resolver import (
+        CredentialResolveError,
+        resolve_user_fields,
+    )
+
+    try:
+        fields = await resolve_user_fields("blazemeter")
+    except CredentialResolveError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if fields is not None:
+        key = (fields.get("api_key") or "").strip()
+        secret = (fields.get("api_secret") or "").strip()
+        if not key or not secret:
+            raise RuntimeError(
+                "No token configured for blazemeter on the active project."
+            )
+    else:
+        key = BLAZEMETER_API_KEY
+        secret = BLAZEMETER_API_SECRET
+    auth = base64.b64encode(f"{key}:{secret}".encode()).decode()
     h = {
         "Authorization": f"Basic {auth}",
     }
@@ -103,7 +121,7 @@ async def list_workspaces() -> str:
     """List BlazeMeter workspaces for the configured account."""
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
-        resp = await client.get(f"{BLAZEMETER_API_BASE}/workspaces?accountId={BLAZEMETER_ACCOUNT_ID}", headers=get_headers())
+        resp = await client.get(f"{BLAZEMETER_API_BASE}/workspaces?accountId={BLAZEMETER_ACCOUNT_ID}", headers=await get_headers())
         resp.raise_for_status()
         workspaces = resp.json()["result"]
         return "\n".join(f"{ws['id']}: {ws['name']}" for ws in workspaces)
@@ -131,7 +149,7 @@ async def list_projects(workspace_id: str | None = None, project_name: str | Non
         url = f"{BLAZEMETER_API_BASE}/projects?workspaceId={workspace_id}&limit={pagination_limit}"
         if project_name:
             url += f"&name={project_name}"
-        resp = await client.get(url, headers=get_headers())
+        resp = await client.get(url, headers=await get_headers())
         resp.raise_for_status()
         projects = resp.json()["result"]
         
@@ -145,7 +163,7 @@ async def list_tests(project_id: str) -> str:
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/tests?projectId={project_id}"
-        resp = await client.get(url, headers=get_headers({"Content-Type": "application/json"}))
+        resp = await client.get(url, headers=await get_headers({"Content-Type": "application/json"}))
         resp.raise_for_status()
         tests = resp.json()["result"]
         return "\n".join(f"{t['id']}: {t['name']}" for t in tests)
@@ -162,7 +180,7 @@ async def run_test(test_id: str, ctx: Context) -> str:
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/tests/{test_id}/start?delayedStart=false"
-        resp = await client.post(url, headers=get_headers({"Content-Type": "application/json"}))
+        resp = await client.post(url, headers=await get_headers({"Content-Type": "application/json"}))
         resp.raise_for_status()
         result = resp.json()["result"]
         run_id = result['id']
@@ -192,7 +210,7 @@ async def get_test_status(run_id: str, ctx: Context) -> dict:
     try:
         verify_ssl = get_ssl_verify_setting()
         async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
-            resp = await client.get(url, headers=get_headers())
+            resp = await client.get(url, headers=await get_headers())
             resp.raise_for_status()
             data = resp.json()
             result = data.get("result", {})
@@ -252,13 +270,13 @@ async def get_results_summary(run_id: str, ctx: Context) -> str:
         async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
             # 1. Fetch main test run (master) info
             master_url = f"{BLAZEMETER_API_BASE}/masters/{run_id}"
-            master_resp = await client.get(master_url, headers=get_headers(), timeout=30.0)
+            master_resp = await client.get(master_url, headers=await get_headers(), timeout=30.0)
             master_resp.raise_for_status()
             master = master_resp.json().get("result", {})
 
             # 2. Fetch summary statistics (aggregated metrics per run)
             summary_url = f"{BLAZEMETER_API_BASE}/masters/{run_id}/reports/default/summary"
-            summary_resp = await client.get(summary_url, headers=get_headers(), timeout=30.0)
+            summary_resp = await client.get(summary_url, headers=await get_headers(), timeout=30.0)
             summary_resp.raise_for_status()
             summary_data = summary_resp.json().get("result", {})
 
@@ -371,7 +389,7 @@ async def list_test_runs(test_id: str, start_time: str, end_time: str, ctx: Cont
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         try:
-            resp = await client.get(url, headers=get_headers())
+            resp = await client.get(url, headers=await get_headers())
             resp.raise_for_status()
             results = resp.json().get("result", [])
         except Exception as e:
@@ -418,7 +436,7 @@ async def get_session_artifacts(session_id: str, ctx: Context) -> dict:
     url = f"{BLAZEMETER_API_BASE}/sessions/{session_id}/reports/logs"
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
-        resp = await client.get(url, headers=get_headers())
+        resp = await client.get(url, headers=await get_headers())
         resp.raise_for_status()
         result = resp.json().get("result", {})
         files = {}
@@ -462,7 +480,7 @@ async def download_artifact_zip_file(artifact_zip_url: str, run_id: str, ctx: Co
             except Exception as e1:
                 # If minimal headers fail, try with BlazeMeter auth headers
                 try:
-                    response = await client.get(artifact_zip_url, headers=get_headers({"Accept": "*/*"}))
+                    response = await client.get(artifact_zip_url, headers=await get_headers({"Accept": "*/*"}))
                     response.raise_for_status()
                 except Exception as e2:
                     if ctx is not None:
@@ -637,11 +655,12 @@ async def session_artifact_processor(
                 await ctx.error(f"No artifacts.zip URL for {session_key}")
                 continue
 
+            bz_headers = await get_headers()
             dl_result = await download_with_retry(
                 artifact_zip_url=artifact_zip_url,
                 dest_path=zip_path,
                 ssl_verify_setting=get_ssl_verify_setting(),
-                auth_headers_func=get_headers,
+                auth_headers_func=lambda extra=None: {**bz_headers, **(extra or {})},
                 max_retries=max_retries,
                 retry_delay=retry_delay,
                 ctx=ctx,
@@ -826,7 +845,7 @@ async def get_public_report_url(run_id: str, ctx: Context) -> dict:
     try:
         verify_ssl = get_ssl_verify_setting()
         async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
-            resp = await client.post(url, headers=get_headers({"Content-Type": "application/json"}))
+            resp = await client.post(url, headers=await get_headers({"Content-Type": "application/json"}))
             resp.raise_for_status()
             data = resp.json()
             result = data.get("result", {})
@@ -894,7 +913,7 @@ async def fetch_aggregate_report(run_id: str, ctx: Context) -> Dict[str, Any]:
         
         verify_ssl = get_ssl_verify_setting()
         async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
-            response = await client.get(url, headers=get_headers(), timeout=30.0)
+            response = await client.get(url, headers=await get_headers(), timeout=30.0)
             response.raise_for_status()
             
             data = response.json()
@@ -1053,7 +1072,7 @@ async def list_shared_folders(workspace_id: str = None) -> list:
                 f"{BLAZEMETER_API_BASE}/folders"
                 f"?workspaceId={workspace_id}&skip={skip}&limit={page_size}"
             )
-            resp = await client.get(url, headers=get_headers())
+            resp = await client.get(url, headers=await get_headers())
             resp.raise_for_status()
             folders = resp.json().get("result", [])
             if not folders:
@@ -1095,7 +1114,7 @@ async def get_shared_folder_files(folder_id: str) -> dict:
     verify_ssl = get_ssl_verify_setting()
     async with httpx.AsyncClient(verify=verify_ssl, timeout=HTTP_TIMEOUT_SECONDS) as client:
         url = f"{BLAZEMETER_API_BASE}/folders/{folder_id}/files"
-        resp = await client.get(url, headers=get_headers())
+        resp = await client.get(url, headers=await get_headers())
         resp.raise_for_status()
         result = resp.json().get("result", {})
 
@@ -1255,7 +1274,7 @@ async def upload_to_shared_folder(
                     f"{BLAZEMETER_API_BASE}/folders/{folder_id}"
                     f"/s3/sign?fileName={encoded_name}"
                 )
-                resp = await client.get(sign_url, headers=get_headers())
+                resp = await client.get(sign_url, headers=await get_headers())
                 resp.raise_for_status()
                 signed_url = resp.json().get("result")
 
@@ -1389,7 +1408,7 @@ async def resolve_project_target(
                 f"{BLAZEMETER_API_BASE}/workspaces"
                 f"?accountId={BLAZEMETER_ACCOUNT_ID}"
             )
-            resp = await client.get(url, headers=get_headers())
+            resp = await client.get(url, headers=await get_headers())
             resp.raise_for_status()
             workspaces = resp.json().get("result", [])
         matches = [
@@ -1439,7 +1458,7 @@ async def resolve_project_target(
             f"&name={project_name_str}"
             f"&limit={pagination_limit}"
         )
-        resp = await client.get(url, headers=get_headers())
+        resp = await client.get(url, headers=await get_headers())
         resp.raise_for_status()
         projects = resp.json().get("result", [])
 
@@ -1544,7 +1563,7 @@ async def create_test(
         ) as client:
             resp = await client.post(
                 f"{BLAZEMETER_API_BASE}/tests",
-                headers=get_headers({"Content-Type": "application/json"}),
+                headers=await get_headers({"Content-Type": "application/json"}),
                 json=payload,
             )
             resp.raise_for_status()
@@ -1622,7 +1641,7 @@ async def upload_test_files(
                 files = {"file": (file_name, file_bytes, "application/octet-stream")}
                 resp = await client.post(
                     upload_url,
-                    headers=get_headers(),
+                    headers=await get_headers(),
                     files=files,
                 )
                 resp.raise_for_status()
