@@ -669,15 +669,17 @@ async def delegate_to_specialist(
 
     body = dict(payload or {})
 
-    # Web-UI: forward the names-only secrets briefing so specialists
-    # (e.g. reporting-agent) see confluence_mode / bindings and do not
-    # re-ask cloud vs onprem. A2A never sets surface=web_ui.
-    if (
-        _caller_identity.get("surface") == "web_ui"
-        and "webui_secrets_hint" not in body
-    ):
+    # Web-UI: stamp surface + user on the child payload and forward the
+    # names-only secrets briefing. AG-UI clears module-level caller
+    # identity when the orchestrator SSE stream ends; specialists must
+    # restore surface from this payload so JWT minting still works.
+    # A2A never sets surface=web_ui.
+    if _caller_identity.get("surface") == "web_ui":
+        body.setdefault("caller_surface", "web_ui")
         hint_user = _caller_identity.get("user_id")
         if hint_user:
+            body.setdefault("caller_user_id", hint_user)
+        if hint_user and "webui_secrets_hint" not in body:
             try:
                 from services.mcp_client import build_webui_secrets_hint
 
