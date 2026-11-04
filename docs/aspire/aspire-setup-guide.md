@@ -146,7 +146,7 @@ dotnet user-secrets set "Parameters:github-personal-access-token" "<github-perso
 # ── Web-UI user secrets (AES-256 master key, base64 32 bytes) ────────────
 # Required for Settings secrets encrypt/decrypt. Generate once, for example:
 #   python -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
-# Aspire injects this as PERFPLOT_SECRETS_MASTER_KEY on perfpilot-agui and
+# Aspire injects this as PERFPILOT_SECRETS_MASTER_KEY on perfpilot-agui and
 # the GitHub, BlazeMeter, Datadog, and Confluence MCP containers only.
 # Losing it means stored tokens cannot be decrypted. Do not reuse the
 # Postgres password. Do not commit the value.
@@ -381,11 +381,11 @@ uncommented in `apphost.cs` and the matching secrets are set. See
 
 ## Docker Compose and other runtimes
 
-Aspire injects `PERFPLOT_SECRETS_MASTER_KEY` from user-secrets. When you
+Aspire injects `PERFPILOT_SECRETS_MASTER_KEY` from user-secrets. When you
 run Docker Compose instead:
 
 1. Generate the same 32-byte base64 key (or reuse the Aspire value).
-2. Put `PERFPLOT_SECRETS_MASTER_KEY=` in `docker/.env` (see
+2. Put `PERFPILOT_SECRETS_MASTER_KEY=` in `docker/.env` (see
    `docker/.env.example`) and in `agent-framework/backend/.env` for a
    host-side AG-UI process.
 3. Full-stack Compose interpolates that key plus `PERFAGENT_STATE_*`

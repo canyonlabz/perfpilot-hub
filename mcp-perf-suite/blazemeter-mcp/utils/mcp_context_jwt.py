@@ -5,7 +5,7 @@ AG-UI mints a short-lived HS256 JWT and sends it as
 the caller's active project bindings. The token carries ``user_id``,
 display name, and email only — never a PAT, ciphertext, or token name.
 
-The HMAC key is HKDF-derived from ``PERFPLOT_SECRETS_MASTER_KEY``
+The HMAC key is HKDF-derived from ``PERFPILOT_SECRETS_MASTER_KEY``
 (see ``utils.secret_crypto``). TTL is ``MCP_JWT_TTL_SECONDS`` so
 operators can change the default one-hour lifetime in one place.
 

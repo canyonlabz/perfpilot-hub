@@ -306,7 +306,7 @@ and never receive a context JWT.
   `GET`/`PUT /api/project-bindings`). Preferences theme stays in
   `localStorage`. Saved secret values are not returned after create.
 - Tokens are encrypted with AES-256-GCM under one operator key,
-  `PERFPLOT_SECRETS_MASTER_KEY` (32-byte base64). Project identity
+  `PERFPILOT_SECRETS_MASTER_KEY` (32-byte base64). Project identity
   stays in `environments.yaml`; the database stores per-user enable /
   active flags and token **names**.
 - The Web-UI → MCP hop sends `Authorization: Bearer` (HS256 JWT with
@@ -323,10 +323,17 @@ and never receive a context JWT.
   PAT validation on save.
 
 **Operator notes:** set the master key in Aspire user-secrets
-(`Parameters:perfpilot-secrets-master-key`) or `docker/.env`. Rebuild
-AG-UI and the four API MCP images so `cryptography`, `PyJWT`, and
-`asyncpg` are installed. Apply SQL `012`–`015` if they are not already
-on `perfagent_state`.
+(`Parameters:perfpilot-secrets-master-key`) or `docker/.env` as
+`PERFPILOT_SECRETS_MASTER_KEY`. Rebuild AG-UI and the four API MCP
+images so `cryptography`, `PyJWT`, and `asyncpg` are installed. Apply
+SQL `012`–`015` if they are not already on `perfagent_state`.
+
+**Env rename (2026-11-03):** the process environment variable is
+`PERFPILOT_SECRETS_MASTER_KEY` (with the **I** in PerfPilot). An earlier
+misspelling `PERFPLOT_SECRETS_MASTER_KEY` was corrected across code,
+Compose/Aspire injection, and docs. Update local `.env` / deployed env
+if you still use the old name. The Aspire user-secrets parameter name
+(`perfpilot-secrets-master-key`) was already spelled correctly.
 
 ---
 

@@ -4,7 +4,7 @@ The AG-UI process encrypts field values before they are written to
 ``user_secret_fields``. The same algorithm is used later by MCP servers
 to decrypt. The browser never receives ciphertext or plaintext.
 
-The master key is ``PERFPLOT_SECRETS_MASTER_KEY``: 32 raw bytes,
+The master key is ``PERFPILOT_SECRETS_MASTER_KEY``: 32 raw bytes,
 base64-encoded. The operator must set this value; secrets storage does
 not work without it. The key is never logged.
 """
@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-MASTER_KEY_ENV = "PERFPLOT_SECRETS_MASTER_KEY"
+MASTER_KEY_ENV = "PERFPILOT_SECRETS_MASTER_KEY"
 MASTER_KEY_LENGTH = 32
 GCM_NONCE_LENGTH = 12
 DEFAULT_KEY_VERSION = 1
@@ -43,7 +43,7 @@ class EncryptedField:
 
 
 def load_master_key() -> bytes:
-    """Return the 32-byte AES key from ``PERFPLOT_SECRETS_MASTER_KEY``.
+    """Return the 32-byte AES key from ``PERFPILOT_SECRETS_MASTER_KEY``.
 
     Raises:
         SecretCryptoError: if the variable is missing, not valid base64,
