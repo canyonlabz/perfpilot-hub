@@ -6,7 +6,7 @@
 -- dict[str, str] and each MCP reads the keys it needs.
 --
 -- Ciphertext is AES-256-GCM. nonce is required for decrypt. key_version
--- supports later rotation of PERFPLOT_SECRETS_MASTER_KEY.
+-- supports later rotation of PERFPILOT_SECRETS_MASTER_KEY.
 --
 -- Run from the `perfagent_state` database context.
 -- Depends on: 013_create_user_secrets.sql

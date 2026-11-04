@@ -110,7 +110,7 @@ services:
     container_name: perfpilot-mcp-blazemeter
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFPILOT_SECRETS_MASTER_KEY=${PERFPILOT_SECRETS_MASTER_KEY:-}
       - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-perfmem-pgvector-age}
       - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
       - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
@@ -132,7 +132,7 @@ services:
     container_name: perfpilot-mcp-datadog
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFPILOT_SECRETS_MASTER_KEY=${PERFPILOT_SECRETS_MASTER_KEY:-}
       - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-perfmem-pgvector-age}
       - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
       - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
@@ -154,7 +154,7 @@ services:
     container_name: perfpilot-mcp-jmeter
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8112:8112"
     volumes:
@@ -173,7 +173,7 @@ services:
     container_name: perfpilot-mcp-perfanalysis
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8113:8113"
     volumes: *artifacts
@@ -189,7 +189,7 @@ services:
     container_name: perfpilot-mcp-perfreport
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8114:8114"
     volumes: *artifacts
@@ -205,7 +205,7 @@ services:
     container_name: perfpilot-mcp-confluence
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFPILOT_SECRETS_MASTER_KEY=${PERFPILOT_SECRETS_MASTER_KEY:-}
       - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-perfmem-pgvector-age}
       - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
       - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
@@ -229,7 +229,7 @@ services:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
       - POSTGRES_HOST=perfmem-pgvector-age
       - POSTGRES_PORT=5432
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8116:8116"
     volumes: *artifacts
@@ -248,7 +248,7 @@ services:
     container_name: perfpilot-mcp-github
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
-      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFPILOT_SECRETS_MASTER_KEY=${PERFPILOT_SECRETS_MASTER_KEY:-}
       - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-perfmem-pgvector-age}
       - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
       - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
@@ -273,7 +273,7 @@ services:
     environment:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
       - FASTMCP_CHECK_FOR_UPDATES=off
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
       # In-network URLs (Docker DNS resolves each container name).
       - MCP_URL_BLAZEMETER=http://perfpilot-mcp-blazemeter:8110/perfpilot-mcp-blazemeter/mcp
       - MCP_URL_DATADOG=http://perfpilot-mcp-datadog:8111/perfpilot-mcp-datadog/mcp
@@ -325,7 +325,7 @@ services:
     environment:
       - HTTP_PORT=8117
       - PERFPILOT_DOCKER=true
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8117:8117"
     volumes:
@@ -354,7 +354,7 @@ services:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
       - A2A_PORT=8101
       - HEALTHCHECK_PORT=8101
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8101:8101"
     depends_on:
@@ -379,7 +379,7 @@ services:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
       - AGUI_PORT=8102
       - HEALTHCHECK_PORT=8102
-      - PERFPLOT_SECRETS_MASTER_KEY=${PERFPLOT_SECRETS_MASTER_KEY:-}
+      - PERFPILOT_SECRETS_MASTER_KEY=${PERFPILOT_SECRETS_MASTER_KEY:-}
       - PERFAGENT_STATE_HOST=${PERFAGENT_STATE_HOST:-perfmem-pgvector-age}
       - PERFAGENT_STATE_PORT=${PERFAGENT_STATE_PORT:-5432}
       - PERFAGENT_STATE_DB=${PERFAGENT_STATE_DB:-perfagent_state}
@@ -408,7 +408,7 @@ services:
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
       - PORT=8080
       - FRONTEND_PORT=8080
-      - PERFPLOT_SECRETS_MASTER_KEY=
+      - PERFPILOT_SECRETS_MASTER_KEY=
     ports:
       - "8080:8080"
     depends_on:

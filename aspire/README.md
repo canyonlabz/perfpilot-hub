@@ -79,7 +79,7 @@ aspire secret set Parameters:<name> <v>  # add / update a secret
 > your workflow. The setup guide uses `dotnet user-secrets` throughout
 > because the commands are explicit about naming. Include
 > `Parameters:perfpilot-secrets-master-key` so AG-UI and the four API
-> MCPs receive `PERFPLOT_SECRETS_MASTER_KEY`. Compose interpolates the
+> MCPs receive `PERFPILOT_SECRETS_MASTER_KEY`. Compose interpolates the
 > same variable onto those five services only (see the setup guide).
 
 ### 🛡️ Certificates

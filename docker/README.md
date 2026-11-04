@@ -119,7 +119,7 @@ full stack up you'll want most of these:
   chat model and the PerfMemory embedding model)
 - 🔑 **GitHub** personal access token (A2A env path; Web-UI users store
   theirs in Settings → Secrets)
-- 🔑 **Web-UI secrets master key** (`PERFPLOT_SECRETS_MASTER_KEY`, 32-byte
+- 🔑 **Web-UI secrets master key** (`PERFPILOT_SECRETS_MASTER_KEY`, 32-byte
   base64) if you will save tokens in the Web UI
 - 🔒 **PostgreSQL** password (you pick this — used for the local `perfmem-pgvector-age`
   container)
@@ -128,7 +128,7 @@ full stack up you'll want most of these:
 
 Every secret goes into `docker/.env` (copied from `docker/.env.example`).
 Nothing is baked into images. Compose interpolates
-`PERFPLOT_SECRETS_MASTER_KEY` onto AG-UI and the GitHub, BlazeMeter,
+`PERFPILOT_SECRETS_MASTER_KEY` onto AG-UI and the GitHub, BlazeMeter,
 Datadog, and Confluence MCP services only. A2A keeps using the vendor
 environment variables above.
 
