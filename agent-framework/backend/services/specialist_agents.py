@@ -34,27 +34,64 @@ log = logging.getLogger(__name__)
 STUB_TOTAL_RUNTIME_SECONDS = 3.0
 
 
-def _restore_web_ui_caller(task: task_store.AgentTask, payload: dict) -> bool:
+def _restore_web_ui_caller(
+    task: task_store.AgentTask,
+    payload: dict,
+) -> tuple[bool, dict | None]:
     """Re-apply Web-UI surface for JWT minting during specialist MCP calls.
 
-    AG-UI clears module-level ``_caller_identity`` when the orchestrator
-    SSE stream ends. Child tasks stamp ``caller_surface`` /
-    ``caller_user_id`` at delegate time; restore them here for the
-    duration of this specialist run. Returns True if restored.
+    Uses **snapshot-restore semantics** so overlapping child contexts
+    (e.g. inline-drain starting a specialist task while the orchestrator
+    is still mid-turn) cannot wipe the parent's live identity.
+
+    Behaviour:
+
+    1. Capture a snapshot of the current ``_caller_identity`` dict.
+    2. If the dict already has a live ``session_id`` (the orchestrator's
+       SSE stream is still active), **skip the restore** — the live
+       identity is authoritative. Return ``(False, None)``.
+    3. If the dict has no live ``session_id`` (the specialist is running
+       after the orchestrator's SSE stream ended, e.g. a HITL-gated task
+       that resumes later), apply the restore-from-payload logic and
+       return ``(True, snapshot)``.
+
+    The caller passes the returned snapshot to
+    ``_restore_caller_snapshot`` in its ``finally`` block.
+
+    Returns:
+        ``(restored, snapshot)`` — ``restored`` is True when the identity
+        was written (and must be undone on exit); ``snapshot`` is the
+        pre-entry state to restore, or None when no restore occurred.
     """
     if payload.get("caller_surface") != "web_ui":
-        return False
+        return False, None
     user_id = payload.get("caller_user_id")
     if not isinstance(user_id, str) or not user_id.strip():
-        return False
+        return False, None
     try:
         from agents.orchestrator.agent import (
             set_caller_identity,
             set_caller_surface,
+            snapshot_caller_identity,
         )
     except Exception:
         log.debug("web_ui caller restore import failed", exc_info=True)
-        return False
+        return False, None
+
+    # Snapshot BEFORE any mutation so we can restore on exit.
+    snapshot = snapshot_caller_identity()
+
+    # If the orchestrator's live identity is still active (session_id is
+    # set), skip the restore — the parent owns the dict for this turn.
+    if snapshot.get("session_id"):
+        log.info(
+            "web_ui_caller.skip_restore: live session_id present; "
+            "preserving orchestrator identity for task %s",
+            task.task_id,
+        )
+        return False, None
+
+    # No live identity (post-SSE specialist task). Restore from payload.
     thread_id = None
     if isinstance(getattr(task, "thread_id", None), str) and task.thread_id.strip():
         thread_id = task.thread_id.strip()
@@ -76,15 +113,25 @@ def _restore_web_ui_caller(task: task_store.AgentTask, payload: dict) -> bool:
         ),
     )
     set_caller_surface("web_ui")
-    return True
+    return True, snapshot
 
 
-def _clear_web_ui_caller() -> None:
-    try:
-        from agents.orchestrator.agent import clear_caller_identity
-    except Exception:
+def _restore_caller_snapshot(snapshot: dict | None) -> None:
+    """Restore ``_caller_identity`` from a prior snapshot.
+
+    Called in ``finally`` blocks after ``_restore_web_ui_caller``
+    returned ``(True, snapshot)``. When ``snapshot`` is ``None``
+    (entry was skipped), this is a no-op.
+    """
+    if snapshot is None:
         return
-    clear_caller_identity()
+    try:
+        from agents.orchestrator.agent import restore_caller_identity
+    except Exception:
+        log.debug("caller snapshot restore import failed", exc_info=True)
+        return
+    restore_caller_identity(snapshot)
+    log.info("web_ui_caller.snapshot_restored")
 
 
 EXECUTION_AGENT_NAME = "execution-agent"
@@ -324,7 +371,7 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
 
     # ---- MCP pass-through dispatch ------------------------------------
     if is_mcp_passthrough:
-        restored = _restore_web_ui_caller(task, payload)
+        restored, snapshot = _restore_web_ui_caller(task, payload)
         await _broadcast(
             task.task_id,
             TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
@@ -346,7 +393,7 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
             return envelope
         finally:
             if restored:
-                _clear_web_ui_caller()
+                _restore_caller_snapshot(snapshot)
 
         await _broadcast(
             task.task_id,
@@ -806,7 +853,7 @@ async def _run_mcp_specialist_agent(
                 stateful_client_holder["client"] = None
 
     # ---- Run multi-turn tool execution loop ---------------------------
-    restored_web_ui = _restore_web_ui_caller(task, payload)
+    restored_web_ui, web_ui_snapshot = _restore_web_ui_caller(task, payload)
     try:
         reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
             await run_multi_turn_tool_loop(
@@ -830,7 +877,7 @@ async def _run_mcp_specialist_agent(
         raise RuntimeError(f"{agent_name} agent invocation failed: {exc}") from exc
     finally:
         if restored_web_ui:
-            _clear_web_ui_caller()
+            _restore_caller_snapshot(web_ui_snapshot)
         if stateful_client_ctx is not None:
             try:
                 await stateful_client_ctx.__aexit__(None, None, None)
