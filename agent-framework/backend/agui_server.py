@@ -91,6 +91,12 @@ FRAMEWORK_DIR = get_framework_dir()
 SERVER_VERSION = "0.1.0"
 SERVER_TITLE = "PerfPilot Agents - AG-UI Bridge"
 
+# Maximum number of terminal task results injected into the orchestrator's
+# context as a system hint on each Web UI turn. Caps the token cost of the
+# known-task-results injection; each entry is a compact JSON block with only
+# whitelisted fields (no large payloads).
+MAX_TASK_RESULTS_INJECTION = 20
+
 # Load .env at module scope so environment variables (LLM credentials, ports,
 # TLS paths) are available when create_app() → build_orchestrator() runs at
 # import time — before main() has a chance to call load_dotenv().
@@ -426,6 +432,62 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                     log.exception(
                         "/copilotkit: failed to inject secrets names hint; "
                         "continuing without it"
+                    )
+
+            # Inject structured results from prior terminal tasks so
+            # the orchestrator LLM sees key facts (sessions_id, public_url,
+            # artifacts_path, etc.) without re-deriving them on each turn.
+            if thread_id:
+                try:
+                    from services.helpers.task_result_fields import extract_key_fields
+
+                    terminal_tasks = await task_store.list_tasks_for_thread(
+                        thread_id,
+                        user_id=requesting_user,
+                        limit=MAX_TASK_RESULTS_INJECTION,
+                    )
+                    task_result_entries: list[dict] = []
+                    for t in terminal_tasks:
+                        if t.status not in task_store.TERMINAL_STATUSES:
+                            continue
+                        if not isinstance(t.result, dict):
+                            continue
+                        tool_result = t.result.get("tool_result")
+                        tool_name = t.result.get("tool")
+                        source = tool_result if isinstance(tool_result, dict) else t.result
+                        key_fields = extract_key_fields(tool_name, source)
+                        if not key_fields:
+                            continue
+                        task_result_entries.append({
+                            "test_run_id": t.test_run_id,
+                            "task_id": str(t.task_id),
+                            "agent_name": t.agent_name,
+                            "tool": tool_name,
+                            "status": t.status,
+                            "key_fields": key_fields,
+                        })
+
+                    if task_result_entries:
+                        from ag_ui.core import SystemMessage
+
+                        hint_body = (
+                            "Known task results from this thread "
+                            "(use these instead of re-fetching):\n"
+                            + json.dumps(task_result_entries, indent=2)
+                        )
+                        combined_messages = [
+                            SystemMessage(
+                                id="webui-known-task-results",
+                                role="system",
+                                content=hint_body,
+                            ),
+                            *combined_messages,
+                        ]
+                except Exception:
+                    log.exception(
+                        "/copilotkit: failed to inject known task results for "
+                        "thread %s; continuing without them",
+                        thread_id,
                     )
 
             if log.isEnabledFor(logging.DEBUG):
