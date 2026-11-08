@@ -21,10 +21,6 @@ import re
 from collections import defaultdict
 from typing import Any, Optional
 
-from services.helpers.mcp_passthrough import (
-    call_mcp_tool_passthrough,
-    passthrough_process_session_artifacts,
-)
 from services.helpers.tool_loop import run_multi_turn_tool_loop
 from services.subscriptions import TaskEvent, broadcast as _broadcast
 from stores import task_store
@@ -323,24 +319,26 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         "test_run_id": test_run_id,
     }
 
-    # ---- Payload validation -------------------------------------------
-    if not isinstance(tool, str) or not tool:
-        envelope["tool_result"] = {
-            "ok": False,
-            "error": {
-                "type": "InvalidPayload",
-                "message": (
-                    "Payload is missing required field 'tool' (must be one "
-                    f"of {list(EXECUTION_AGENT_TOOL_NAMES)})."
-                ),
-            },
-        }
-        return envelope
+    # ---- Payload validation & routing ----------------------------------
+    is_composite_tool = isinstance(tool, str) and tool in EXECUTION_AGENT_TOOL_NAMES
+    is_mcp_name = (
+        isinstance(tool, str)
+        and tool
+        and any(tool.startswith(p) for p in EXECUTION_AGENT_MCP_PREFIXES)
+    )
+    is_intent_based = not isinstance(tool, str) or not tool
 
-    is_composite_tool = tool in EXECUTION_AGENT_TOOL_NAMES
-    is_mcp_passthrough = any(tool.startswith(p) for p in EXECUTION_AGENT_MCP_PREFIXES)
+    # Intent-based delegation (no tool field) or an explicit MCP tool
+    # name: route through the execution-agent's LLM with its full
+    # FastMCP tool catalog so it can validate args against live schemas.
+    if is_intent_based or is_mcp_name:
+        log.info(
+            "execution-agent LLM dispatch: tool=%s intent_based=%s task=%s",
+            tool, is_intent_based, task.task_id,
+        )
+        return await _run_mcp_specialist_agent(task, common, EXECUTION_AGENT_NAME)
 
-    if not is_composite_tool and not is_mcp_passthrough:
+    if not is_composite_tool:
         envelope["tool_result"] = {
             "ok": False,
             "error": {
@@ -348,7 +346,8 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
                 "message": (
                     f"Unknown tool {tool!r}. Valid composite tools: "
                     f"{list(EXECUTION_AGENT_TOOL_NAMES)}. "
-                    f"MCP pass-through prefixes: {list(EXECUTION_AGENT_MCP_PREFIXES)}."
+                    "For individual MCP operations, omit the 'tool' field "
+                    "and describe the intent in 'user_message'."
                 ),
             },
         }
@@ -368,39 +367,6 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         return envelope
 
     args = args or {}
-
-    # ---- MCP pass-through dispatch ------------------------------------
-    if is_mcp_passthrough:
-        restored, snapshot = _restore_web_ui_caller(task, payload)
-        await _broadcast(
-            task.task_id,
-            TaskEvent(status="running", progress=f"mcp_passthrough:{tool}", **common),
-        )
-        try:
-            if tool == "blazemeter_process_session_artifacts":
-                mcp_result = await passthrough_process_session_artifacts(args)
-            else:
-                mcp_result = await call_mcp_tool_passthrough(tool, args)
-        except Exception as exc:
-            log.exception("MCP pass-through failed for tool %s", tool)
-            envelope["tool_result"] = {
-                "ok": False,
-                "error": {
-                    "type": type(exc).__name__,
-                    "message": f"MCP pass-through call failed: {exc}",
-                },
-            }
-            return envelope
-        finally:
-            if restored:
-                _restore_caller_snapshot(snapshot)
-
-        await _broadcast(
-            task.task_id,
-            TaskEvent(status="running", progress=f"tool_complete:{tool}", **common),
-        )
-        envelope["tool_result"] = mcp_result
-        return envelope
 
     # ---- Module load + function resolution ----------------------------
     await _broadcast(
