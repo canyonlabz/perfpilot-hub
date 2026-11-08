@@ -1,339 +1,159 @@
-# 📋 PerfPilot-Hub — Changelog (October 2026)
+# 📋 PerfPilot-Hub — Changelog (November 2026)
 
-This document summarizes the enhancements added to PerfPilot-Hub during October 2026.
-
-The JMeter script workflow is unchanged. Playwright, HAR, and OpenAPI are three ways the Script Agent receives the source. After that, validation, execution, monitoring, analysis, and reporting follow the same path and share one `test_run_id`.
-
-This changelog also covers the A2A server compliance pass: JSON-RPC is
-the primary binding, REST stays supported, custom PerfPilot task routes
-are retired, and inbound messages follow A2A v1.0.0.
+This document summarizes the enhancements added to PerfPilot-Hub during November 2026.
 
 ---
 
 ## 📑 Table of Contents
 
-- [🆔 1. Framework-assigned `test_run_id`](#1-framework-assigned-test_run_id)
-- [🧪 2. Script creation inputs](#2-script-creation-inputs)
-- [🔄 3. Multi-turn pause and resume](#3-multi-turn-pause-and-resume)
-- [🖥️ 4. Web UI thread context](#4-web-ui-thread-context)
-- [📊 5. Comparison reports](#5-comparison-reports)
-- [📄 6. A2A server data contract](#6-a2a-server-data-contract)
-- [✨ 7. Files created](#7-files-created)
-- [🔧 8. Files modified](#8-files-modified)
-- [🚫 9. Removed custom A2A task routes](#9-removed-custom-a2a-task-routes)
-- [🔌 10. A2A wire-format compliance](#10-a2a-wire-format-compliance)
-- [🧵 11. Required `contextId`](#11-required-contextid)
-- [📥 12. Strict A2A ingress](#12-strict-a2a-ingress)
-- [🪪 13. A2A Agent Cards](#13-a2a-agent-cards)
-- [📘 14. A2A data-contract rewrite](#14-a2a-data-contract-rewrite)
-- [📖 15. Public documentation refresh](#15-public-documentation-refresh)
-- [🚀 16. .NET Aspire orchestration](#16-net-aspire-orchestration)
-- [🎨 17. Web UI visual port](#17-web-ui-visual-port)
-- [🔐 18. Settings Secrets catalog and header GitHub retirement](#18-settings-secrets-catalog-and-header-github-retirement)
-- [🔑 19. Web-UI bring-your-own tokens](#19-web-ui-bring-your-own-tokens)
+- [🔧 1. Caller identity snapshot/restore](#1-caller-identity-snapshotrestore)
+- [🛠️ 2. Execution-agent delegation and MCP dispatch](#2-execution-agent-delegation-and-mcp-dispatch)
+- [📊 3. Structured task results injection](#3-structured-task-results-injection)
+- [✨ 4. Files created](#4-files-created)
+- [🔧 5. Files modified](#5-files-modified)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
 
-## 🆔 1. Framework-assigned `test_run_id`
+## 🔧 1. Caller identity snapshot/restore
 
-The agent framework assigns `test_run_id`. Specialist agents reuse the id they are given. They do not mint one.
+**Branch:** `fix/agent-delegation-and-caller-identity`
 
-Every inbound request is classified into one of four outcomes:
+The module-level `_caller_identity` dict in `agents/orchestrator/agent.py`
+carries per-request identity (user_id, thread_id, session_id, etc.) across
+AG2's thread isolation boundary. When the Web UI's inline-drain mechanism
+starts a delegated specialist task in the same turn, the child task's
+`_clear_web_ui_caller()` wiped the dict — killing subsequent delegations
+in the same orchestrator turn.
 
-| Outcome | When | What the server does |
-|---------|------|----------------------|
-| **Reuse** | An id is already on the task, in the payload, or in the user's message (`test_run_id: YYYY-MM-DD-HH-MM-SS`) | Keep that id |
-| **Mint** | The request creates a JMeter script (Playwright, HAR, or OpenAPI) and no id exists yet | Mint `YYYY-MM-DD-HH-MM-SS` in UTC and store it on the task |
-| **Skip mint** | The request is a comparison report and names two or more existing run ids | Do not mint. The reporting tools mint `comparison_id`, and the framework stores that value on the reporting task |
-| **Ask** | No id exists and the request is not script creation | Pause the task and ask the user which run to use |
+**Fix:** replaced wipe-on-exit with snapshot/restore semantics.
 
-Artifacts for a single run stay under `artifacts/{test_run_id}/`.
-
----
-
-## 🧪 2. Script creation inputs
-
-One script-creation workflow. The Script Agent is the only part that changes with the source:
-
-| Source | What the caller supplies | What the Script Agent uses |
-|--------|--------------------------|----------------------------|
-| Playwright | Step text in the task context | Those steps, written to `artifacts/{test_run_id}/test-specs/` |
-| HAR | A short summary, plus the URL of the capture file | The HAR-to-JMX converter |
-| OpenAPI | A short summary, plus the URL of the specification file | The OpenAPI-to-JMX converter |
-
-A Playwright request must say `source_type: playwright` and include recognizable step lines (for example `Step 1:`, `TC01:`, or `Test Case 1:`). A request that declares Playwright and has no steps pauses instead of writing an empty spec.
+- Added `snapshot_caller_identity()` — returns a shallow copy of the
+  current `_caller_identity` dict before entering a child context.
+- Added `restore_caller_identity(snapshot)` — restores the dict from a
+  prior snapshot on exit instead of wiping all fields.
+- Renamed `_clear_web_ui_caller()` to `_restore_caller_snapshot(snapshot)`
+  in `specialist_agents.py` — restores the snapshot instead of clearing.
+- Rewrote `_restore_web_ui_caller()` to return
+  `tuple[bool, dict | None]` — captures the snapshot and skips restore
+  when a live `session_id` is already present (inline-drain scenario).
+- Both call sites updated: `_run_execution_agent` finally block and
+  `_run_mcp_specialist_agent` finally block.
 
 ---
 
-## 🔄 3. Multi-turn pause and resume
+## 🛠️ 2. Execution-agent delegation and MCP dispatch
 
-When the server needs more input, the task moves to `TASK_STATE_INPUT_REQUIRED`. The status message includes a question for the user and a `reasonCode` a client can switch on.
+**Branch:** `fix/agent-delegation-and-caller-identity`
 
-| `reasonCode` | When |
-|--------------|------|
-| `missing_test_run_id` | The request needs a run id and none was supplied |
-| `malformed_playwright_test_spec` | Playwright was declared and the task context has no recognizable steps |
+Three related sub-fixes address the execution-agent's MCP tool handling:
 
-The caller continues the same task by sending another message with the same task id and the same `contextId`. The follow-up can be a short answer. The original request stays on the task. A mismatched `contextId`, an unknown task id, or a task that is not paused is rejected.
+### 2a. Prompt corrections
+
+The orchestrator's INSTRUCTIONS.md §9.6 listed 14 MCP tool names with
+incomplete parameter schemas. The orchestrator has no access to MCP tools
+and cannot validate arguments — that is the specialist's job via FastMCP
+v3.x docstring-derived schemas.
+
+- **Orchestrator INSTRUCTIONS.md:** Removed the MCP pass-through table
+  (§9.6). Replaced with intent-based delegation guidance. Added §11
+  item 3: "Do not name MCP tools or set MCP tool arguments when
+  delegating to the execution-agent." Updated §2 table row.
+- **Execution-agent INSTRUCTIONS.md:** Added §5.1 documenting
+  intent-based payloads (no `tool` field). Three-point guidance:
+  inspect FastMCP catalog, prefer composites, use individual
+  `blazemeter_*` tools only for specific operations.
+
+### 2b. Dispatcher rewrite
+
+The MCP pass-through branch in `_run_execution_agent` bypassed the
+execution-agent's LLM, forwarding args verbatim via
+`call_mcp_tool_passthrough`. The orchestrator (with no MCP schemas)
+became the only reasoning agent — schema mismatches caused Pydantic
+validation errors that wasted retry budget.
+
+- Replaced the MCP pass-through block with routing to
+  `_run_mcp_specialist_agent()` — the execution-agent's LLM now
+  validates args against live FastMCP schemas.
+- Three-way routing: **composite tools** (direct Python dispatch),
+  **intent-based** (no `tool` field → LLM dispatch),
+  **MCP tool names** (`blazemeter_*`/`jmeter_*` → LLM dispatch).
+- Removed unused `call_mcp_tool_passthrough` and
+  `passthrough_process_session_artifacts` imports.
+
+### 2c. Retry policy fix
+
+`call_mcp_tool_passthrough` retried all exceptions 3 times including
+deterministic Pydantic validation errors, wasting 10+ seconds per bad
+call.
+
+- Added `_is_validation_error(exc)` helper — detects `validation error`,
+  `unexpected_keyword_argument`, `missing_argument`, and
+  `missing required argument` markers (case-insensitive).
+- Both `call_mcp_tool_passthrough` and
+  `call_mcp_tool_passthrough_for_specialist` now short-circuit on
+  validation errors: return immediately on attempt 1 with
+  `error.type = "ValidationError"`. Transient errors still retry.
 
 ---
 
-## 🖥️ 4. Web UI thread context
+## 📊 3. Structured task results injection
 
-On each Web UI turn, the backend loads `test_run_id` values already stored for that conversation and gives them to the orchestrator.
+**Branch:** `fix/agent-delegation-and-caller-identity`
 
-- One known id is reused.
-- Several known ids are listed so the orchestrator can ask which run the user means.
-- A first turn with no known id follows the same reuse / mint / ask rules as an A2A request.
+Two gaps prevented structured data from prior tasks being available in
+subsequent conversation turns:
+
+1. `_build_completion_summary` only extracted `reply_text` / `summary` /
+   `message` — execution-agent pass-through results (which carry data in
+   `tool_result` but no `reply_text`) produced a bare "completed
+   successfully" message.
+2. `agui_server.py` only injected `known_test_run_ids` — structured
+   fields like `sessions_id`, artifact paths, and public URLs were lost
+   between turns.
+
+**Fix:**
+
+- **New helper:** `services/helpers/task_result_fields.py` — whitelisted
+  key-field extractor. Maps 10 tool names to their safe-to-surface
+  fields. Unknown tools get fallback extraction (`status`, `ok`).
+  Normalizes `sessionsId` → `sessions_id`. Excludes `None` values and
+  non-dict inputs.
+- **Completion summary enrichment** (`task_executor.py`): when no
+  `reply_text`/`summary`/`message` is present and the result contains a
+  `tool_result` dict, extracts whitelisted key fields and formats them
+  as JSON in the conversation thread.
+- **Known-task-results injection** (`agui_server.py`): added
+  `MAX_TASK_RESULTS_INJECTION = 20` module-level constant. After the
+  existing secrets hint injection, queries terminal tasks for the
+  thread, extracts key fields, and injects a
+  `SystemMessage(id="webui-known-task-results")` so the orchestrator
+  LLM sees prior outcomes on subsequent turns.
 
 ---
 
-## 📊 5. Comparison reports
-
-A comparison report names the runs to compare. The framework does not mint a new `test_run_id` for that request. When the reporting agent returns `comparison_id`, that value is stored on the reporting task in the same column a single-run id uses, so later status reads and publishes can find the bundle.
-
----
-
-## 📄 6. A2A server data contract
-
-Public reference: [`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md)
-(rewritten after the A2A compliance pass; see §14).
-
-It describes what an upstream framework sends on an inbound A2A request:
-
-- Exactly three parts on a new request: the user prompt, the task context, and extra context such as environment and work-item links.
-- Each part is `text` plus `metadata`, with `mediaType: text/markdown`.
-- Playwright steps travel in the task-context text. HAR and OpenAPI travel as a summary plus a source URL.
-- Comparison reports travel as a summary plus `task_type: comparison_report` and `test_run_ids`.
-- A resume message can be a short single-part answer.
-
-Examples use placeholder hosts (`example.com`, `example-org`).
-
----
-
-## ✨ 7. Files created
+## ✨ 4. Files created
 
 | File | Purpose |
 |------|---------|
-| `agent-framework/backend/sql/011_extend_agent_tasks_status.sql` | Allows `input_required`, `rejected`, and `auth_required` on `agent_tasks` |
-| `agent-framework/backend/core/task_signals.py` | Signal used to pause a task for missing input |
-| `docs/a2a/a2a-server-data-contracts.md` | Public A2A inbound data contract |
-| `tests/agent_framework/stores/test_task_store_input_required.py` | Task-store coverage for pause, resume messages, and `test_run_id` persistence |
-| `tests/agent_framework/core/test_test_run_id.py` | Resolver outcome coverage |
-| `tests/agent_framework/a2a/test_parts_parser_task_split.py` | Prompt and optional task-tag parsing |
-| `tests/agent_framework/a2a/test_a2a_sse_input_required.py` | Pause-event coverage |
-| `tests/agent_framework/a2a/test_a2a_resume_flow.py` | Resume-path coverage |
-| `tests/agent_framework/a2a/test_spec_normalizer_strict_gate.py` | Playwright source gate |
-| `tests/agent_framework/a2a/test_retired_task_routes.py` | Retired `/agents/{name}/tasks/*` routes are unregistered |
-| `tests/agent_framework/a2a/test_wire_format.py` | JSON-RPC/REST wrappers, `returnImmediately`, push `-32003` |
-| `tests/agent_framework/a2a/test_context_enforcement.py` | Required `contextId`; optional matching `X-External-Thread-Id` |
-| `tests/agent_framework/a2a/test_ingress_validation.py` | Strict Message validation; metadata-sourced `test_run_id` |
-| `tests/agent_framework/a2a/test_agent_cards.py` | Official card capabilities, `provider.url`, metadata catalog fields |
-| `tests/agent_framework/agui/test_webui_context_load.py` | Web UI thread-context coverage |
-| `tests/agent_framework/services/test_orchestrator_input_required.py` | Orchestrator pause coverage |
-| `tests/agent_framework/services/test_specialist_envelope_reuse.py` | Specialist reuse and `comparison_id` capture |
-| `tests/agent_framework/services/test_persist_test_spec_strict.py` | Playwright spec persistence |
-| `tests/agent_framework/agents/test_delegate_source_type.py` | Orchestrator delegation of `source_type` and comparison payloads |
+| `agent-framework/backend/services/helpers/task_result_fields.py` | Whitelisted key-field extractor for task results |
+| `tests/agent_framework/services/test_caller_identity_lifecycle.py` | 10 regression tests for snapshot/restore caller identity |
+| `tests/agent_framework/services/test_mcp_passthrough_retry_policy.py` | 12 tests for validation error short-circuit and transient retry |
+| `tests/agent_framework/services/test_execution_agent_dispatch.py` | 8 tests for three-way dispatch routing |
+| `tests/agent_framework/services/test_task_result_fields.py` | 16 tests for whitelisted key-field extraction |
+| `tests/agent_framework/services/test_completion_summary_enrichment.py` | 7 tests for completion summary enrichment |
 
-## 🔧 8. Files modified
+## 🔧 5. Files modified
 
 | File | Changes |
 |------|---------|
-| `agent-framework/backend/stores/task_store.py` | Persist `test_run_id`, mark a task paused, append a resume message |
-| `agent-framework/backend/core/test_run_id.py` | Reuse, mint, skip-mint, and ask outcomes |
-| `agent-framework/backend/a2a/shared/parts_parser.py` | Read an optional task tag from the prompt part |
-| `agent-framework/backend/services/task_executor.py` | Pause when an id is missing; specialists reuse the id; capture `comparison_id`; persist Playwright specs from step text |
-| `agent-framework/backend/a2a/server/v1_jsonrpc.py` | JSON-RPC binding (`POST /a2a/v1`) |
-| `agent-framework/backend/a2a/server/v1_rest.py` | REST binding + official Agent Card discovery |
-| `agent-framework/backend/a2a/server/helpers/normalize.py` | Strict SendMessage validation; metadata-centric flatten |
-| `agent-framework/backend/a2a/server/helpers/converters.py` | Task / StreamResponse shapes; `reasonCode` on one text part |
-| `agent-framework/backend/a2a/server/helpers/resume.py` | Resume an existing paused task when the inbound message names it |
-| `agent-framework/backend/a2a/server/helpers/spec_normalizer.py` | Playwright extraction requires `source_type: playwright` |
-| `agent-framework/backend/a2a/server/utils/context.py` | Required `contextId`; optional header match; never mint |
-| `agent-framework/backend/agui_server.py` | Load prior `test_run_id` values for the Web UI thread |
-| `agent-framework/backend/agents/orchestrator/agent.py` | Delegation accepts `source_type` for the Script Agent and passes comparison run ids through |
-| `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | The framework assigns `test_run_id`; the model asks when more than one run is in play |
-| `agent-framework/backend/agents/script-agent/INSTRUCTIONS.md` | Use the `test_run_id` already on the payload |
-
----
-
-## 🚫 9. Removed custom A2A task routes
-
-Custom PerfPilot task URLs under `/agents/{name}/tasks/*` are retired.
-JSON-RPC (`POST /a2a/v1`) is the primary A2A binding; REST
-(`/message:send`, `/message:stream`, `/tasks/{id}`) remains supported.
-The Web UI catalog (`GET /agents`, `GET /agents/{name}/.well-known/agent.json`)
-and AG-UI (port 8102) are unchanged. Orchestrator specialist
-delegation is in-process; it no longer HTTP-POSTs the deleted routes.
-
-See [A2A server data contract §12](docs/a2a/a2a-server-data-contracts.md#12-removed-api)
-for the replacement table.
-
----
-
-## 🔌 10. A2A wire-format compliance
-
-JSON-RPC `GetTask` / `CancelTask` now return a bare `Task` in `result`.
-`SendMessage` (both bindings) returns `{ "task": Task }`. REST success
-and error bodies use `Content-Type: application/a2a+json`.
-`configuration.returnImmediately` (default `false`) is the blocking
-switch. `INPUT_REQUIRED` emits a single text part with
-`metadata.reasonCode`. Agent cards advertise `pushNotifications: false`;
-push methods return `-32003`. REST gained `GET /tasks/{id}:subscribe`
-and `GET /tasks` (list is still unimplemented).
-
----
-
-## 🧵 11. Required `contextId`
-
-Every A2A `SendMessage` / `SendStreamingMessage` must include
-`message.contextId`. The server no longer auto-mints a conversation
-id. Optional `X-External-Thread-Id` must match `contextId` when
-present. Task objects and SSE events echo `contextId` (never an empty
-string). Emitting `X-Thread-Id` on every success response is a
-follow-up (Yaak smokes confirmed `A2A-Version` and `X-Session-Id`).
-
----
-
-## 📥 12. Strict A2A ingress
-
-A2A `SendMessage` / `SendStreamingMessage` now require a validated
-`message` object (`messageId`, `ROLE_USER`, non-empty `parts`,
-`contextId`). Flat bodies (`text`, `prompt`, or a string `message`)
-are rejected. PerfPilot fields such as `test_run_id` are read from
-`message.metadata` and `parts[].metadata` (`message.metadata` wins
-over envelope `metadata`).
-
----
-
-## 🪪 13. A2A Agent Cards
-
-On-disk Agent Cards and the stub synthesizer now use official A2A
-`capabilities` only (`streaming`, `pushNotifications`,
-`extendedAgentCard`). PerfPilot flags live under
-`metadata.perfpilot_capabilities`. `displayName`, `status`, and `tags`
-moved into `metadata`. `provider.url` is the `{host}:{port}`
-placeholder (hostname auto-injection stays backlog-only).
-`list_available_specialists` reads those metadata fields.
-
----
-
-## 📘 14. A2A data-contract rewrite
-
-[`docs/a2a/a2a-server-data-contracts.md`](docs/a2a/a2a-server-data-contracts.md)
-is the post-compliance inbound contract: required `contextId` (never
-minted), optional matching `X-External-Thread-Id`, official envelope
-`metadata`, no flat legacy payload, correct JSON-RPC / REST wrappers,
-Removed API, and Agent Card metadata. Unit coverage for those rules
-lives under `tests/agent_framework/a2a/`.
-
----
-
-## 📖 15. Public documentation refresh
-
-All public-facing READMEs updated to reflect .NET Aspire as the recommended
-local orchestration path and to use open-source-friendly language throughout.
-
-**Files updated:**
-
-| File | Key changes |
-|------|-------------|
-| `README.md` | Aspire-first getting started, architecture diagram with 8 gateway-mounted MCPs, corrected repo tree (`aspire/`, `tests/`, `github-mcp/`) |
-| `docs/aspire/aspire-setup-guide.md` | Fixed resource names and count (14), dashboard URL (`17014`), moved cert/JKS secrets to optional, removed Vault/cloud claims |
-| `aspire/README.md` | Fixed resource count (14) |
-| `docker/README.md` | Added Aspire banner, removed Phase 1/2 language and Vault references, Compose positioned as supported alternative |
-| `agent-framework/README.md` | Aspire-first startup, fixed gateway port (`8125`), removed Epic/Azure/EntraID/Key Vault references |
-| `agent-framework/frontend/ui/README.md` | Aspire-first startup order, fixed gateway port (`8125`) |
-| `docs/README.md` | Rebuilt guide index from actual file tree with categorized tables |
-
----
-
-## 🚀 16. .NET Aspire orchestration
-
-Added .NET Aspire as the recommended local orchestration path
-([PR #11](https://github.com/canyonlabz/perfpilot-hub/pull/11)).
-
-A single-file C# AppHost (`aspire/apphost.cs`) using Aspire 13.x `#:sdk`
-directives starts **14 resources** — PostgreSQL, 9 MCP servers, the gateway,
-both agent backends, and the frontend — with one command (`aspire run`).
-Secrets are managed via `dotnet user-secrets` with
-`UserSecretsId = perfpilot-aspire-apphost`.
-
-**Files added:**
-
-| File | Purpose |
-|------|---------|
-| `aspire/apphost.cs` | Single-file AppHost — resources, env vars, secrets, health waits |
-| `aspire/aspire.config.json` | Project-level Aspire config |
-| `aspire/apphost.run.json` | Dev launch profiles (dashboard on `https://localhost:17014`) |
-| `aspire/README.md` | Quick-start guide and command reference |
-| `docs/aspire/aspire-setup-guide.md` | Full setup walkthrough — prerequisites, secrets, smoke checks, troubleshooting |
-
-Docker Compose remains supported as an alternative for contributors who
-prefer it or cannot run .NET Aspire.
-
----
-
-## 🎨 17. Web UI visual port
-
-The live frontend now matches the approved chat and Settings mocks, plus Aspire review follow-up.
-
-- YAML-aligned color tokens apply before first paint (`perfpilot.theme` in `localStorage`, Auto follows the OS). Dark theme also sets the full token set in CSS so text stays light if the applier is late. Assistant markdown uses conversation text tokens instead of typography gray.
-- Chat chrome: right-aligned nav, Settings pill, ~960px conversation column, ChatGPT-style right-edge alignment, shared `#3d5674` steel-blue user bubble in light and dark, composer well (`#e8eef4` plus a stone-gray border in light; `#1c2430` in dark) so the prompt box reads against the canvas, Perplexity-style autosize with `field-sizing: content` and a `scrollHeight` fallback.
-- `/settings` has Projects, Secrets, Preferences, and Profile as visual shells. Dummy project/secret rows are gone. Add-secret Component options are scoped to the focus area (including Confluence Cloud / On-Prem). Trash removes an in-session preview row. Project dropdowns list Secrets token names plus None selected. Only the theme control persists. No `/api/secrets`, `/api/me`, or project persistence.
-
-**Files added:** `lib/theme-config.ts`, `lib/theme-applier.ts`, `lib/theme-preference.ts`, `lib/settings-catalog.ts`, `components/theme/theme-runtime.tsx`, `app/settings/page.tsx`, `components/settings/*`.
-
----
-
-## 🔐 18. Settings Secrets catalog and header GitHub retirement
-
-- Settings → Secrets gained an Observability focus area (`datadog`) and per-component value fields (BlazeMeter `api_key` + `api_secret`, Datadog `api_key` + `app_key`; others remain a single token). Projects preview dropdowns include Datadog token names plus None selected.
-- The header GitHub connector, `github-creds.ts` session store, and CopilotKit readable of SCM metadata are removed. Repo and branch for script push come from chat. PATs belong on Settings → Secrets.
-- Orchestrator instructions: on Playwright / HAR / OpenAPI script creation, ask for repo + a feature branch; refuse `main`/`master`; if dest is still missing, create the script and warn that a GitHub link will not be available. Destination logging uses OTEL-shaped `log_event` (info when dest is known; warning when it is not). Never logs tokens.
-
----
-
-## 🔑 19. Web-UI bring-your-own tokens
-
-Web-UI users store named personal tokens on the server. A2A credential
-behavior is unchanged: those callers keep using environment variables
-and never receive a context JWT.
-
-- Settings → Profile, Secrets, and Projects persist through AG-UI
-  (`GET`/`PATCH /api/me`, `GET`/`POST`/`DELETE /api/secrets`,
-  `GET`/`PUT /api/project-bindings`). Preferences theme stays in
-  `localStorage`. Saved secret values are not returned after create.
-- Tokens are encrypted with AES-256-GCM under one operator key,
-  `PERFPILOT_SECRETS_MASTER_KEY` (32-byte base64). Project identity
-  stays in `environments.yaml`; the database stores per-user enable /
-  active flags and token **names**.
-- The Web-UI → MCP hop sends `Authorization: Bearer` (HS256 JWT with
-  user identity only). GitHub, BlazeMeter, Datadog, and Confluence
-  decrypt the active project's bound secret themselves. A missing
-  binding is a names-only orchestrator message, not an env fallback.
-  An invalid vendor token still surfaces as a vendor 401. GitHub
-  `token=` is ignored on the Web-UI path.
-- Aspire and full-stack Compose inject the master key and
-  `PERFAGENT_STATE_*` onto AG-UI and those four MCPs only. A2A, the
-  gateway, the frontend, and the other MCPs do not receive the key.
-- Schema files `012`–`015` add `users`, `user_secrets`,
-  `user_secret_fields`, and `user_project_bindings`. There is no live
-  PAT validation on save.
-
-**Operator notes:** set the master key in Aspire user-secrets
-(`Parameters:perfpilot-secrets-master-key`) or `docker/.env` as
-`PERFPILOT_SECRETS_MASTER_KEY`. Rebuild AG-UI and the four API MCP
-images so `cryptography`, `PyJWT`, and `asyncpg` are installed. Apply
-SQL `012`–`015` if they are not already on `perfagent_state`.
-
-**Env rename (2026-11-03):** the process environment variable is
-`PERFPILOT_SECRETS_MASTER_KEY` (with the **I** in PerfPilot). An earlier
-misspelling `PERFPLOT_SECRETS_MASTER_KEY` was corrected across code,
-Compose/Aspire injection, and docs. Update local `.env` / deployed env
-if you still use the old name. The Aspire user-secrets parameter name
-(`perfpilot-secrets-master-key`) was already spelled correctly.
+| `agent-framework/backend/agents/orchestrator/agent.py` | Added `snapshot_caller_identity()` and `restore_caller_identity()` helpers |
+| `agent-framework/backend/services/specialist_agents.py` | Snapshot/restore in `_restore_web_ui_caller`; replaced MCP pass-through with LLM dispatch; removed unused pass-through imports |
+| `agent-framework/backend/services/helpers/mcp_passthrough.py` | Added `_is_validation_error()` guard; validation errors return on attempt 1 |
+| `agent-framework/backend/services/task_executor.py` | `_build_completion_summary` enriched with key-field extraction for execution-agent results |
+| `agent-framework/backend/agui_server.py` | `MAX_TASK_RESULTS_INJECTION = 20` constant; known-task-results system hint injection |
+| `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | Removed MCP pass-through table (§9.6); added intent-based delegation; added §11 item 3 prohibition |
+| `agent-framework/backend/agents/execution-agent/INSTRUCTIONS.md` | Added §5.1 intent-based delegation payload documentation |
 
 ---
 
@@ -341,6 +161,7 @@ if you still use the old name. The Aspire user-secrets parameter name
 
 | Month | Link | Highlights |
 |-------|------|------------|
+| October 2026 | [CHANGELOG-2026-10.md](docs/changelogs/CHANGELOG-2026-10.md) | Framework-assigned test_run_id, A2A compliance pass, .NET Aspire orchestration, Web UI visual port, bring-your-own tokens |
 | September 2026 | [CHANGELOG-2026-09.md](docs/changelogs/CHANGELOG-2026-09.md) | GitHub MCP, BlazeMeter test provisioning, A2A new-JMX pipeline, documentation refactor, Docker full-stack refactor |
 | August 2026 | [CHANGELOG-2026-08.md](docs/changelogs/CHANGELOG-2026-08.md) | Repository restructuring, agent-framework containers, HITL approval flow, user identity, task management UI |
 | July 2026 | [CHANGELOG-2026-07.md](docs/changelogs/CHANGELOG-2026-07.md) | Loop engineering, LLM round-trip reduction, context and token tracking, compaction |
@@ -353,4 +174,4 @@ if you still use the old name. The Aspire user-secrets parameter name
 
 ---
 
-*Last Updated: November 2, 2026* ✨
+*Last Updated: November 8, 2026*

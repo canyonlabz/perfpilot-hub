@@ -16,6 +16,29 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# Markers that identify Pydantic / FastMCP validation errors in exception
+# messages. These errors are deterministic — the same args will always
+# produce the same failure — so retrying wastes time and API budget.
+# Checked case-insensitively against ``str(exception).lower()``.
+_VALIDATION_ERROR_MARKERS: tuple[str, ...] = (
+    "validation error",
+    "unexpected_keyword_argument",
+    "missing_argument",
+    "missing required argument",
+)
+
+
+def _is_validation_error(exc: Exception) -> bool:
+    """Return True when the exception is a deterministic schema mismatch.
+
+    Pydantic validation errors raised by FastMCP when the caller passes
+    wrong argument names or omits required arguments are not transient —
+    retrying will produce the identical failure. This helper lets the
+    retry loops short-circuit on the first attempt.
+    """
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _VALIDATION_ERROR_MARKERS)
+
 
 def extract_sessions_id_from_mcp_payload(payload: Any) -> list[str]:
     """Pull the load-generator ``sessions_id`` list from an MCP result."""
@@ -88,6 +111,20 @@ async def call_mcp_tool_passthrough_for_specialist(
                     "attempts": attempt,
                 }
             except Exception as e:
+                if _is_validation_error(e):
+                    log.warning(
+                        "MCP validation error (no retry): tool=%s attempt=%d error=%s",
+                        tool_name, attempt, e,
+                    )
+                    return {
+                        "ok": False,
+                        "tool": tool_name,
+                        "error": {
+                            "type": "ValidationError",
+                            "message": str(e)[:500],
+                        },
+                        "attempts": attempt,
+                    }
                 last_error = e
                 if attempt < max_attempts:
                     await asyncio.sleep(retry_delay)
@@ -146,6 +183,20 @@ async def call_mcp_tool_passthrough(tool_name: str, args: dict) -> dict:
                     "attempts": attempt,
                 }
             except Exception as e:
+                if _is_validation_error(e):
+                    log.warning(
+                        "MCP validation error (no retry): tool=%s attempt=%d error=%s",
+                        tool_name, attempt, e,
+                    )
+                    return {
+                        "ok": False,
+                        "tool": tool_name,
+                        "error": {
+                            "type": "ValidationError",
+                            "message": str(e)[:500],
+                        },
+                        "attempts": attempt,
+                    }
                 last_error = e
                 if attempt < max_attempts:
                     await asyncio.sleep(retry_delay)

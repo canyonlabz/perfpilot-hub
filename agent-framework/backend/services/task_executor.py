@@ -105,6 +105,20 @@ def _build_completion_summary(task: task_store.AgentTask) -> str:
                 result_snippet = reply_text
             else:
                 result_snippet = task.result.get("summary") or task.result.get("message") or ""
+
+            # Execution-agent envelope results carry structured data in
+            # tool_result but no reply_text. Extract whitelisted fields
+            # so the conversation thread gets actionable facts (sessions_id,
+            # public_url, artifacts_path, etc.) instead of a bare
+            # "completed successfully" message.
+            if not result_snippet:
+                tool_result = task.result.get("tool_result")
+                if isinstance(tool_result, dict):
+                    from services.helpers.task_result_fields import extract_key_fields
+                    key_fields = extract_key_fields(task.result.get("tool"), tool_result)
+                    if key_fields:
+                        result_snippet = json.dumps(key_fields, indent=2)
+
         msg = f"**{agent}** completed successfully."
         if result_snippet:
             # Truncate very long results for the chat bubble

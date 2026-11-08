@@ -224,6 +224,40 @@ def set_known_test_run_ids(ids: Optional[list[str]]) -> None:
     _caller_identity["known_test_run_ids"] = cleaned
 
 
+def snapshot_caller_identity() -> dict[str, Any]:
+    """Return a shallow copy of the current ``_caller_identity`` dict.
+
+    Used by specialist executors to capture the orchestrator's live
+    identity before entering a child context, so the identity can be
+    restored after the child exits (stack semantics). The
+    ``known_test_run_ids`` list is copied so mutations in the snapshot
+    do not affect the live dict.
+    """
+    snap = dict(_caller_identity)
+    snap["known_test_run_ids"] = list(_caller_identity.get("known_test_run_ids") or [])
+    return snap
+
+
+def restore_caller_identity(snapshot: dict[str, Any]) -> None:
+    """Restore ``_caller_identity`` from a prior ``snapshot_caller_identity`` snapshot.
+
+    Overwrites every field in the module-level dict with the snapshot's
+    values. Fields present in the dict but absent in the snapshot are
+    reset to their default (``None`` or ``[]``). This is intentionally
+    a full overwrite — partial restores would leave stale child-context
+    fields in the dict.
+    """
+    _caller_identity["user_id"] = snapshot.get("user_id")
+    _caller_identity["thread_id"] = snapshot.get("thread_id")
+    _caller_identity["session_id"] = snapshot.get("session_id")
+    _caller_identity["task_id"] = snapshot.get("task_id")
+    _caller_identity["test_run_id"] = snapshot.get("test_run_id")
+    _caller_identity["known_test_run_ids"] = list(
+        snapshot.get("known_test_run_ids") or []
+    )
+    _caller_identity["surface"] = snapshot.get("surface")
+
+
 def clear_caller_identity() -> None:
     _caller_identity["user_id"] = None
     _caller_identity["thread_id"] = None
