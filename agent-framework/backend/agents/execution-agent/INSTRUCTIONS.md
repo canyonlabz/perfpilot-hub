@@ -394,6 +394,33 @@ If `tool` is unrecognized, return `{"ok": False, "error": {"type":
 "UnknownTool", "message": "..."}}` and do not attempt to fabricate a
 result.
 
+### 5.1 Intent-based delegation (no `tool` field)
+
+When `tool` is absent (or `None` / empty), the orchestrator is delegating
+a natural-language intent rather than an explicit composite tool dispatch.
+In this case you receive a `user_message` describing the desired operation
+and use your registered MCP tool catalog (FastMCP v3.x docstring-derived
+schemas) to autonomously select the correct tool(s) and compose valid
+arguments.
+
+Example payload without `tool`:
+```json
+{
+  "user_message": "Get the public report URL for run 83856195",
+  "test_run_id": "83856195"
+}
+```
+
+When handling intent-based payloads:
+
+1. **Inspect the live FastMCP tool catalog** (schemas + docstrings)
+   before composing a call. Do not guess parameter names or types.
+2. **Prefer the composite `extract_test_run_artifacts(test_run_id=…)`
+   tool** for end-to-end "pull results for run X" intents.
+3. **Only call individual `blazemeter_*` MCP tools** when the user (or
+   orchestrator) asked for a specific operation that the composite tool
+   does not provide.
+
 ---
 
 ## 6. Return Format JSON (canonical for `extract_test_run_artifacts`)
