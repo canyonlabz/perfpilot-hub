@@ -56,17 +56,36 @@
 # 2. MCP namespace allowlist
 # =============================================================================
 # Per V2 Section 13.1, the execution-agent gets `blazemeter_*` for test
-# execution + artifact pulls, plus `jmeter_*` for the Step-6 log analysis
-# tool (`jmeter_analyze_jmeter_log`). The full BlazeMeter MCP tool list
-# the agent uses today:
+# execution + artifact pulls + resource discovery, plus `jmeter_*` for
+# the Step-6 log analysis tool (`jmeter_analyze_jmeter_log`).
 #
-#   blazemeter_start_test
-#   blazemeter_check_test_status
-#   blazemeter_get_run_results
-#   blazemeter_get_artifacts_path
-#   blazemeter_process_session_artifacts
-#   blazemeter_get_public_report
-#   blazemeter_get_aggregate_report
+# All non-deprecated `blazemeter_*` tools from the gateway are available:
+#
+#   Discovery & browsing:
+#     blazemeter_get_workspaces
+#     blazemeter_get_projects
+#     blazemeter_get_tests
+#     blazemeter_get_test_runs
+#     blazemeter_get_artifact_file_list
+#
+#   Test execution pipeline:
+#     blazemeter_start_test
+#     blazemeter_check_test_status
+#     blazemeter_get_run_results
+#     blazemeter_get_artifacts_path
+#     blazemeter_process_session_artifacts
+#     blazemeter_get_public_report
+#     blazemeter_get_aggregate_report
+#
+#   Provisioning:
+#     blazemeter_resolve_project
+#     blazemeter_create_test
+#     blazemeter_upload_test_files
+#
+#   Shared folder management:
+#     blazemeter_get_shared_folders
+#     blazemeter_get_shared_folder_file_list
+#     blazemeter_upload_to_shared_folder
 #
 # `utils/mcp_client.py` (PBI 3.8.2) filters the gateway-mcp tool catalog
 # through this allowlist before exposing tools to the agent. Anything

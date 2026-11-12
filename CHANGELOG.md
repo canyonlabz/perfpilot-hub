@@ -9,8 +9,10 @@ This document summarizes the enhancements added to PerfPilot-Hub during November
 - [🔧 1. Caller identity snapshot/restore](#1-caller-identity-snapshotrestore)
 - [🛠️ 2. Execution-agent delegation and MCP dispatch](#2-execution-agent-delegation-and-mcp-dispatch)
 - [📊 3. Structured task results injection](#3-structured-task-results-injection)
-- [✨ 4. Files created](#4-files-created)
-- [🔧 5. Files modified](#5-files-modified)
+- [🔌 4. Execution-agent gateway MCP tool registration](#4-execution-agent-gateway-mcp-tool-registration)
+- [📝 5. Specialist agent instructions accuracy](#5-specialist-agent-instructions-accuracy)
+- [✨ 6. Files created](#6-files-created)
+- [🔧 7. Files modified](#7-files-modified)
 - [📚 Previous Changelogs](#previous-changelogs)
 
 ---
@@ -132,7 +134,73 @@ subsequent conversation turns:
 
 ---
 
-## ✨ 4. Files created
+## 🔌 4. Execution-agent gateway MCP tool registration
+
+**Branch:** `fix/specialist-agent-instructions`
+
+The execution-agent's `build_execution_agent()` factory only registered the
+4 composite agent tools (`start_performance_test`, `wait_for_completion`,
+`extract_test_run_artifacts`, `provision_performance_test`) on the agent's
+LLM catalog. It never called `register_mcp_tools_on_agent()` to register
+the full `blazemeter_*` and `jmeter_*` MCP tool catalog from the gateway.
+When the orchestrator delegated intent-based requests (e.g., "list
+BlazeMeter workspaces"), the execution-agent's LLM had no matching tool
+and honestly replied `OutOfScope`.
+
+**Pre-existing defect.** Not caused by the BUG-011 fixes — the gap
+predates both the delegation fix branch and the OSS port.
+
+**Fix:** Mirrored the script-agent's `_register_gateway_tools()` pattern.
+
+- Added `GATEWAY_MCP_NAMESPACES = ["blazemeter", "jmeter"]` module
+  constant in `agents/execution-agent/agent.py`.
+- Added `_register_gateway_tools(agent) -> int` helper that calls
+  `services.mcp_tool_registry.register_mcp_tools_on_agent()` with the
+  namespace allowlist. Handles both the `asyncio.run` path and the
+  `ThreadPoolExecutor` path (for Web UI where an event loop is already
+  running).
+- `build_execution_agent()` now calls `_register_gateway_tools(agent)`
+  after `_register_tools(agent)` and logs the registered count.
+- Smoke-test verified: 37 gateway MCP tools registered, execution-agent
+  LLM selected `blazemeter_get_workspaces` from its live catalog and
+  returned workspace data successfully.
+
+---
+
+## 📝 5. Specialist agent instructions accuracy
+
+**Branch:** `fix/specialist-agent-instructions`
+
+Audited all 7 specialist agent INSTRUCTIONS.md files. The execution-agent's
+instructions were too restrictive — §3 titled "The four agent tools
+available to you" caused the LLM to believe it only had 4 tools,
+overshadowing the intent-based delegation added in §5.1.
+
+- **Execution-agent INSTRUCTIONS.md:**
+  - Added §2 "MCP tools — runtime discovery" subsection describing the
+    `blazemeter_*` and `jmeter_*` namespaces in general capability
+    terms (not hardcoded tool names).
+  - Added §2 "How to use your tools" three-point guidance matching
+    the pattern used by all other specialists.
+  - Renamed §3 from "The four agent tools available to you" to "Your
+    four composite agent tools" — clarifies these are pipeline wrappers,
+    not the exhaustive tool set.
+  - Reworded §5.1 point 3 from restrictive ("Only call individual...")
+    to permissive ("Individual `blazemeter_*` MCP tools are fully
+    available...").
+- **Orchestrator INSTRUCTIONS.md:**
+  - §5 Step 2: Expanded execution-agent routing to include BlazeMeter
+    resource discovery and management operations.
+- **Execution-agent config.example.yaml:**
+  - Updated §2 comment to list all 18 non-deprecated `blazemeter_*`
+    tools organized into four categories (Discovery, Execution,
+    Provisioning, Shared folder management).
+- **Other specialists (reporting, script, analysis, monitoring,
+  notifications):** Audited — no issues found.
+
+---
+
+## ✨ 6. Files created
 
 | File | Purpose |
 |------|---------|
@@ -142,8 +210,9 @@ subsequent conversation turns:
 | `tests/agent_framework/services/test_execution_agent_dispatch.py` | 8 tests for three-way dispatch routing |
 | `tests/agent_framework/services/test_task_result_fields.py` | 16 tests for whitelisted key-field extraction |
 | `tests/agent_framework/services/test_completion_summary_enrichment.py` | 7 tests for completion summary enrichment |
+| `tests/agent_framework/agents/test_execution_agent_gateway_registration.py` | 3 tests for gateway MCP tool registration |
 
-## 🔧 5. Files modified
+## 🔧 7. Files modified
 
 | File | Changes |
 |------|---------|
@@ -152,8 +221,10 @@ subsequent conversation turns:
 | `agent-framework/backend/services/helpers/mcp_passthrough.py` | Added `_is_validation_error()` guard; validation errors return on attempt 1 |
 | `agent-framework/backend/services/task_executor.py` | `_build_completion_summary` enriched with key-field extraction for execution-agent results |
 | `agent-framework/backend/agui_server.py` | `MAX_TASK_RESULTS_INJECTION = 20` constant; known-task-results system hint injection |
-| `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | Removed MCP pass-through table (§9.6); added intent-based delegation; added §11 item 3 prohibition |
-| `agent-framework/backend/agents/execution-agent/INSTRUCTIONS.md` | Added §5.1 intent-based delegation payload documentation |
+| `agent-framework/backend/agents/orchestrator/INSTRUCTIONS.md` | Removed MCP pass-through table (§9.6); added intent-based delegation; §5 Step 2 expanded for BlazeMeter discovery; §11 item 3 prohibition |
+| `agent-framework/backend/agents/execution-agent/INSTRUCTIONS.md` | Added §2 MCP tools runtime discovery + "How to use your tools"; renamed §3 to "composite agent tools"; rewrote §5.1 point 3 as permissive |
+| `agent-framework/backend/agents/execution-agent/agent.py` | Added `GATEWAY_MCP_NAMESPACES` constant and `_register_gateway_tools()` helper; `build_execution_agent()` registers gateway MCP tools |
+| `agent-framework/backend/agents/execution-agent/config.example.yaml` | Updated §2 comment with full 18-tool non-deprecated `blazemeter_*` catalog |
 
 ---
 
@@ -174,4 +245,4 @@ subsequent conversation turns:
 
 ---
 
-*Last Updated: November 8, 2026*
+*Last Updated: November 11, 2026*

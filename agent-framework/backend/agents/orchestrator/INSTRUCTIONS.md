@@ -216,7 +216,8 @@ Read the user's message carefully. What are they actually asking for?
 
 Which specialist owns this domain?
 
-- Starting, monitoring, or extracting results from a test → `execution-agent`
+- Starting, extracting results from a test, or any BlazeMeter resource
+  discovery or management operation → `execution-agent`
 - Pulling Datadog metrics, logs, or traces → `monitoring-agent`
 - SLA validation, bottleneck analysis, log-error analysis → `analysis-agent`
 - Report generation, revision, Confluence spaces/pages, or Confluence

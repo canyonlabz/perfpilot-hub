@@ -89,6 +89,8 @@ AGENT_DIR = Path(__file__).resolve().parent
 AGENT_NAME = "execution-agent"
 FRAMEWORK_DIR = get_framework_dir()  # agent-framework/backend/
 
+GATEWAY_MCP_NAMESPACES = ["blazemeter", "jmeter"]
+
 INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
 AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"
 
@@ -151,6 +153,11 @@ def build_execution_agent() -> Any:
     )
 
     _register_tools(agent)
+    gateway_tool_count = _register_gateway_tools(agent)
+    log.info(
+        "%s built — %d composite tools + %d gateway MCP tools (namespaces=%s)",
+        AGENT_NAME, 4, gateway_tool_count, GATEWAY_MCP_NAMESPACES,
+    )
     return agent
 
 
@@ -215,7 +222,54 @@ def _resolved_config_filename() -> str:
 
 
 # =============================================================================
-# Tool registration
+# Gateway MCP tool registration
+# =============================================================================
+
+def _register_gateway_tools(agent: Any) -> int:
+    """Auto-discover and register gateway MCP tools for the execution-agent.
+
+    Mirrors the script-agent's ``_register_gateway_tools`` pattern. Calls
+    ``services.mcp_tool_registry.register_mcp_tools_on_agent`` with the
+    ``GATEWAY_MCP_NAMESPACES`` allowlist so the agent's LLM sees the full
+    ``blazemeter_*`` and ``jmeter_*`` tool catalog at inference time.
+
+    Handles the running-loop case via ``concurrent.futures.ThreadPoolExecutor``
+    exactly like the script-agent (AG2's factory runs inside an existing
+    asyncio loop in the Web UI path).
+
+    Returns:
+        Count of tools registered. Zero when the gateway is unreachable
+        at build time (the agent still functions with its composite tools
+        and system prompt).
+    """
+    import asyncio
+
+    from services.mcp_client import resolve_gateway_url
+    from services.mcp_tool_registry import register_mcp_tools_on_agent
+
+    gateway_url = resolve_gateway_url()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                asyncio.run,
+                register_mcp_tools_on_agent(agent, gateway_url, GATEWAY_MCP_NAMESPACES),
+            )
+            return future.result(timeout=30)
+    else:
+        return asyncio.run(
+            register_mcp_tools_on_agent(agent, gateway_url, GATEWAY_MCP_NAMESPACES),
+        )
+
+
+# =============================================================================
+# Composite tool registration
 # =============================================================================
 
 def _register_tools(agent: Any) -> None:
