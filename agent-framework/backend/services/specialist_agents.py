@@ -264,6 +264,31 @@ async def _adopt_vendor_run_id_after_start(
     return adopted
 
 
+def _apply_load_testing_defaults(args: dict, payload: dict) -> None:
+    """Fill BlazeMeter ids from the stamped load-testing block.
+
+    Explicit args win. A non-BlazeMeter provider is left untouched so
+    the tool does not send another vendor's fields to BlazeMeter.
+    """
+    block = payload.get("_resolved_load_testing")
+    if not isinstance(block, dict):
+        return
+    provider = block.get("provider")
+    if provider not in (None, "", "blazemeter"):
+        return
+    for key in ("workspace_id", "project_id", "workspace_name", "project_name"):
+        current = args.get(key)
+        incoming = block.get(key)
+        if (current is None or current == "") and incoming not in (None, ""):
+            args[key] = str(incoming)
+    resolved_env = payload.get("_resolved_environment")
+    if isinstance(resolved_env, dict):
+        if not args.get("environment") and resolved_env.get("environment"):
+            args["environment"] = resolved_env["environment"]
+        if not args.get("project") and resolved_env.get("project"):
+            args["project"] = resolved_env["project"]
+
+
 async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict:
     """Dispatch the task payload's `tool` to the matching execution-agent function.
 
@@ -367,6 +392,8 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         return envelope
 
     args = args or {}
+    if tool == "provision_performance_test":
+        _apply_load_testing_defaults(args, payload)
 
     # ---- Module load + function resolution ----------------------------
     await _broadcast(
@@ -550,7 +577,13 @@ def _compose_specialist_prompt(payload: dict) -> str:
     }
     context = {
         k: v for k, v in payload.items()
-        if k not in message_keys and not k.startswith("_") and v is not None
+        if k not in message_keys
+        and v is not None
+        and (
+            not k.startswith("_")
+            or k == "_cert_profile"
+            or k.startswith("_resolved_")
+        )
     }
 
     if not user_msg:

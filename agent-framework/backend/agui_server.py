@@ -69,7 +69,8 @@ from utils import (
     agents_config,
     auth,
 )
-from services import env_resolver, settings_catalog, task_executor, user_identity
+from services import settings_catalog, task_executor, user_identity
+from services.resolvers import project_catalog
 from stores import (
     conversation_store,
     db,
@@ -86,6 +87,41 @@ from utils.paths import get_framework_dir
 from services.session_middleware import SessionMiddleware
 
 log = logging.getLogger(__name__)
+
+
+async def _apply_active_project_context(user_id: str, setter) -> str:
+    """Resolve the user's active project and store it for delegation.
+
+    Returns a short briefing for the orchestrator, or an empty string
+    when no active project is configured or the key is unknown.
+    Database failures are logged and treated as "no project context".
+    """
+    setter(None)
+    if not user_id:
+        return ""
+    try:
+        binding = await user_project_binding_store.get_active_binding(user_id)
+    except Exception:
+        log.warning(
+            "active project lookup failed for Web UI context",
+            exc_info=True,
+        )
+        return ""
+    if binding is None:
+        return ""
+    try:
+        context = project_catalog.resolve_project_context(
+            binding.project_key,
+            source="webui.active_project",
+        )
+    except project_catalog.ProjectNotFoundError:
+        log.warning(
+            "active project '%s' is not in environments.yaml",
+            binding.project_key,
+        )
+        return ""
+    setter(context)
+    return project_catalog.format_project_context_briefing(context)
 
 FRAMEWORK_DIR = get_framework_dir()
 SERVER_VERSION = "0.1.0"
@@ -376,6 +412,7 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                 set_caller_identity,
                 set_caller_surface,
                 set_known_test_run_ids,
+                set_project_context,
                 clear_caller_identity,
             )
 
@@ -390,6 +427,10 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                 test_run_id=webui_resolve.test_run_id,
             )
             set_caller_surface("web_ui")
+            project_briefing = await _apply_active_project_context(
+                requesting_user,
+                set_project_context,
+            )
             set_known_test_run_ids(webui_resolve.known_test_run_ids)
 
             # Inject the ask-user hint (when the thread has multiple known
@@ -412,6 +453,24 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                 except Exception:
                     log.exception(
                         "/copilotkit: failed to inject webui_resolve system hint; "
+                        "continuing without it"
+                    )
+
+            if project_briefing:
+                try:
+                    from ag_ui.core import SystemMessage
+
+                    combined_messages = [
+                        SystemMessage(
+                            id="webui-project-context",
+                            role="system",
+                            content=project_briefing,
+                        ),
+                        *combined_messages,
+                    ]
+                except Exception:
+                    log.exception(
+                        "/copilotkit: failed to inject project context; "
                         "continuing without it"
                     )
 
@@ -929,7 +988,7 @@ def _register_routes(app: FastAPI) -> None:
         """Merge YAML project identity with this user's binding rows."""
         user_id = _require_user_id(request)
         await user_store.get_or_create_user(user_id)
-        catalog = env_resolver.list_project_catalog()
+        catalog = project_catalog.list_project_catalog()
         stored = {
             row.project_key.lower(): row
             for row in await user_project_binding_store.list_bindings(user_id)
@@ -970,7 +1029,7 @@ def _register_routes(app: FastAPI) -> None:
         await user_store.get_or_create_user(user_id)
         prepared: list[dict] = []
         for item in body.bindings:
-            catalog_entry = env_resolver.resolve_project_key(item.project_key)
+            catalog_entry = project_catalog.resolve_project_key(item.project_key)
             if catalog_entry is None:
                 raise HTTPException(
                     status_code=400,

@@ -147,8 +147,8 @@ user's objective. The user should not need to tell you each individual step.
 When the orchestrator delegates a "create a JMeter script and publish
 it" request, the delegation context will include an `scm` block with
 at minimum a repo URL (parsed and defaulted by the framework's
-`scm_resolver`) and optionally an `environment` name resolved via
-`env_resolver`. Run the pipeline in this exact order:
+`scm_resolver`) and optionally an `environment` URL from the stamped
+project context (`_resolved_environment`). Run the pipeline in this exact order:
 
 1. **Generate** the JMX from the selected input mode (Playwright,
    HAR, or Swagger/OpenAPI) as documented in Sections 3 and 4.

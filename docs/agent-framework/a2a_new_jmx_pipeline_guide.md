@@ -52,10 +52,11 @@ described below is identical.
 
 ### 2.1 Field notes
 
-- **`environment`** — matches a key under `environments:` in
-  `agent-framework/backend/config/environments.yaml`. The resolver
-  (`services/env_resolver.py`) uses it to look up the hostname, cert
-  profile, and default BlazeMeter workspace/project. See
+- **`environment`** — matches a key under `projects.<key>.environments`
+  in `agent-framework/backend/config/environments.yaml`. Pass `project`
+  or `project_key` (or a project alias) in metadata so
+  `services/resolvers/project_catalog.py` can resolve the URL,
+  certificate profile, and capability blocks. See
   [`environments.example.yaml`](../../agent-framework/backend/config/environments.example.yaml).
 - **`scm.url`** — must be an `https://github.com/<owner>/<repo>` URL.
   SSH and enterprise hosts are rejected by

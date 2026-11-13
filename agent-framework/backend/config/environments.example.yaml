@@ -1,98 +1,107 @@
-# Agent Framework - Environment Mappings
+# Agent Framework - Project configuration
 # ---------------------------------------
-# Copy this file to `environments.yaml` and tune for your deployment.
-# `environments.yaml` is gitignored; the framework falls back to this
-# `.example` file when the real file is absent (same pattern as
-# `agents.example.yaml`).
+# Copy this file to `environments.yaml` and tune it for your deployment.
+# `environments.yaml` is gitignored. The framework falls back to this
+# example when the real file is absent.
 #
-# Purpose:
-#   Map an environment NAME received in A2A / Web UI metadata (QA, UAT,
-#   PERF, etc.) to the concrete targets a performance run needs:
-#     - Application hostname / base URL under test.
-#     - Certificate / test-user profile (for mutual TLS or authenticated
-#       flows).
-#     - BlazeMeter workspace + project for provisioning tests.
+# This file is topology only: where to connect. Tokens and passwords stay
+# in Aspire user-secrets, Compose environment variables, or Web UI
+# bring-your-own-token storage. Do not put PATs, API keys, or passwords
+# here. `jks_password_env` names an environment variable; it is not the
+# password.
 #
-#   Sections:
-#     1. environments - one entry per named environment.
-#     2. cert_profiles - reusable auth profiles referenced by name from
-#        each environment entry (kept separate so the same profile can be
-#        shared across environments).
+# This file is separate from the Datadog MCP `environments.json`.
 #
-# The metadata field in each environment is freeform and intended for
-# human context (surfaced in logs / summaries). It has no schema.
-
-schema_version: "1.0"
-
-# =============================================================================
-# Environments
-# =============================================================================
-# Each key is the environment name that appears in A2A metadata as
-# `environment: "QA"` (case-sensitive; align with the string your upstream
-# framework sends).
+# Lookup:
+#   - Project keys and aliases are case-insensitive.
+#   - Environment keys are case-insensitive.
 #
-# `blazemeter.workspace_id` / `project_id` are preferred (numeric BlazeMeter
-# IDs). If unknown, use `workspace_name` / `project_name` and the resolver
-# will look them up at run time. If both id and name are provided, id wins.
+# Capability blocks (all optional except `name`):
+#   - certificate_profile : mTLS / test-user material references
+#   - load_testing        : provider `blazemeter` plus provider fields
+#   - project_management  : provider `azure_devops` or `jira`
+#   - documentation       : provider `confluence` (`mode`: cloud | onprem)
+#   - environments        : env name -> {url, label, description}
 #
-# A2A callers MAY override the resolved BlazeMeter target by sending
-# `blazemeter.workspaceId` / `projectId` in the metadata block; overrides
-# always win over the file.
-environments:
+# A2A callers may still override BlazeMeter ids in request metadata.
+# Those overrides win over this file.
 
-  QA:
-    hostname: https://qa.example.com
-    cert_profile: qa-user
-    blazemeter:
-      workspace_id: "00000"
-      project_id: "00000"
-    tags: ["qa"]
-    metadata:
-      description: QA environment for functional + smoke performance runs
+schema_version: "2.0"
 
-  UAT:
-    hostname: https://uat.example.com
-    cert_profile: uat-user
-    blazemeter:
-      workspace_id: "00000"
-      project_id: "00000"
-    tags: ["uat"]
-    metadata:
-      description: UAT environment for pre-release performance runs
+projects:
 
-  PERF:
-    hostname: https://perf.example.com
-    cert_profile: perf-user
-    blazemeter:
-      # Example of name-based lookup instead of numeric ids.
-      workspace_name: "Performance"
-      project_name: "Checkout"
-    tags: ["perf", "load"]
-    metadata:
-      description: Dedicated performance environment (load / stress)
+  project1:
+    name: "Project1"
+    aliases:
+      - "AIPTE"
+      - "PerfPilotOS"
+    certificate_profile:
+      type: "mtls"
+      profile_id: "project1"
+      jks_file: "project1.jks"
+      jks_password_env: "JMETER_JKS_PWD_PROJECT1"
+      cert_alias_variable: "certAlias"
+      alias_start_index: 0
+      alias_end_index: 1999
+      test_users_csv: "project1-test-users.csv"
+      csv_variable_names: "userId,userName,userEmail,certAlias"
+      auth_template: "entra-id-mtls"
+      default_cert_cn: "perftest001"
+      default_user_email: "performance001.testuser@example.com"
+      allow_request_user_email_override: false
+      cert_auto_select_pattern: "https://login.example.com"
+    load_testing:
+      provider: blazemeter
+      workspace_id: "1234567"
+      # Optional when the BlazeMeter project id is already known.
+      # project_id: "7654321"
+    project_management:
+      provider: azure_devops
+      organization: "my-org"
+      project: "Project1"
+      url: "https://dev.azure.com/my-org/Project1"
+    documentation:
+      provider: confluence
+      mode: cloud
+      space_name: "Performance Test Engineering"
+      space_ref: "PTE"
+      base_url: "https://my-org.atlassian.net"
+      publishing:
+        parent_page_name: "AI Generated Test Reports"
+        parent_page_id: "987654"
+    environments:
+      QA:
+        url: "https://qa.example.com"
+        label: "QA"
+        description: "QA testing environment"
+      UAT:
+        url: "https://uat.example.com/"
+        label: "UAT"
+        description: "UAT testing environment"
 
-# =============================================================================
-# Certificate / test-user profiles
-# =============================================================================
-# Each key is referenced from `environments.<name>.cert_profile` above.
-# `jks_path` / `p12_path` are local file paths on the machine running the
-# performance test (or the container that mounts them). Do NOT commit real
-# .jks / .p12 files - reference paths only. The framework never reads the
-# credential material itself; downstream tools (JMeter, browser automation)
-# consume the paths.
-cert_profiles:
-
-  qa-user:
-    jks_path: /local/path/to/qa.jks
-    test_user_email: qa.tester@example.com
-    p12_path: /local/path/to/qa.p12
-
-  uat-user:
-    jks_path: /local/path/to/uat.jks
-    test_user_email: uat.tester@example.com
-    p12_path: /local/path/to/uat.p12
-
-  perf-user:
-    jks_path: /local/path/to/perf.jks
-    test_user_email: perf.tester@example.com
-    p12_path: /local/path/to/perf.p12
+  # Illustrative Jira-backed project. The framework records these fields.
+  # A Jira adapter is not required for the example to load.
+  project2:
+    name: "Project2"
+    aliases:
+      - "JIRADEMO"
+    load_testing:
+      provider: blazemeter
+      workspace_id: "1234567"
+    project_management:
+      provider: jira
+      site_url: "https://example.atlassian.net"
+      project_key: "PERF"
+      project_name: "Performance"
+      # cloud_id: optional Atlassian site id for OAuth 3LO
+    documentation:
+      provider: confluence
+      mode: cloud
+      space_name: "Performance"
+      space_ref: "PERF"
+      base_url: "https://example.atlassian.net"
+    environments:
+      QA:
+        url: "https://qa.example.com"
+        label: "QA"
+        description: "QA testing environment"

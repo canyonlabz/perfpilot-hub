@@ -350,8 +350,8 @@ def _register_tools(agent: Any) -> None:
         name="provision_performance_test",
         description=(
             "Provision a NEW BlazeMeter test for a freshly-generated JMX. "
-            "Resolves the workspace/project via the framework env_resolver "
-            "(environment name -> BlazeMeter target) and any A2A overrides, "
+            "Resolves the workspace/project from the project load_testing "
+            "block and any explicit id overrides, "
             "then calls blazemeter_resolve_project -> blazemeter_create_test -> "
             "blazemeter_upload_test_files in sequence. ALWAYS runs even when "
             "smoke_status='FAIL' (per user contract), but flags "
@@ -1599,7 +1599,7 @@ async def provision_performance_test(
     environment: Annotated[
         Optional[str],
         "Environment name from A2A / Web UI metadata (e.g. 'QA', 'UAT'). "
-        "Resolved via env_resolver -> BlazeMeter workspace/project. May be "
+        "Resolved via the project load_testing block when `project` is set. May be "
         "None when the caller supplies workspace_id / project_id explicitly.",
     ] = None,
     test_name: Annotated[
@@ -1632,6 +1632,11 @@ async def provision_performance_test(
         "Explicit BlazeMeter project id override (from A2A metadata). Wins "
         "over the environments.yaml mapping. When set the resolver skips "
         "workspace/project lookup entirely.",
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        "Project key or alias from environments.yaml. Used to load the "
+        "load_testing block when workspace_id / project_id are not both set.",
     ] = None,
 ) -> dict:
     """Create a new BlazeMeter test and upload the JMX + data files.
@@ -1731,47 +1736,54 @@ async def provision_performance_test(
     resolved_workspace_name: Optional[str] = None
     resolved_project_name: Optional[str] = None
 
-    if environment and (resolved_project is None or resolved_workspace is None):
+    if project and (resolved_project is None or resolved_workspace is None):
         try:
-            from services.env_resolver import resolve_environment
-            overrides: dict[str, Any] = {}
-            if resolved_workspace:
-                overrides["workspaceId"] = resolved_workspace
-            if resolved_project:
-                overrides["projectId"] = resolved_project
-            env_target = resolve_environment(
-                environment, overrides=overrides or None,
+            from services.resolvers.project_catalog import (
+                ProjectNotFoundError,
+                resolve_load_testing_config,
             )
-        except Exception as e:
+            load_block = resolve_load_testing_config(str(project).strip())
+        except ProjectNotFoundError as exc:
             return _provision_error(
                 environment, test_name, normalized_smoke,
                 phase="env-resolver",
-                message=f"{type(e).__name__}: {_truncate(e, 200)}",
+                message=str(exc),
             )
-
-        if env_target is None:
+        except Exception as exc:
             return _provision_error(
                 environment, test_name, normalized_smoke,
                 phase="env-resolver",
-                message=(
-                    f"environment '{environment}' not found in "
-                    "environments.yaml"
-                ),
+                message=f"{type(exc).__name__}: {_truncate(exc, 200)}",
             )
-        bm = env_target.blazemeter
-        resolved_workspace = resolved_workspace or bm.workspace_id
-        resolved_project = resolved_project or bm.project_id
-        resolved_workspace_name = bm.workspace_name
-        resolved_project_name = bm.project_name
+        if isinstance(load_block, dict) and load_block.get("provider") in (
+            None, "", "blazemeter",
+        ):
+            resolved_workspace = resolved_workspace or _normalize_timestamp(
+                load_block.get("workspace_id")
+            )
+            resolved_project = resolved_project or _normalize_timestamp(
+                load_block.get("project_id")
+            )
+            resolved_workspace_name = resolved_workspace_name or _normalize_timestamp(
+                load_block.get("workspace_name")
+            )
+            resolved_project_name = resolved_project_name or _normalize_timestamp(
+                load_block.get("project_name")
+            )
 
-    if not resolved_project and not resolved_project_name:
+    if not any((
+        resolved_project,
+        resolved_project_name,
+        resolved_workspace,
+        resolved_workspace_name,
+    )):
         return _provision_error(
             environment, test_name, normalized_smoke,
             phase="env-resolver",
             message=(
-                "Could not resolve BlazeMeter project: no project_id override "
-                "and environments.yaml did not supply project_id or "
-                "project_name."
+                "Could not resolve a BlazeMeter target: pass workspace_id or "
+                "project_id, or set load_testing.workspace_id for the project "
+                "in environments.yaml."
             ),
         )
 
