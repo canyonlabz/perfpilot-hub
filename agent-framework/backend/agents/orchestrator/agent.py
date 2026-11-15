@@ -124,6 +124,9 @@ agent_spec_file_var: ContextVar[Optional[str]] = ContextVar(
 agent_test_run_id_var: ContextVar[Optional[str]] = ContextVar(
     "agent_test_run_id", default=None
 )
+agent_project_context_var: ContextVar[Optional[dict]] = ContextVar(
+    "agent_project_context", default=None
+)
 # NOTE: agent_test_run_id_var propagates the framework-resolved (or minted)
 # test_run_id so delegate_to_specialist auto-injects it into child tasks.
 # Prefer a caller-supplied ID (metadata / payload / tool arg); mint only
@@ -153,6 +156,9 @@ _caller_identity: dict[str, Any] = {
     # Inbound surface. ``web_ui`` enables JWT mint and BYOT preflight.
     # A2A leaves this unset so MCP hops stay env-var credentials.
     "surface": None,
+    # Composite environments.yaml context for the active project.
+    # Stamped onto specialist payloads by delegate_to_specialist.
+    "project_context": None,
 }
 
 # Strong references to background tasks so they aren't garbage collected
@@ -200,6 +206,32 @@ def set_caller_surface(surface: Optional[str]) -> None:
     _caller_identity["surface"] = cleaned or None
 
 
+def set_project_context(context: Optional[dict]) -> None:
+    """Store the resolved environments.yaml context for this request.
+
+    ``None`` or a non-dict clears the slot. The dict is copied so later
+    payload stamps cannot mutate the stored context.
+    """
+    if not isinstance(context, dict) or not context:
+        _caller_identity["project_context"] = None
+        agent_project_context_var.set(None)
+        return
+    copied = dict(context)
+    _caller_identity["project_context"] = copied
+    agent_project_context_var.set(copied)
+
+
+def current_project_context() -> Optional[dict]:
+    """Return the request's project context, if one was resolved."""
+    stored = _caller_identity.get("project_context")
+    if isinstance(stored, dict) and stored:
+        return stored
+    stored = agent_project_context_var.get()
+    if isinstance(stored, dict) and stored:
+        return stored
+    return None
+
+
 def set_known_test_run_ids(ids: Optional[list[str]]) -> None:
     """Populate the thread's known ``test_run_id`` candidates.
 
@@ -235,6 +267,8 @@ def snapshot_caller_identity() -> dict[str, Any]:
     """
     snap = dict(_caller_identity)
     snap["known_test_run_ids"] = list(_caller_identity.get("known_test_run_ids") or [])
+    raw_context = _caller_identity.get("project_context")
+    snap["project_context"] = dict(raw_context) if isinstance(raw_context, dict) else None
     return snap
 
 
@@ -256,6 +290,11 @@ def restore_caller_identity(snapshot: dict[str, Any]) -> None:
         snapshot.get("known_test_run_ids") or []
     )
     _caller_identity["surface"] = snapshot.get("surface")
+    raw_context = snapshot.get("project_context")
+    _caller_identity["project_context"] = (
+        dict(raw_context) if isinstance(raw_context, dict) else None
+    )
+    agent_project_context_var.set(_caller_identity["project_context"])
 
 
 def clear_caller_identity() -> None:
@@ -266,6 +305,8 @@ def clear_caller_identity() -> None:
     _caller_identity["test_run_id"] = None
     _caller_identity["known_test_run_ids"] = []
     _caller_identity["surface"] = None
+    _caller_identity["project_context"] = None
+    agent_project_context_var.set(None)
 
 
 # =============================================================================
@@ -618,6 +659,42 @@ def _read_mcp_namespaces(agent_folder: Path) -> list[str]:
 # Tool 2 (PBI 3.7.4): delegate_to_specialist
 # =============================================================================
 
+
+def _stamp_resolved_project_context(body: dict) -> None:
+    """Copy the active project's YAML context onto a specialist payload.
+
+    Uses the context resolved at ingress when present. Otherwise resolves
+    from a project key on the payload. An unknown project is logged and
+    skipped so delegation still proceeds.
+    """
+    from services.resolvers.project_catalog import (
+        ProjectNotFoundError,
+        environment_name_from_payload,
+        project_identifier_from_payload,
+        resolve_project_context,
+        stamp_project_context,
+    )
+
+    context = current_project_context()
+    if not context:
+        identifier = project_identifier_from_payload(body)
+        if identifier:
+            try:
+                context = resolve_project_context(
+                    identifier,
+                    environment=environment_name_from_payload(body),
+                    source="delegate_to_specialist",
+                )
+            except ProjectNotFoundError:
+                log.warning(
+                    "delegate_to_specialist: project '%s' not in environments.yaml",
+                    identifier,
+                )
+                context = None
+    if isinstance(context, dict) and context:
+        stamp_project_context(body, context)
+
+
 async def delegate_to_specialist(
     agent_name: Annotated[str, "Specialist agent name (e.g. 'execution-agent')."],
     payload: Annotated[dict, "JSON-serializable task payload (the body POSTed to A2A)."],
@@ -702,6 +779,7 @@ async def delegate_to_specialist(
         })
 
     body = dict(payload or {})
+    _stamp_resolved_project_context(body)
 
     # Web-UI: stamp surface + user on the child payload and forward the
     # names-only secrets briefing. AG-UI clears module-level caller

@@ -235,8 +235,12 @@ Do not invent a GitHub destination for other work.
 
 Before choosing a specialist, check the request's **upstream context**
 block (surfaced automatically as `Upstream context: - SCM target: ...`
-under the user message when metadata is present) **and** the user's
-chat text:
+under the user message when metadata is present), any
+`Project context (from environments.yaml)` briefing, **and** the user's
+chat text. The briefing names the active project capabilities
+(load testing, project management, documentation). Pass `project` and
+`environment` through when you delegate; the framework stamps the
+resolved blocks onto the specialist payload.
 
 - **A2A path.** The upstream framework may include an `scm` block in
   the metadata (`scm.url`, `scm.branch`, optional `scm.path`,

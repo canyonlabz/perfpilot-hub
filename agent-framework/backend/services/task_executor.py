@@ -344,6 +344,47 @@ async def _dispatch_agent(task: task_store.AgentTask, common: dict) -> dict:
     return await _run_stub_agent(task, common)
 
 
+def _attach_a2a_project_context(payload: Any, user_message: Optional[str]) -> Optional[str]:
+    """Resolve A2A project metadata and append a briefing to the prompt.
+
+    Stores the composite context for ``delegate_to_specialist``. A missing
+    or unknown project leaves the prompt unchanged.
+    """
+    from agents.orchestrator.agent import _caller_identity, set_project_context
+    from services.resolvers.project_catalog import (
+        ProjectNotFoundError,
+        environment_name_from_payload,
+        format_project_context_briefing,
+        project_identifier_from_payload,
+        resolve_project_context,
+    )
+
+    identifier = project_identifier_from_payload(payload)
+    if not identifier:
+        if _caller_identity.get("surface") != "web_ui":
+            set_project_context(None)
+        return user_message
+    try:
+        context = resolve_project_context(
+            identifier,
+            environment=environment_name_from_payload(payload),
+            source="a2a.metadata",
+        )
+    except ProjectNotFoundError:
+        log.warning(
+            "A2A project '%s' is not in environments.yaml",
+            identifier,
+        )
+        return user_message
+    set_project_context(context)
+    briefing = format_project_context_briefing(context)
+    if not briefing:
+        return user_message
+    if user_message:
+        return f"{user_message}\n\n{briefing}"
+    return briefing
+
+
 async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     """Run the real PerfPilot Orchestrator agent against the task payload.
 
@@ -384,6 +425,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     thread_id = extract_thread_id_from_payload(task.payload)
     user_message = extract_user_message_from_payload(task.payload)
+    user_message = _attach_a2a_project_context(task.payload, user_message)
 
     # A2A §6.3 resume messages — follow-up user turns appended to
     # payload["resume_messages"] by task_store.append_resume_message

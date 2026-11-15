@@ -122,7 +122,24 @@ retries: 3
 timeout_seconds: 60
 
 # =============================================================================
-# 5. Polling tool exemptions (future-proofing)
+# 5. Multi-turn loop engineering
+# =============================================================================
+# Controls the autonomous tool-execution loop that allows the agent to
+# chain multiple MCP tool calls to fulfill a high-level objective.
+#
+# max_tool_rounds: Maximum number of LLM → tool → LLM cycles before the
+#   loop exits with a warning. Prevents infinite loops. Higher values
+#   allow more complex multi-step workflows. Default: 7.
+#
+# max_consecutive_repeats: If the LLM calls the same tool with identical
+#   arguments this many times in a row, the loop exits with a "stuck"
+#   warning. Prevents the LLM from retrying a deterministic failure
+#   endlessly. Default: 3.
+max_tool_rounds: 20
+max_consecutive_repeats: 5
+
+# =============================================================================
+# 6. Polling tool exemptions (future-proofing)
 # =============================================================================
 # The execution-agent currently uses its own internal polling loop
 # (wait_for_completion) which bypasses the multi-turn tool loop.
@@ -136,7 +153,7 @@ polling_tools:
 polling_max_consecutive_repeats: 30
 
 # =============================================================================
-# 6. A2A discovery metadata
+# 7. A2A discovery metadata
 # =============================================================================
 # Overrides for the `agent_card.json` fields used by external A2A
 # clients. When absent, sensible defaults are derived from the agent's

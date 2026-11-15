@@ -179,10 +179,10 @@ is `"partial"`; on full success it is `"success"`.
 Provision a **new** BlazeMeter test from a freshly-generated JMX. The
 tool runs a three-step composite via MCP:
 
-1. Resolve the workspace + project via the framework's `env_resolver`
-   (environment name -> BlazeMeter target from `environments.yaml`) plus
-   any explicit `workspace_id` / `project_id` overrides from A2A
-   metadata, then confirm with `blazemeter_resolve_project`.
+1. Resolve the workspace + project from the stamped `load_testing`
+   block (`environments.yaml`, provider `blazemeter`) plus any explicit
+   `workspace_id` / `project_id` overrides, then confirm with
+   `blazemeter_resolve_project`.
 2. `blazemeter_create_test` with `project_id`, `test_name`, and the
    JMX basename. BlazeMeter creates a Taurus / JMeter script-mode test.
 3. `blazemeter_upload_test_files` uploads the JMX first (order matters)

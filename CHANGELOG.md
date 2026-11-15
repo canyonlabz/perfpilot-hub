@@ -6,6 +6,7 @@ This document summarizes the enhancements added to PerfPilot-Hub during November
 
 ## 📑 Table of Contents
 
+- [🗂️ 0. Project catalog schema](#0-project-catalog-schema)
 - [🔧 1. Caller identity snapshot/restore](#1-caller-identity-snapshotrestore)
 - [🛠️ 2. Execution-agent delegation and MCP dispatch](#2-execution-agent-delegation-and-mcp-dispatch)
 - [📊 3. Structured task results injection](#3-structured-task-results-injection)
@@ -14,6 +15,22 @@ This document summarizes the enhancements added to PerfPilot-Hub during November
 - [✨ 6. Files created](#6-files-created)
 - [🔧 7. Files modified](#7-files-modified)
 - [📚 Previous Changelogs](#previous-changelogs)
+
+---
+
+## 🗂️ 0. Project catalog schema
+
+**Branch:** `feature/backend-environments-yaml-schema-update`
+
+`environments.example.yaml` is now project-centric. Each project can
+declare `load_testing`, `project_management`, and `documentation`
+blocks with a `provider`, plus environments and an optional certificate
+profile. The file holds topology only.
+
+`services/resolvers/project_catalog.py` loads that file (or the example
+fallback) and builds one context dict for A2A metadata and the Web UI
+active project. Delegation stamps the dict onto specialist payloads.
+The previous flat `services/env_resolver.py` is removed.
 
 ---
 
@@ -205,6 +222,8 @@ overshadowing the intent-based delegation added in §5.1.
 | File | Purpose |
 |------|---------|
 | `agent-framework/backend/services/helpers/task_result_fields.py` | Whitelisted key-field extractor for task results |
+| `agent-framework/backend/services/resolvers/project_catalog.py` | Project and capability resolver for environments.yaml |
+| `tests/agent_framework/services/test_project_catalog.py` | Catalog, alias, and context-dict tests |
 | `tests/agent_framework/services/test_caller_identity_lifecycle.py` | 10 regression tests for snapshot/restore caller identity |
 | `tests/agent_framework/services/test_mcp_passthrough_retry_policy.py` | 12 tests for validation error short-circuit and transient retry |
 | `tests/agent_framework/services/test_execution_agent_dispatch.py` | 8 tests for three-way dispatch routing |
@@ -245,4 +264,4 @@ overshadowing the intent-based delegation added in §5.1.
 
 ---
 
-*Last Updated: November 11, 2026*
+*Last Updated: November 12, 2026*
