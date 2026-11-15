@@ -52,6 +52,7 @@ projects:
       cert_auto_select_pattern: "https://login.example.com"
     load_testing:
       provider: blazemeter
+      account_id: "1234567"
       workspace_id: "1234567"
       # Optional when the BlazeMeter project id is already known.
       # project_id: "7654321"
