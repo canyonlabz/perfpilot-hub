@@ -1,10 +1,11 @@
-"""Factory for constructing AG2 ConversableAgent instances from agent folders.
+"""Factory for constructing native ``ag2.Agent`` instances from agent folders.
 
 This module provides the framework-level convention for how an agent's
 four-file pattern (`agent.py`, `agent_card.json`, `INSTRUCTIONS.md`,
 plus *one of* `config.yaml` / `config.example.yaml`) is loaded from disk.
 Each specialist agent's `agent.py` calls into `create_agent()` and supplies
-agent-specific behavior on top of the shared factory.
+agent-specific behavior (its MCP tools, middleware, observers) on top of the
+shared factory.
 
 Per-agent config files follow the same `<file>.yaml` / `<file>.example.yaml`
 override-vs-template split that the MCP servers and the global
@@ -13,20 +14,24 @@ override-vs-template split that the MCP servers and the global
 priority order so operator-side overrides win without ever being committed.
 See `resolve_agent_config_path()` for the helper.
 
-Status:
-    F3.2 (this commit) - public API skeleton, four-file loading, name
-        validation. The actual `ConversableAgent` construction is a placeholder.
-    F3.4 - LLM provider wiring once `utils/llm_provider.py` lands.
-    F3.7 - real `ConversableAgent` creation, starting with the orchestrator.
-    F3.13 - auth middleware and OpenTelemetry span hooks lit up.
+`create_agent()` builds a native ``ag2.Agent``: the agent's INSTRUCTIONS.md
+text becomes its ``prompt``, the agent's ``llm_provider`` config block becomes
+a typed ``ag2.config.ModelConfig`` via ``services.llm_provider`` (which
+dispatches to the vendor-agnostic adapter layer, so OpenAI, Azure OpenAI,
+Ollama, and Anthropic each resolve to their own typed config), and tools /
+middleware / observers are injected by the caller. The agent owns an
+``httpx2`` client through its config, so the factory retains the originating
+``LLMProvider`` on the agent and ``aclose_agent()`` releases the connection
+pool at shutdown.
 
-Heavy imports (`ag2` / `autogen`) are deferred into the function that needs
-them so this module can be imported in environments without AG2 installed
-(structural smoke test, IDE indexing, etc.).
+Heavy imports (`ag2`) are deferred into the functions that need them so this
+module can be imported in environments without AG2 installed (structural smoke
+test, IDE indexing, etc.).
 """
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,7 +71,9 @@ _PLACEHOLDER_URL = "https://{host}:{port}"
 
 def card_display_name(card: dict, fallback: str = "") -> str:
     """Return ``metadata.displayName``, then ``name``, then ``fallback``."""
-    meta = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+    meta = card.get("metadata")
+    if not isinstance(meta, dict):
+        meta = {}
     for value in (meta.get("displayName"), card.get("name"), fallback):
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -75,7 +82,9 @@ def card_display_name(card: dict, fallback: str = "") -> str:
 
 def card_status(card: dict, fallback: str = "stub") -> str:
     """Return ``metadata.status``, or ``fallback`` when unset."""
-    meta = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+    meta = card.get("metadata")
+    if not isinstance(meta, dict):
+        meta = {}
     value = meta.get("status")
     if isinstance(value, str) and value.strip():
         return value.strip()
@@ -84,7 +93,9 @@ def card_status(card: dict, fallback: str = "stub") -> str:
 
 def card_tags(card: dict) -> list[str]:
     """Return ``metadata.tags`` as a list of strings."""
-    meta = card.get("metadata") if isinstance(card.get("metadata"), dict) else {}
+    meta = card.get("metadata")
+    if not isinstance(meta, dict):
+        meta = {}
     tags = meta.get("tags")
     if not isinstance(tags, list):
         return []
@@ -282,23 +293,52 @@ def discover_agents(agents_root: Path) -> list[AgentDefinition]:
     return definitions
 
 
-def create_agent(definition: AgentDefinition, **overrides: Any) -> Any:
-    """Construct an AG2 `ConversableAgent` from a loaded `AgentDefinition`.
+def create_agent(
+    definition: AgentDefinition,
+    *,
+    tools: Iterable[Any] = (),
+    middleware: Iterable[Any] = (),
+    observers: Iterable[Any] = (),
+    hitl_hook: Any = None,
+    config: Any = None,
+    prompt: Any = None,
+) -> Any:
+    """Construct a native ``ag2.Agent`` from a loaded ``AgentDefinition``.
 
-    F3.2 status: this is a structural skeleton. Until F3.7 lands the real
-    ConversableAgent factory (with LLM provider wiring from F3.4 and MCP
-    namespace filtering via `mcp_client.py`), this returns a placeholder
-    dictionary describing what *would* be created. Callers in F3.2 are not
-    expected to interact with the return value.
+    This is the canonical factory shared by every specialist agent. It maps the
+    four-file definition onto the AG2 1.x construction surface:
+
+    - ``definition.instructions`` (INSTRUCTIONS.md) becomes the agent ``prompt``.
+    - the agent's ``llm_provider`` config block becomes a typed
+      ``ag2.config.ModelConfig`` via ``services.llm_provider``, which dispatches
+      to the per-vendor adapter layer (OpenAI / Azure OpenAI / Ollama / Anthropic
+      each resolve to their own typed config).
+    - ``tools`` / ``middleware`` / ``observers`` are injected by the caller
+      (MCP tool wiring and HITL / auth / telemetry middleware land in later
+      steps).
+
+    The legacy ``human_input_mode="NEVER"`` has no native equivalent and is
+    dropped: an agent with no ``hitl_hook`` simply never requests human input.
+    The old ``max_consecutive_auto_reply`` cap is likewise expressed via
+    middleware by the specialist when it needs it.
+
+    When ``config`` is not supplied the factory builds (and retains) an
+    ``LLMProvider`` so the agent owns the lifecycle of its ``httpx2`` client.
+    Call :func:`aclose_agent` at shutdown to release the connection pool.
 
     Args:
-        definition: `AgentDefinition` from `load_agent_definition()`.
-        **overrides: Optional keyword overrides applied on top of
-            `definition.config`. Useful for tests and orchestrator-driven
-            instantiation.
+        definition: ``AgentDefinition`` from ``load_agent_definition()``.
+        tools: AG2 tools / callables to register on the agent at construction.
+        middleware: AG2 ``MiddlewareFactory`` instances.
+        observers: AG2 ``Observer`` instances.
+        hitl_hook: Optional human-in-the-loop hook; ``None`` means no HITL.
+        config: Optional pre-built ``ModelConfig``. When provided, the factory
+            does not build or retain an ``LLMProvider`` (the caller owns it).
+        prompt: Optional prompt override. Defaults to ``definition.instructions``.
 
     Returns:
-        AG2 `ConversableAgent` instance (in F3.7+); a placeholder dict in F3.2.
+        A native ``ag2.Agent`` instance, or a disabled-marker dict when the
+        agent's config sets ``enabled: false``.
     """
     if not definition.enabled:
         log.info(
@@ -311,14 +351,47 @@ def create_agent(definition: AgentDefinition, **overrides: Any) -> Any:
             "reason": "agent config has enabled: false",
         }
 
-    log.warning(
-        "create_agent('%s') is a F3.2 skeleton; real ConversableAgent wiring lights up in F3.7",
+    # Heavy import deferred so this module loads without AG2 installed.
+    from ag2 import Agent
+
+    retained_provider = None
+    resolved_config = config
+    if resolved_config is None:
+        # Build and retain the provider so the agent owns its httpx2 client.
+        from services.llm_provider import build_llm_provider
+
+        retained_provider = build_llm_provider(definition.config.get("llm_provider"))
+        resolved_config = retained_provider.to_ag2_config()
+
+    resolved_prompt = definition.instructions if prompt is None else prompt
+
+    agent = Agent(
         definition.name,
+        resolved_prompt,
+        config=resolved_config,
+        hitl_hook=hitl_hook,
+        tools=tuple(tools),
+        middleware=tuple(middleware),
+        observers=tuple(observers),
     )
-    return {
-        "agent_name": definition.name,
-        "status": "skeleton",
-        "config": dict(definition.config),
-        "overrides": dict(overrides),
-        "instructions_preview": definition.instructions[:200],
-    }
+
+    # Attach the provider (if we built it) so aclose_agent() can release the
+    # connection pool at shutdown. ag2.Agent allows attribute assignment at
+    # runtime; Pyright can't see this dynamic attribute on the typed class.
+    agent._perfpilot_llm_provider = retained_provider  # type: ignore[attr-defined]
+
+    log.info("create_agent('%s') constructed native ag2.Agent", definition.name)
+    return agent
+
+
+async def aclose_agent(agent: Any) -> None:
+    """Release resources owned by an agent built by :func:`create_agent`.
+
+    Closes the ``LLMProvider`` the factory attached to the agent (if any),
+    which releases its ``httpx2`` connection pool. Safe to call on any object:
+    agents created with a caller-owned ``config`` (or the disabled-marker dict)
+    carry no retained provider and are left untouched.
+    """
+    provider = getattr(agent, "_perfpilot_llm_provider", None)
+    if provider is not None:
+        await provider.close()
