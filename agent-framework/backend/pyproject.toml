@@ -6,10 +6,21 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   # AG2 (formerly AutoGen) - multi-agent framework, A2A integration, AG-UI integration.
-  # `[ag-ui]` extra brings in `ag-ui-protocol` so `autogen.ag_ui.AGUIStream(agent).build_asgi()`
+  # `[ag-ui]` extra brings in `ag-ui-protocol` so `ag2.ag_ui.AGUIStream(agent).build_asgi()`
   # can mount on FastAPI - this is the AG-UI endpoint CopilotKit React talks to.
-  # Pinned >=0.13.3,<0.14 for stable AG-UI surface; AG2 v1.0 will move ag_ui out of beta.
-  "ag2[ag-ui]>=0.13.3,<0.14",
+  # `[openai]` brings the OpenAI-backed typed-config stack (also used for Azure
+  # OpenAI); `[anthropic]` and `[ollama]` bring the Claude and Ollama
+  # typed-config stacks used by the per-vendor adapters in
+  # services/model_adapters/. Pinned ==1.3.2 for migration stabilization; relax
+  # to >=1.3.2,<1.4 once the migration lands.
+  # NOTE: the `ag2[mcp]` extra is intentionally NOT used - it requires mcp>=2.3,
+  # which conflicts with fastmcp 3.x (mcp<2.0); the custom MCP registry keeps the
+  # fastmcp 3.x client instead.
+  "ag2[ag-ui,openai,anthropic,ollama]==1.3.2",
+
+  # AG-UI wire protocol. Transitive via ag2[ag-ui]; pinned explicitly to lock the
+  # AG-UI 1.0 contract consumed by CopilotKit 1.88 / @ag-ui/client 1.0.2.
+  "ag-ui-protocol==1.0.0",
 
   # MCP client - reaches the PerfPilot Hub gateway (perf-gateway:8000)
   "fastmcp>=3.4.2,<4",
@@ -36,8 +47,24 @@ dependencies = [
   # HTTP client - shared by LLM provider adapters (mirrors PerfMemory pattern)
   "httpx>=0.28.1",
 
-  # LLM provider SDKs (OpenAI client also covers Azure OpenAI via AsyncAzureOpenAI)
-  "openai>=2.30.0",
+  # httpx2 is openai>=3's async transport and AG2's typed-config `http_client`
+  # type; services/llm_provider.py constructs it directly for the agent LLM path.
+  "httpx2>=2.16.2,<3",
+
+  # LLM provider SDKs. openai>=3 is required by ag2[openai]; the OpenAI client
+  # also covers Azure OpenAI (OpenAI-standard base_url) and the 3.x line uses
+  # httpx2 for its async transport.
+  "openai>=3.45.0,<4",
+
+  # Anthropic (Claude) SDK, pulled by ag2[anthropic] and used by
+  # services/model_adapters/anthropic.py. AG2 1.3.2 allows >=1.15,<3 and targets
+  # the 2.x Messages API (which rejects a sampling temperature - the adapter
+  # omits it). The Claude CLI is a separate tool, not a Python dependency.
+  "anthropic>=2.12.0,<3",
+
+  # Ollama SDK, pulled by ag2[ollama] and used by
+  # services/model_adapters/ollama.py for the local Ollama agent path.
+  "ollama>=0.5.2,<1",
 
   # Config and env loading
   "pyyaml>=6.0.2",
@@ -46,6 +73,9 @@ dependencies = [
   # Web-UI user-secret encryption and MCP context JWT
   "cryptography>=43.0.0",
   "PyJWT>=2.9.0",
+
+  # Token counting for context-window tracking on the agent LLM path
+  "tiktoken>=0.12.0",
 ]
 
 [build-system]

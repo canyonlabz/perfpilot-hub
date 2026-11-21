@@ -9,12 +9,13 @@
 
 # AG2 framework. `[ag-ui]` extra pulls in `ag-ui-protocol` (pinned explicitly
 # below) so AG2 can expose the AG-UI endpoint consumed by CopilotKit React.
-# `[openai]` extra brings the OpenAI-backed typed-config stack used by the AG2
-# 1.x agent path. Pinned ==1.3.2 for migration stabilization; relax to
-# >=1.3.2,<1.4 once the migration lands.
+# `[openai]` brings the OpenAI-backed typed-config stack (also used for Azure
+# OpenAI); `[anthropic]` and `[ollama]` bring the Claude and Ollama typed-config
+# stacks used by the per-vendor adapters in services/model_adapters/. Pinned
+# ==1.3.2 for migration stabilization; relax to >=1.3.2,<1.4 once it lands.
 # NOTE: the `ag2[mcp]` extra is intentionally NOT used - it requires mcp>=2.3,
 # which conflicts with fastmcp 3.x (mcp<2.0).
-ag2[ag-ui,openai]==1.3.2
+ag2[ag-ui,openai,anthropic,ollama]==1.3.2
 
 # AG-UI wire protocol. Transitive via ag2[ag-ui]; pinned explicitly to lock the
 # AG-UI 1.0 contract consumed by CopilotKit 1.88 / @ag-ui/client 1.0.2.
@@ -52,6 +53,17 @@ httpx2>=2.16.2,<3
 # httpx2 (installed transitively) for its async transport. The TLS-aware client
 # in services/llm_provider.py moves to httpx2 in the agent-path refactor.
 openai>=3.45.0,<4
+
+# Anthropic (Claude) SDK, pulled by ag2[anthropic] and used by
+# services/model_adapters/anthropic.py. AG2 1.3.2 allows >=1.15,<3 and targets
+# the 2.x Messages API (which rejects a sampling temperature - the adapter omits
+# it). Pinned to the 2.x line the adapter was validated against. The Claude CLI
+# is a separate tool and is not a Python dependency.
+anthropic>=2.12.0,<3
+
+# Ollama SDK, pulled by ag2[ollama] and used by services/model_adapters/ollama.py
+# for the local Ollama agent path (native OllamaConfig, host-based).
+ollama>=0.5.2,<1
 
 # Config / utilities
 pyyaml>=6.0.2

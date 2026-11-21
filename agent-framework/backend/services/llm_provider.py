@@ -1,39 +1,57 @@
-"""LLM provider abstraction for chat completions.
+"""Vendor-agnostic LLM provider abstraction for chat completions.
 
 Mirrors the existing `EmbeddingProvider` pattern from
 `perfmemory-mcp/services/embeddings.py` but produces chat-completion responses
-instead of embedding vectors. Supports OpenAI, Azure OpenAI, and Ollama
-through a single async interface.
+instead of embedding vectors. OpenAI is the default; Azure OpenAI, Ollama, and
+Anthropic are also supported, and new vendors can be added without touching this
+module.
+
+This module is the vendor-agnostic coordinator. It owns configuration merging,
+TLS `verify` resolution, the shared `httpx2` client, and lifecycle, then
+dispatches to the per-vendor adapter registered in `services.model_adapters`.
+Each vendor's typed-config construction (field layout, sampling policy, required
+extras) lives in its own adapter, because vendor signatures genuinely differ
+(for example, Anthropic nests the model in a different shape and rejects a
+`temperature`).
 
 Two consumers:
 
-1. **AG2 agents** read `to_ag2_config()` to get an AG2-compatible
-   `llm_config` dict. AG2 then calls the OpenAI client itself; our wrapper
-   stays out of that hot path.
+1. **AG2 agents** read `to_ag2_config()` to get an AG2 typed `ModelConfig`
+   (e.g. `ag2.config.OpenAICompletionsConfig` or `AnthropicConfig`). AG2 then
+   calls the LLM itself; our wrapper stays out of that hot path.
 2. **Direct callers** (smoke tests, the AG-UI bridge, ad-hoc tooling) call
-   `chat()` for a normalized response dict that is identical in shape across
-   all three providers.
+   `chat()` for a normalized response dict. The direct `chat()` path currently
+   supports the OpenAI-standard providers (OpenAI / Azure OpenAI / Ollama).
 
-Heavy imports (`openai`, `httpx`) are deferred into the lazy client getters so
-this module can be imported in environments without those packages installed
-(structural smoke tests, IDE indexing, etc.).
+Heavy imports (`openai`, `httpx`, `httpx2`, `ag2.config`, vendor libraries) are
+deferred into the lazy client getters and the adapter builders so this module
+can be imported in environments without those packages installed (structural
+smoke tests, IDE indexing, etc.).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from ag2.config import ModelConfig
 
 log = logging.getLogger(__name__)
 
-VALID_PROVIDERS = ("openai", "azure_openai", "ollama")
+VALID_PROVIDERS = ("openai", "azure_openai", "ollama", "anthropic")
 DEFAULT_OPENAI_CHAT_MODEL = "gpt-4o-mini"
 DEFAULT_AZURE_DEPLOYMENT = "gpt-4o"
 DEFAULT_OLLAMA_MODEL = "llama3.1"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_AZURE_API_VERSION = "2024-02-15-preview"
+# Anthropic default model is a placeholder alias; operators set the real model
+# via the `ANTHROPIC_MODEL` env var or the agent's `llm_provider` YAML block.
+DEFAULT_ANTHROPIC_MODEL = "claude-3-5-sonnet-latest"
+DEFAULT_ANTHROPIC_MAX_TOKENS = 4096
 DEFAULT_TEMPERATURE = 1.0
 
 # SSL verification modes - mirrors the pattern used by blazemeter-mcp,
@@ -66,7 +84,7 @@ def load_agents_yaml(framework_dir: Optional[Path] = None) -> dict:
     return config_loader.load_global_config(framework_dir=framework_dir)
 
 
-def merge_env_credentials(provider_config: dict, env: Optional[dict] = None) -> dict:
+def merge_env_credentials(provider_config: dict, env: Optional[Mapping[str, str]] = None) -> dict:
     """Enrich a provider-config block with credentials from environment variables.
 
     The YAML block stored in `agents.yaml` (or per-agent `config.yaml`)
@@ -80,6 +98,8 @@ def merge_env_credentials(provider_config: dict, env: Optional[dict] = None) -> 
         AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT,
         AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENT
         OLLAMA_BASE_URL, OLLAMA_MODEL
+        ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL,
+            ANTHROPIC_MAX_TOKENS
         REQUESTS_CA_BUNDLE / SSL_CERT_FILE  (corporate CA bundle path; same
             convention as blazemeter-mcp, datadog-mcp, confluence-mcp)
 
@@ -104,6 +124,14 @@ def merge_env_credentials(provider_config: dict, env: Optional[dict] = None) -> 
 
     enriched.setdefault("ollama_base_url", env.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL))
     enriched.setdefault("ollama_model", env.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL))
+
+    enriched.setdefault("anthropic_api_key", env.get("ANTHROPIC_API_KEY", ""))
+    enriched.setdefault("anthropic_model", env.get("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL))
+    enriched.setdefault("anthropic_base_url", env.get("ANTHROPIC_BASE_URL", ""))
+    enriched.setdefault(
+        "anthropic_max_tokens",
+        env.get("ANTHROPIC_MAX_TOKENS", DEFAULT_ANTHROPIC_MAX_TOKENS),
+    )
 
     enriched.setdefault("temperature", DEFAULT_TEMPERATURE)
 
@@ -136,24 +164,46 @@ def load_default_provider_config(framework_dir: Optional[Path] = None) -> dict:
 # LLMProvider
 # =============================================================================
 
-def build_llm_config(agent_llm_block: dict | None = None) -> dict:
-    """Build an AG2-compatible ``llm_config`` dict for a specialist agent.
+def build_llm_config(agent_llm_block: dict | None = None) -> "ModelConfig":
+    """Build an AG2 typed ``ModelConfig`` for a specialist agent.
 
     This is the convenience function every specialist ``build_*_agent()``
     factory calls.  It merges the per-agent YAML ``llm_provider`` block
     (if any) with environment-variable credentials and the global
-    ``config/agents.yaml`` defaults, then returns the dict that
-    ``autogen.ConversableAgent(llm_config=...)`` expects.
+    ``config/agents.yaml`` defaults, then returns the typed config that
+    ``ag2.Agent(config=...)`` expects.
 
     Args:
         agent_llm_block: The ``llm_provider`` sub-dict from the agent's
             own ``config.yaml``.  ``None`` means "use global defaults".
+
+    Note:
+        The returned config owns an ``httpx2.AsyncClient``. The caller should
+        retain the originating ``LLMProvider`` (or the agent holding it) and call
+        ``close()`` at shutdown so the client's connection pool is released.
+        When you need that lifecycle handle, prefer ``build_llm_provider()``.
+    """
+    return build_llm_provider(agent_llm_block).to_ag2_config()
+
+
+def build_llm_provider(agent_llm_block: dict | None = None) -> "LLMProvider":
+    """Build a retained ``LLMProvider`` for a specialist agent.
+
+    Same merge logic as :func:`build_llm_config` (per-agent YAML ``llm_provider``
+    block, else global ``config/agents.yaml`` defaults, plus env credentials),
+    but returns the ``LLMProvider`` instance so the caller owns its lifecycle.
+    The provider holds the ``httpx2`` client used by the agent's typed config;
+    call ``close()`` at shutdown to release the connection pool.
+
+    Args:
+        agent_llm_block: The ``llm_provider`` sub-dict from the agent's own
+            ``config.yaml``. ``None`` means "use global defaults".
     """
     if agent_llm_block:
         merged = merge_env_credentials(agent_llm_block)
     else:
         merged = load_default_provider_config()
-    return LLMProvider(merged).to_ag2_config()
+    return LLMProvider(merged)
 
 
 class LLMProvider:
@@ -180,9 +230,14 @@ class LLMProvider:
                 VALID_PROVIDERS,
             )
         self.config = dict(config)
+        # Guarantee the resolved provider is visible in the config dict so the
+        # per-vendor adapter (which reads config["provider"]) sees the same
+        # value even when the caller omitted it and relied on the default.
+        self.config.setdefault("provider", self.provider)
         self._openai_client = None
         self._azure_client = None
         self._ollama_client = None
+        self._agent_http_client = None
 
     # -------------------------------------------------------------------------
     # Public API
@@ -220,7 +275,8 @@ class LLMProvider:
             RuntimeError: If the underlying API call fails.
         """
         if temperature is None:
-            temperature = self.config.get("temperature", DEFAULT_TEMPERATURE)
+            configured = self.config.get("temperature", DEFAULT_TEMPERATURE)
+            temperature = DEFAULT_TEMPERATURE if configured is None else float(configured)
 
         if self.provider == "openai":
             return await self._chat_openai(messages, temperature, max_tokens, extra)
@@ -230,49 +286,42 @@ class LLMProvider:
             return await self._chat_ollama(messages, temperature, max_tokens, extra)
         raise ValueError(f"Unknown LLM provider: {self.provider}")
 
-    def to_ag2_config(self) -> dict:
-        """Return an AG2-compatible `llm_config` dict.
+    def to_ag2_config(self) -> "ModelConfig":
+        """Return an AG2 typed ``ModelConfig`` for the configured provider.
 
-        AG2 (`autogen.ConversableAgent`) takes an `llm_config` dict at
-        construction time and calls the LLM itself. This helper produces the
-        exact shape AG2 expects so each agent can do
-        `ConversableAgent(llm_config=provider.to_ag2_config(), ...)`.
+        Vendor-agnostic: this dispatches to the per-vendor adapter registered in
+        ``services.model_adapters`` and returns whatever typed config that vendor
+        uses (``OpenAICompletionsConfig`` for the OpenAI-standard family,
+        ``AnthropicConfig`` for Anthropic, and so on). The coordinator supplies
+        the merged config dict and the shared ``httpx2`` client; the adapter owns
+        the vendor-specific field layout and sampling policy.
 
-        Notes:
-            - For Ollama we use `api_type: "openai"` plus a `base_url`
-              pointing at Ollama's OpenAI-compatible endpoint
-              (`http://host:port/v1`). This avoids requiring AG2's optional
-              `ollama` extra and works with any AG2 version that ships an
-              OpenAI client.
+        TLS: the resolved ``verify`` value (corporate CA bundle, system store, or
+        disabled) is carried by the shared ``httpx2.AsyncClient`` passed to the
+        adapter as ``http_client`` - this is what propagates corporate TLS
+        settings into the agent's LLM calls for every vendor that accepts it.
         """
-        temperature = self.config.get("temperature", DEFAULT_TEMPERATURE)
+        from services.model_adapters import get_adapter
 
-        if self.provider == "openai":
-            entry = {
-                "model": self.config.get("openai_model", DEFAULT_OPENAI_CHAT_MODEL),
-                "api_key": self.config.get("openai_api_key", ""),
-                "api_type": "openai",
-            }
-        elif self.provider == "azure_openai":
-            entry = {
-                "model": self.config.get("azure_deployment", DEFAULT_AZURE_DEPLOYMENT),
-                "api_key": self.config.get("azure_api_key", ""),
-                "api_type": "azure",
-                "azure_endpoint": self.config.get("azure_endpoint", ""),
-                "api_version": self.config.get("azure_api_version", DEFAULT_AZURE_API_VERSION),
-            }
-        elif self.provider == "ollama":
-            base_url = self.config.get("ollama_base_url", DEFAULT_OLLAMA_BASE_URL).rstrip("/")
-            entry = {
-                "model": self.config.get("ollama_model", DEFAULT_OLLAMA_MODEL),
-                "api_key": "ollama",  # Ollama ignores the key; OpenAI client requires non-empty.
-                "api_type": "openai",
-                "base_url": f"{base_url}/v1",
-            }
-        else:
-            raise ValueError(f"Unknown LLM provider: {self.provider}")
+        adapter = get_adapter(self.provider)
+        return adapter.build_ag2_config(
+            self.config,
+            http_client=self._get_agent_http_client(),
+        )
 
-        return {"config_list": [entry], "temperature": temperature}
+    def _get_agent_http_client(self):
+        """Lazily build and cache the ``httpx2`` client used by AG2 typed configs.
+
+        ``openai>=3`` and AG2's typed configs use ``httpx2`` for async transport.
+        The client carries the resolved TLS ``verify`` value so corporate CA
+        settings reach the agent's LLM calls. Cached so repeated
+        ``to_ag2_config()`` calls share one connection pool; released by
+        ``close()``.
+        """
+        if self._agent_http_client is None:
+            import httpx2
+            self._agent_http_client = httpx2.AsyncClient(verify=self._resolve_verify())
+        return self._agent_http_client
 
     def get_model_name(self) -> str:
         """Return the model identifier for the current provider."""
@@ -282,6 +331,8 @@ class LLMProvider:
             return self.config.get("azure_deployment", DEFAULT_AZURE_DEPLOYMENT)
         if self.provider == "ollama":
             return self.config.get("ollama_model", DEFAULT_OLLAMA_MODEL)
+        if self.provider == "anthropic":
+            return self.config.get("anthropic_model", DEFAULT_ANTHROPIC_MODEL)
         return "unknown"
 
     async def close(self) -> None:
@@ -313,6 +364,14 @@ class LLMProvider:
             finally:
                 self._ollama_client = None
 
+        if self._agent_http_client is not None:
+            try:
+                await self._agent_http_client.aclose()
+            except Exception:
+                log.warning("Error closing agent httpx2 client", exc_info=True)
+            finally:
+                self._agent_http_client = None
+
     # -------------------------------------------------------------------------
     # Lazy clients
     # -------------------------------------------------------------------------
@@ -342,10 +401,10 @@ class LLMProvider:
 
     def _get_openai_client(self):
         if self._openai_client is None:
-            import httpx
+            import httpx2
             from openai import AsyncOpenAI
             verify = self._resolve_verify()
-            http_client = httpx.AsyncClient(verify=verify)
+            http_client = httpx2.AsyncClient(verify=verify)
             self._openai_client = AsyncOpenAI(
                 api_key=self.config.get("openai_api_key"),
                 http_client=http_client,
@@ -354,13 +413,13 @@ class LLMProvider:
 
     def _get_azure_client(self):
         if self._azure_client is None:
-            import httpx
+            import httpx2
             from openai import AsyncAzureOpenAI
             verify = self._resolve_verify()
-            http_client = httpx.AsyncClient(verify=verify)
+            http_client = httpx2.AsyncClient(verify=verify)
             self._azure_client = AsyncAzureOpenAI(
                 api_key=self.config.get("azure_api_key"),
-                azure_endpoint=self.config.get("azure_endpoint"),
+                azure_endpoint=self.config.get("azure_endpoint") or "",
                 api_version=self.config.get("azure_api_version", DEFAULT_AZURE_API_VERSION),
                 http_client=http_client,
             )
