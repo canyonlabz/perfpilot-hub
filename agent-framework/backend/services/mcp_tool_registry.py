@@ -1,24 +1,32 @@
-"""MCP Auto-Discovery Tool Registry for AG2 ConversableAgents.
+"""MCP Auto-Discovery Tool Registry for native AG2 agents.
 
 Fetches live MCP tool schemas from the FastMCP gateway and registers them
-as fully-typed AG2 ``Tool`` objects on ``ConversableAgent`` instances.
-Each registered tool wraps a single gateway MCP call with the project's
+as native AG2 ``FunctionTool`` objects on ``ag2.Agent`` instances. Each
+registered tool wraps a single gateway MCP call with the project's
 NEVER-raise contract applied.
 
-Core pattern (validated in Perplexity AG2-and-MCP-Bridge research):
+Core pattern (AG2 1.x native tools):
 
     FastMCP Client.list_tools()
         -> namespace filter (e.g. "datadog_")
-        -> autogen.tools.Tool(parameters_json_schema=mcp_tool.inputSchema)
-        -> Tool.register_for_llm(agent)        # LLM sees exact JSON Schema
-        -> Tool.register_for_execution(agent)   # AG2 can invoke the function
+        -> ag2.tools.tool(schema=mcp_tool.inputSchema)(wrapper)  # FunctionTool
+        -> agent.add_tool(function_tool)   # LLM sees the exact JSON Schema and
+                                           # AG2 can invoke the function
 
-Both ``register_for_llm`` and ``register_for_execution`` target the SAME
-``ConversableAgent``. This matches the execution-agent's proven pattern
-where the specialist plays both LLM and executor roles.
+``agent.add_tool`` makes each tool both visible to the LLM and executable in a
+single call on the SAME ``ag2.Agent`` (replacing the legacy
+``register_for_llm`` / ``register_for_execution`` pair, which does not exist on
+native AG2 tools). This matches the execution-agent's proven pattern where the
+specialist plays both LLM and executor roles.
 
-No new dependencies: uses ``fastmcp.Client`` (fastmcp>=3.4.2) and
-``autogen.tools.Tool`` (ag2>=0.13.3), both already in requirements.txt.
+The MCP ``inputSchema`` is passed to ``ag2.tools.tool`` as ``schema=`` verbatim,
+so the native tool advertises the gateway's exact parameter contract to the LLM.
+Supplying the schema explicitly also means the bare ``**kwargs`` wrapper needs no
+annotation introspection, so these wrappers deliberately avoid typed signatures
+(and this module must not rely on ``from __future__ import annotations``).
+
+No new dependencies: uses ``fastmcp.Client`` (fastmcp>=3.4.2) and the native
+``ag2.tools.tool`` decorator (ag2 1.3.x), both already in requirements.txt.
 
 Retry policy per the project's ``mcp-error-handling`` rule:
     - API-based namespaces (blazemeter, datadog, confluence): retry up
@@ -26,12 +34,9 @@ Retry policy per the project's ``mcp-error-handling`` rule:
     - Code-based namespaces (perfanalysis, perfreport, jmeter, etc.):
       single attempt, surface errors immediately.
 
-Heavy imports (``fastmcp``, ``autogen.tools``) are deferred into the
-functions that need them so this module is cheap to import in
-environments that don't exercise auto-discovery.
-
-Status:
-    F3.10 PBI 3.10.1 -- initial implementation.
+Heavy imports (``fastmcp``, ``ag2.tools``) are deferred into the functions that
+need them so this module is cheap to import in environments that don't exercise
+auto-discovery.
 """
 
 import asyncio
@@ -352,14 +357,17 @@ async def register_mcp_tools_on_agent(
     gateway_url: str,
     allowed_namespaces: list[str],
     stateful_client_holder: dict | None = None,
+    *,
+    allowed_tools: list[str] | None = None,
 ) -> int:
     """Fetch live MCP tool schemas from the FastMCP gateway and register
-    them on an existing ``ConversableAgent`` with full JSON schemas.
+    them on an existing native ``ag2.Agent`` with full JSON schemas.
 
-    Each matching tool is wrapped in an ``autogen.tools.Tool`` object
-    that carries the gateway's ``inputSchema`` verbatim, so the LLM
-    sees the exact parameter contract at inference time -- eliminating
-    the "passes a string where a list is expected" class of errors.
+    Each matching tool is wrapped in a native ``ag2.tools.FunctionTool``
+    (built via the ``ag2.tools.tool`` decorator) that carries the gateway's
+    ``inputSchema`` verbatim, so the LLM sees the exact parameter contract at
+    inference time -- eliminating the "passes a string where a list is
+    expected" class of errors.
 
     The wrapper functions honour the project's NEVER-raise contract:
     all code paths return a string (either the MCP response or a
@@ -370,11 +378,11 @@ async def register_mcp_tools_on_agent(
     with its system prompt; it just won't have tool schemas injected.
 
     Args:
-        agent: An AG2 ``ConversableAgent`` instance. Both
-            ``register_for_llm`` and ``register_for_execution`` target
-            this same agent (matching the execution-agent's proven
-            pattern where the specialist plays both LLM and executor
-            roles).
+        agent: A native ``ag2.Agent`` instance (or compatible stub exposing
+            ``add_tool`` / ``name``). ``add_tool`` makes each tool both
+            visible to the LLM and executable in one call -- matching the
+            execution-agent's proven pattern where the specialist plays both
+            LLM and executor roles.
         gateway_url: URL of the FastMCP gateway (e.g.
             ``http://localhost:8888/mcp/``).
         allowed_namespaces: List of namespace prefixes to filter by
@@ -387,12 +395,20 @@ async def register_mcp_tools_on_agent(
             persistent client instead of per-call connections. When
             ``None`` (default), all tools use per-call connections
             (backward-compatible behavior).
+        allowed_tools: Optional fine-grained per-tool allow-list of exact
+            tool names (e.g. ``["datadog_load_environment"]``). A tool is
+            admitted when it matches an allowed namespace **or** appears in
+            this list, so an agent can be granted one or two specific tools
+            from a namespace it is otherwise not authorized for
+            (defense-in-depth / capability-sharing) without inheriting the
+            whole namespace. ``None`` (default) disables the per-tool filter
+            and preserves the namespace-only behavior.
 
     Returns:
         Count of tools successfully registered. Zero when the gateway
         is unreachable or no tools match the namespace filter.
     """
-    from autogen.tools import Tool
+    from ag2.tools import tool as ag2_tool_decorator
 
     try:
         mcp_tools = await _fetch_tool_catalog(gateway_url)
@@ -404,13 +420,23 @@ async def register_mcp_tools_on_agent(
         )
         return 0
 
+    # ``None`` means "no per-tool filter" and matches the legacy behavior
+    # exactly; an explicit (possibly empty) list enables the allow-list dial.
+    allowed_tool_set: frozenset[str] | None = (
+        frozenset(allowed_tools) if allowed_tools is not None else None
+    )
+
     registered = 0
     for mcp_tool in mcp_tools:
         tool_name = getattr(mcp_tool, "name", None)
         if not tool_name:
             continue
 
-        if not any(tool_name.startswith(ns + "_") for ns in allowed_namespaces):
+        # Admit a tool when it matches an allowed namespace OR the explicit
+        # per-tool allow-list. The two dials are additive.
+        in_namespace = any(tool_name.startswith(ns + "_") for ns in allowed_namespaces)
+        in_allow_list = allowed_tool_set is not None and tool_name in allowed_tool_set
+        if not (in_namespace or in_allow_list):
             continue
 
         tool_description = getattr(mcp_tool, "description", "") or tool_name
@@ -426,14 +452,22 @@ async def register_mcp_tools_on_agent(
         wrapper.__name__ = tool_name
         wrapper.__doc__ = tool_description
 
-        ag2_tool = Tool(
+        # Build a native AG2 ``FunctionTool`` from the wrapper, carrying the
+        # MCP ``inputSchema`` verbatim so the LLM sees the exact JSON Schema,
+        # then attach it. ``add_tool`` makes the tool visible to the LLM and
+        # executable in one call (replacing the legacy register_for_llm /
+        # register_for_execution pair, which native tools do not expose).
+        #
+        # When a tool reports no ``inputSchema``, fall back to an explicit
+        # empty-object schema: passing ``schema=None`` would make AG2 introspect
+        # the bare ``**kwargs`` wrapper and advertise a spurious ``kwargs``
+        # parameter to the LLM. The empty object models a correct no-argument tool.
+        function_tool = ag2_tool_decorator(
             name=tool_name,
             description=tool_description,
-            func_or_tool=wrapper,
-            parameters_json_schema=tool_schema,
-        )
-        ag2_tool.register_for_llm(agent)
-        ag2_tool.register_for_execution(agent)
+            schema=tool_schema or {"type": "object", "properties": {}},
+        )(wrapper)
+        agent.add_tool(function_tool)
         registered += 1
 
     if registered > 25:
@@ -444,7 +478,8 @@ async def register_mcp_tools_on_agent(
         )
 
     log.info(
-        "[mcp_tool_registry] Registered %d tools on '%s' (namespaces=%s)",
+        "[mcp_tool_registry] Registered %d tools on '%s' (namespaces=%s, allowed_tools=%s)",
         registered, agent.name, allowed_namespaces,
+        sorted(allowed_tool_set) if allowed_tool_set is not None else None,
     )
     return registered
