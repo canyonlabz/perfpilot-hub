@@ -31,10 +31,12 @@ would create a circular import).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
+from uuid import UUID
 
 from stores import hitl_store, task_store
 
@@ -170,7 +172,9 @@ class HitlGateRule:
             A dict with keys ``title``, ``summary``, ``artifact`` — the
             shape ``hitl_store.create_prompt`` expects.
         """
-        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        args = payload.get("args")
+        if not isinstance(args, dict):
+            args = {}
         tool = payload.get("tool", "unknown")
 
         template_vars = {
@@ -664,3 +668,339 @@ async def wait_for_decision(
         decided_by=None,
         approval_id=approval_id,
     )
+
+
+# =============================================================================
+# 7. Native AG2 tool-level gate
+# =============================================================================
+# The enforcers above (Section 5) are the REST/task-executor path: they are
+# called imperatively from ``task_executor`` around a specialist run. The
+# pieces below are the native-AG2 path: a ``BaseMiddleware`` that intercepts
+# each tool call the agent's LLM makes, and the ``hitl_hook`` AG2 routes
+# ``ToolApprovalRequest`` to. Both paths share the SAME authority:
+# ``hitl_approvals`` (via ``hitl_store``), the SAME rules
+# (:func:`find_matching_rule`), the SAME prompt shape
+# (:meth:`HitlGateRule.build_prompt`), and the SAME poll loop
+# (:func:`wait_for_decision`). A rejected / timed-out / errored approval stops
+# the agent's turn by emitting a native ``HaltEvent`` that ``HaltCheckMiddleware``
+# turns into a short-circuited final reply; :func:`hitl_halt_outcome` reads the
+# outcome back off a finished turn.
+#
+# AG2 is imported lazily (inside the builders and via ``__getattr__``) so this
+# module — and ``task_executor``, which re-exports the REST enforcers — still
+# imports cleanly in environments where AG2 is not installed.
+
+HITL_GATE_SOURCE = "hitl-gate"
+"""``source`` of the ``HaltEvent`` / ``ObserverAlert`` the tool-level gate emits."""
+
+TASK_ID_VARIABLE = "task_id"
+"""``context.variables`` key carrying the ``agent_tasks`` UUID for the run."""
+
+
+def _task_id_from(context: Any) -> Optional[UUID]:
+    """Extract the task UUID a native run carries in ``context.variables``.
+
+    Returns ``None`` when the variable is absent or cannot be coerced to a
+    UUID — the middleware treats that as a hard error (it cannot record an
+    approval without a task to attach it to).
+    """
+    raw = context.variables.get(TASK_ID_VARIABLE)
+    if isinstance(raw, UUID):
+        return raw
+    try:
+        return UUID(str(raw)) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_arguments(arguments: Any) -> dict:
+    """Coerce a tool-call ``arguments`` value into a plain dict.
+
+    AG2 delivers tool-call arguments either already-parsed (dict) or as a
+    JSON string. Anything that is not a JSON object becomes ``{}`` so the
+    prompt template renders predictably.
+    """
+    if isinstance(arguments, dict):
+        return arguments
+    try:
+        parsed = json.loads(arguments or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _error_decision(feedback: str) -> Decision:
+    """Build a rejected :class:`Decision` for a gate error (no DB row)."""
+    return Decision(
+        approved=False,
+        rejected=True,
+        timed_out=False,
+        feedback=feedback,
+        decided_by=None,
+        approval_id=-1,
+    )
+
+
+def _decision_to_answer(decision: Decision) -> str:
+    """Serialize a :class:`Decision` as the JSON the ``hitl_hook`` returns.
+
+    The hook's string return value is what AG2 hands back to
+    :meth:`HitlGateMiddleware.on_tool_execution` as the approval answer, so
+    the two ends agree on this envelope.
+    """
+    return json.dumps(
+        {
+            "approved": decision.approved,
+            "rejected": decision.rejected,
+            "timed_out": decision.timed_out,
+            "feedback": decision.feedback,
+            "decided_by": decision.decided_by,
+            "approval_id": decision.approval_id,
+        }
+    )
+
+
+def _decision_from_answer(answer: str) -> Decision:
+    """Parse the hook's JSON answer back into a :class:`Decision`.
+
+    An unparseable or non-object answer becomes a rejected decision so the
+    gate fails closed (the tool does not run) rather than open.
+    """
+    try:
+        data = json.loads(answer)
+    except (TypeError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        return _error_decision(f"Unrecognized HITL answer: {answer!r}")
+    return Decision(
+        approved=bool(data.get("approved")),
+        rejected=bool(data.get("rejected")),
+        timed_out=bool(data.get("timed_out")),
+        feedback=data.get("feedback"),
+        decided_by=data.get("decided_by"),
+        approval_id=int(data.get("approval_id", -1)),
+    )
+
+
+def _decision_outcome(decision: Decision) -> str:
+    """Map a :class:`Decision` to a short outcome label for halt metadata."""
+    if decision.approved:
+        return "approved"
+    if decision.timed_out:
+        return "timeout"
+    return "rejected"
+
+
+async def _find_prior_approval(
+    task_id: UUID,
+    agent_name: str,
+    tool: str,
+) -> Optional[int]:
+    """Return the id of an already-approved row for this (task, agent, tool).
+
+    An approval granted by the task-start gate (:func:`enforce_at_task_start`)
+    covers the same tool when the agent's LLM then calls it, so the human is
+    not asked twice. Matching uses the ``artifact`` block
+    :meth:`HitlGateRule.build_prompt` records (``tool`` + ``agent``).
+    """
+    try:
+        rows = await hitl_store.list_for_task(task_id)
+    except Exception:
+        log.exception("HITL prior-approval lookup failed for task %s", task_id)
+        return None
+    for row in reversed(rows):
+        artifact = row.prompt.get("artifact") if isinstance(row.prompt, dict) else None
+        if (
+            row.decision == "approved"
+            and isinstance(artifact, dict)
+            and artifact.get("tool") == tool
+            and artifact.get("agent") == agent_name
+        ):
+            return row.id
+    return None
+
+
+def _build_hitl_store_hook() -> Callable[..., Awaitable[str]]:
+    """Build the AG2 ``hitl_hook`` that answers tool approvals from the store.
+
+    Lazily imported so the module loads without AG2. AG2 injects the hook's
+    ``context`` by its ``ag2.Context`` annotation, so the real classes must be
+    attached to ``__annotations__`` (postponed annotations are strings here).
+    """
+    from ag2 import Context
+    from ag2.events import HumanInputRequest, ToolApprovalRequest
+    from ag2.exceptions import HumanInputNotProvidedError
+
+    async def hitl_store_hook(request: HumanInputRequest, context: Context) -> str:
+        """Answer a ``ToolApprovalRequest`` from ``hitl_approvals``.
+
+        Creates the prompt row the middleware assembled (carried as JSON in
+        ``request.content``), polls it to a terminal decision via
+        :func:`wait_for_decision`, and returns the JSON-encoded answer. Any
+        other human-input request is refused the way AG2's default hook does.
+        """
+        if not isinstance(request, ToolApprovalRequest):
+            raise HumanInputNotProvidedError
+
+        task_id = _task_id_from(context)
+        if task_id is None:
+            return _decision_to_answer(
+                _error_decision(
+                    "HITL approval requires a task_id in the run variables."
+                )
+            )
+
+        try:
+            prompt = json.loads(request.content)
+            if not isinstance(prompt, dict):
+                prompt = {"title": "Approve Tool Call", "summary": str(request.content)}
+        except (TypeError, ValueError):
+            prompt = {"title": "Approve Tool Call", "summary": str(request.content)}
+
+        try:
+            approval = await hitl_store.create_prompt(task_id, prompt)
+        except Exception as exc:
+            log.exception("hitl_store_hook: failed to create HITL prompt")
+            return _decision_to_answer(
+                _error_decision(f"Failed to create HITL prompt: {exc}")
+            )
+
+        log.info(
+            "HITL approval pending for task %s (approval_id=%d)",
+            task_id, approval.id,
+        )
+        decision = await wait_for_decision(approval.id)
+        return _decision_to_answer(decision)
+
+    # Postponed annotations are strings; AG2's dependency injection needs the
+    # real classes to recognize the ``context`` parameter.
+    hitl_store_hook.__annotations__ = {
+        "request": HumanInputRequest, "context": Context, "return": str,
+    }
+    return hitl_store_hook
+
+
+def _build_hitl_middleware_class() -> type:
+    """Build the native ``BaseMiddleware`` subclass that gates tool calls.
+
+    Lazily imported so the module loads without AG2. Register via
+    ``Middleware(HitlGateMiddleware, agent_name=...)`` alongside
+    ``Middleware(HaltCheckMiddleware)``, and pass :func:`hitl_store_hook` as the
+    agent's ``hitl_hook``. The run must carry the task UUID in
+    ``variables={"task_id": ...}``.
+    """
+    from ag2.events import (
+        HaltEvent,
+        ObserverAlert,
+        Severity,
+        ToolApprovalRequest,
+        ToolResultEvent,
+    )
+    from ag2.middleware import BaseMiddleware
+
+    class HitlGateMiddleware(BaseMiddleware):
+        """Gate an agent's tool calls on ``hitl_approvals`` decisions."""
+
+        def __init__(self, event: Any, context: Any, *, agent_name: str) -> None:
+            super().__init__(event, context)
+            self._agent_name = agent_name
+
+        async def on_tool_execution(
+            self, call_next: Any, event: Any, context: Any,
+        ) -> Any:
+            rule = find_matching_rule(self._agent_name, event.name)
+            if rule is None:
+                return await call_next(event, context)
+
+            task_id = _task_id_from(context)
+            if task_id is None:
+                return await self._halt(
+                    event, context,
+                    _error_decision(
+                        "HITL approval requires a task_id in the run variables."
+                    ),
+                )
+
+            prior = await _find_prior_approval(task_id, self._agent_name, event.name)
+            if prior is not None:
+                log.info(
+                    "HITL gate: prior approval %d covers tool=%s for task %s",
+                    prior, event.name, task_id,
+                )
+                return await call_next(event, context)
+
+            prompt = rule.build_prompt(
+                self._agent_name,
+                {"tool": event.name, "args": _parse_arguments(event.arguments)},
+            )
+            answer = await context.ask(
+                ToolApprovalRequest(json.dumps(prompt), tool_call_id=event.id)
+            )
+            decision = _decision_from_answer(answer)
+            if decision.approved:
+                return await call_next(event, context)
+            return await self._halt(event, context, decision)
+
+        async def _halt(self, event: Any, context: Any, decision: Decision) -> Any:
+            outcome = _decision_outcome(decision)
+            message = (
+                f"Tool '{event.name}' was not run: HITL {outcome}"
+                + (f" ({decision.feedback})" if decision.feedback else "")
+            )
+            alert = ObserverAlert(
+                source=HITL_GATE_SOURCE,
+                severity=Severity.FATAL,
+                message=message,
+                data={
+                    "outcome": outcome,
+                    "approval_id": decision.approval_id,
+                    "feedback": decision.feedback,
+                    "tool": event.name,
+                    "agent": self._agent_name,
+                },
+            )
+            await context.send(
+                HaltEvent(reason=message, source=HITL_GATE_SOURCE, alerts=[alert])
+            )
+            return ToolResultEvent.from_call(event, result=message)
+
+    return HitlGateMiddleware
+
+
+_LAZY_BUILDERS: dict[str, Callable[[], Any]] = {
+    "HitlGateMiddleware": _build_hitl_middleware_class,
+    "hitl_store_hook": _build_hitl_store_hook,
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily build the AG2-dependent symbols on first access.
+
+    Keeps ``import services.hitl_gates`` working where AG2 is not installed:
+    the middleware class and hook are constructed (and cached into module
+    globals) only when something actually references them.
+    """
+    builder = _LAZY_BUILDERS.get(name)
+    if builder is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = builder()
+    globals()[name] = value
+    return value
+
+
+async def hitl_halt_outcome(reply: Any) -> Optional[dict]:
+    """Return the tool-level gate's outcome from a finished AG2 turn.
+
+    Returns the ``ObserverAlert.data`` dict (``outcome``, ``approval_id``,
+    ``feedback``, ``tool``, ``agent``) when the turn was halted by
+    :class:`HitlGateMiddleware`, otherwise ``None``.
+    """
+    from ag2.events import HaltEvent
+
+    events = await reply.context.stream.history.get_events()
+    for event in reversed(list(events)):
+        if isinstance(event, HaltEvent) and event.source == HITL_GATE_SOURCE:
+            if event.alerts:
+                return dict(event.alerts[0].data)
+            return {"outcome": "error", "feedback": event.reason}
+    return None

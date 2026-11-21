@@ -1,10 +1,9 @@
 """Tests for the native-AG2 port of ``services.mcp_tool_registry``.
 
-These cover the C-3a increment: ``register_mcp_tools_on_agent`` now builds
-native ``ag2.tools.FunctionTool`` objects (via the ``ag2.tools.tool`` decorator,
+These cover the C-3a increment: ``register_mcp_tools_on_agent`` builds native
+``ag2.tools.FunctionTool`` objects (via the ``ag2.tools.tool`` decorator,
 carrying the MCP ``inputSchema`` verbatim) and attaches them with
-``agent.add_tool`` -- replacing the legacy ``autogen.tools.Tool`` +
-``register_for_llm`` / ``register_for_execution`` pair.
+``agent.add_tool``.
 
 The real ``ag2.tools.tool`` decorator runs (so we assert against the actual
 ``FunctionTool`` it produces), but the gateway catalog fetch and the per-call
