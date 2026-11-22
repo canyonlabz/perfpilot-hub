@@ -4,9 +4,9 @@ Owns agent-name constants, module loading, and the ``_run_*_agent``
 entry points formerly hosted in ``services.task_executor``.
 
 Shared utilities live elsewhere:
-  * ``services.helpers.tool_loop`` — multi-turn AG2 tool loop
+  * ``core.agent_harness`` — round cap, repeat throttle, context budget, HITL
   * ``services.helpers.mcp_passthrough`` — MCP gateway pass-through
-  * ``services.helpers.token_context_window`` — token estimate / compact
+  * ``services.helpers.token_context_window`` — context-budget resolver
 
 Imports the in-process subscription bus from ``services.subscriptions``
 so this module never depends on ``task_executor`` (avoids import cycles).
@@ -21,7 +21,6 @@ import re
 from collections import defaultdict
 from typing import Any, Optional
 
-from services.helpers.tool_loop import run_multi_turn_tool_loop
 from services.subscriptions import TaskEvent, broadcast as _broadcast
 from stores import task_store
 
@@ -162,7 +161,7 @@ EXECUTION_AGENT_MCP_PREFIXES: tuple[str, ...] = (
 # Loads `agents/<agent-name>/agent.py` via `importlib.util` because
 # hyphenated folder names make `from agents.execution-agent.agent import ...`
 # a Python syntax error. Modules are cached per agent name to avoid
-# re-paying the `fastmcp` / `autogen` import cost on every task.
+# re-paying the module import cost on every task.
 # Replaces the old execution-agent-specific `_load_execution_agent_module()`.
 
 _specialist_module_cache: dict[str, Any] = {}
@@ -617,12 +616,229 @@ def _compose_specialist_prompt(payload: dict) -> str:
 
 
 # =============================================================================
-# Generic MCP specialist dispatch (AG2 LLM loop)
+# Native AG2 turn — same envelope the specialist and orchestrator callers read
 # =============================================================================
-# Used by promoted specialist agents whose MCP tools are auto-discovered
-# at build time. The specialist's ConversableAgent has full JSON schemas
-# for every tool in its namespace. The LLM autonomously selects tools
-# and parameters based on the user's request and contextual data.
+# HaltEvent source -> exit_reason. Sources match the harness and the HITL gate.
+_HALT_EXIT_REASONS = {
+    "round-limit": "max_rounds_reached",
+    "tool-repeat-throttle": "consecutive_repeat_limit",
+    "hitl-gate": "hitl_halted",
+}
+
+
+def _native_result_fields(result_event: Any) -> tuple[bool, str]:
+    """Return ``(ok, result_text)`` for one native tool-result event.
+
+    A ``ToolErrorEvent``, or a JSON body with ``ok: false``, is a failure.
+    The text is the joined string parts of the result, which the round audit
+    stores as a short snippet.
+    """
+    from ag2.events import ToolErrorEvent
+
+    if isinstance(result_event, ToolErrorEvent):
+        error = result_event.error
+        payload = {
+            "ok": False,
+            "error": {
+                "type": type(error).__name__,
+                "message": str(error)[:500],
+            },
+        }
+        return False, json.dumps(payload)
+
+    result = getattr(result_event, "result", None)
+    parts = getattr(result, "parts", None) or []
+    chunks: list[str] = []
+    for part in parts:
+        content = getattr(part, "content", None)
+        if isinstance(content, str):
+            chunks.append(content)
+    result_str = "".join(chunks)
+    ok = True
+    try:
+        parsed = json.loads(result_str)
+        if isinstance(parsed, dict) and parsed.get("ok") is False:
+            ok = False
+    except (json.JSONDecodeError, TypeError):
+        ok = True
+    return ok, result_str
+
+
+def _reconstruct_tool_rounds(events: list[Any]) -> list[dict[str, Any]]:
+    """Rebuild the per-round tool audit from a native event stream.
+
+    Each ``ToolCallsEvent`` is one round. Member calls are matched to their
+    ``ToolCallEvent`` (name and arguments) and ``ToolResultEvent`` (by
+    ``parent_id``). Result snippets stay at 200 characters so the
+    comparison-id scan keeps seeing the same prefix it did before.
+    """
+    from ag2.events import ToolCallEvent, ToolCallsEvent, ToolResultEvent
+
+    calls_by_id: dict[str, Any] = {}
+    results_by_parent: dict[str, Any] = {}
+    for event in events:
+        if isinstance(event, ToolCallsEvent):
+            for member in event.calls:
+                member_id = getattr(member, "id", None)
+                if isinstance(member_id, str):
+                    calls_by_id.setdefault(member_id, member)
+        elif isinstance(event, ToolCallEvent):
+            calls_by_id[event.id] = event
+        elif isinstance(event, ToolResultEvent):
+            parent_id = event.parent_id
+            if isinstance(parent_id, str):
+                results_by_parent.setdefault(parent_id, event)
+
+    rounds: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, ToolCallsEvent):
+            continue
+        audit: dict[str, Any] = {
+            "round": len(rounds) + 1,
+            "tool_calls": [],
+            "results": [],
+        }
+        for member in event.calls:
+            member_id = getattr(member, "id", None)
+            if not isinstance(member_id, str):
+                continue
+            call = calls_by_id.get(member_id)
+            if call is None:
+                continue
+            raw_args = getattr(call, "arguments", None)
+            if isinstance(raw_args, str):
+                try:
+                    args = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    args = {}
+            elif isinstance(raw_args, dict):
+                args = raw_args
+            else:
+                args = {}
+            name = getattr(call, "name", "")
+            if not isinstance(name, str):
+                name = str(name)
+            audit["tool_calls"].append({"name": name, "args": args})
+            result_event = results_by_parent.get(member_id)
+            if result_event is None:
+                continue
+            ok, result_str = _native_result_fields(result_event)
+            audit["results"].append({
+                "tool": name,
+                "ok": ok,
+                "snippet": result_str[:200],
+            })
+        rounds.append(audit)
+    return rounds
+
+
+def _native_exit_reason(events: list[Any], reply_text: str) -> str:
+    """Derive ``exit_reason`` from the latest known halt, or from the reply."""
+    from ag2.events import HaltEvent
+
+    for event in reversed(events):
+        if not isinstance(event, HaltEvent):
+            continue
+        source = event.source
+        if isinstance(source, str) and source in _HALT_EXIT_REASONS:
+            return _HALT_EXIT_REASONS[source]
+    return "text_response" if reply_text else "null_reply"
+
+
+def _native_ctx_metrics(events: list[Any], context_budget: Any) -> dict[str, Any]:
+    """Build the envelope context fields from the stream's token usage.
+
+    Uses the last main-loop ``UsageEvent`` (``kind == "model_call"`` and no
+    delegated ``task_id``) as the prompt size. ``context_limit`` stays the
+    model window from the budget resolver, and utilization is a percentage,
+    matching the fields the previous runner stored on the envelope.
+    """
+    from ag2.events import UsageEvent
+
+    limit = int(context_budget.context_limit)
+    prompt_tokens = 0
+    for event in events:
+        if not isinstance(event, UsageEvent):
+            continue
+        if event.kind != "model_call" or event.task_id is not None:
+            continue
+        usage = event.usage
+        prompt_tokens = int(usage.prompt_tokens or 0)
+    utilization = (prompt_tokens / limit) if limit else 0.0
+    return {
+        "context_tokens": prompt_tokens,
+        "context_utilization_pct": round(utilization * 100, 1),
+        "context_limit": limit,
+    }
+
+
+async def _run_native_agent(
+    agent: Any,
+    *,
+    user_prompt: str,
+    secrets_hint: str | None,
+    task_id: Any,
+    common: dict[str, Any],
+    agent_name: str,
+    max_tool_rounds: int,
+    context_budget: Any,
+) -> tuple[str, str, list[dict[str, Any]], str, dict[str, Any]]:
+    """Run one native ``agent.ask`` and shape the specialist envelope tuple.
+
+    The agent already carries the harness, so this only runs the turn and
+    rebuilds ``(reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics)``
+    from the reply history. Per-round progress events are emitted after the
+    turn so ``tool_round_N_of_M`` still reaches SSE subscribers.
+
+    ``secrets_hint`` is a names-only briefing. It is passed as an extra
+    prompt string, separate from the user message.
+    """
+    ask_kwargs: dict[str, Any] = {"variables": {"task_id": str(task_id)}}
+    if secrets_hint:
+        ask_kwargs["prompt"] = (secrets_hint,)
+
+    reply = await agent.ask(user_prompt, **ask_kwargs)
+    history = reply.context.stream.history
+    events = list(await history.get_events())
+    body = reply.body
+    reply_text = body if isinstance(body, str) else (str(body) if body else "")
+    tool_rounds = _reconstruct_tool_rounds(events)
+    exit_reason = _native_exit_reason(events, reply_text)
+    ctx_metrics = _native_ctx_metrics(events, context_budget)
+
+    for audit in tool_rounds:
+        tool_calls = audit["tool_calls"]
+        names = [
+            tc["name"]
+            for tc in tool_calls
+            if isinstance(tc, dict) and isinstance(tc.get("name"), str)
+        ]
+        round_num = audit["round"]
+        await _broadcast(
+            task_id,
+            TaskEvent(
+                status="running",
+                progress=f"tool_round_{round_num}_of_{max_tool_rounds}",
+                result={
+                    "round": round_num,
+                    "tools_called": names,
+                    "agent": agent_name,
+                    **ctx_metrics,
+                },
+                **common,
+            ),
+        )
+
+    return reply_text, reply_text, tool_rounds, exit_reason, ctx_metrics
+
+
+# =============================================================================
+# Generic MCP specialist dispatch
+# =============================================================================
+# Used by specialist agents whose MCP tools are registered at build time.
+# The native agent carries those tool schemas. ``agent.ask`` runs the turn;
+# the harness enforces the round cap, repeat throttle, context budget, and
+# per-tool approval gate.
 
 
 async def _run_mcp_specialist_agent(
@@ -630,24 +846,19 @@ async def _run_mcp_specialist_agent(
     common: dict,
     agent_name: str,
 ) -> dict:
-    """Build and invoke a specialist's AG2 agent with MCP tools.
+    """Build and invoke a specialist's native AG2 agent with MCP tools.
 
-    The specialist's ``build_*_agent()`` factory creates a
-    ``ConversableAgent`` with MCP tools auto-discovered and registered
-    via ``mcp_tool_registry``. The agent's LLM sees the full tool
-    schemas and autonomously selects the right tool(s) based on the
-    user's request.
+    The specialist's ``build_*_agent()`` factory creates an ``ag2.Agent``
+    with the shared harness and MCP tools registered via
+    ``mcp_tool_registry``. ``agent.ask`` runs the turn. The harness
+    enforces the round cap, repeat throttle, context budget, and
+    per-tool approval gate. This function translates the reply into the
+    envelope below.
 
     The payload carries the user's original message (``user_message``)
     plus any contextual data the orchestrator included (test_run_id,
     environment, timestamps, etc.). The specialist's LLM uses all
     available information to fulfill the request.
-
-    Uses a multi-turn tool-execution loop: the LLM may
-    return tool calls which are executed and fed back until the LLM
-    produces a final text response or an exit condition is reached.
-    Loop parameters (``max_tool_rounds``, ``max_consecutive_repeats``)
-    are read from the agent's ``config.yaml``.
 
     Return envelope::
 
@@ -656,7 +867,7 @@ async def _run_mcp_specialist_agent(
           "test_run_id":  "<echoed from payload, or None>",
           "user_message": "<echoed for audit trail>",
           "reply_text":   "<specialist LLM response text>",
-          "reply_raw":    <raw LLM reply object>,
+          "reply_raw":    "<specialist LLM response text>",
           "tool_rounds":  [<per-round audit dicts>],
           "total_rounds": <int>,
           "exit_reason":  "<text_response|max_rounds_reached|...>"
@@ -749,15 +960,10 @@ async def _run_mcp_specialist_agent(
 
     # ---- Agent invocation ---------------------------------------------
     # Web-UI secrets briefing (names only) is injected by
-    # delegate_to_specialist. Keep it as a system turn so specialists
-    # do not re-ask cloud vs onprem when confluence_mode is set.
-    messages_for_llm: list[dict] = []
-    secrets_hint = payload.get("webui_secrets_hint")
-    if isinstance(secrets_hint, str) and secrets_hint.strip():
-        messages_for_llm.append(
-            {"role": "system", "content": secrets_hint.strip()}
-        )
-    messages_for_llm.append({"role": "user", "content": user_prompt})
+    # delegate_to_specialist. Pass it as an extra prompt string so
+    # specialists do not re-ask cloud vs onprem when confluence_mode is set.
+    raw_hint = payload.get("webui_secrets_hint")
+    secrets_hint = raw_hint.strip() if isinstance(raw_hint, str) and raw_hint.strip() else None
 
     await _broadcast(
         task.task_id,
@@ -776,28 +982,15 @@ async def _run_mcp_specialist_agent(
     if str(framework_dir) not in sys.path:
         sys.path.insert(0, str(framework_dir))
 
+    from core.agent_harness import load_harness_settings
+    from services.helpers.token_context_window import resolve_context_budget_for_agent
     from utils import config_loader
 
     agent_config = config_loader.load_agent_config(agent_name)
-
-    max_tool_rounds = int(agent_config.get("max_tool_rounds", 7))
-    max_consecutive_repeats = int(agent_config.get("max_consecutive_repeats", 3))
-    raw_polling_tools = agent_config.get("polling_tools", [])
-    polling_tools = frozenset(
-        raw_polling_tools if isinstance(raw_polling_tools, list) else []
-    )
-    polling_max_consecutive_repeats = int(
-        agent_config.get("polling_max_consecutive_repeats", 30)
-    )
-    # Context budget now lives in the `context_management:` block (global
-    # default in config/agents.yaml, optional per-agent override), resolved
-    # (with global<-agent merge) by the shared helper.
-    from services.helpers.token_context_window import resolve_context_budget_for_agent
-
-    _budget = resolve_context_budget_for_agent(agent_name)
-    context_limit = _budget.context_limit
-    compaction_threshold = _budget.compaction_threshold
-    compaction_preserve_recent = _budget.compaction_preserve_recent
+    # The harness enforces loop limits and the prompt budget. These reads
+    # only label SSE progress and fill the envelope's context fields.
+    harness_settings = load_harness_settings(agent_name)
+    context_budget = resolve_context_budget_for_agent(agent_name)
 
     # ---- Detect stateful namespaces -----------------------------------
     from .mcp_tool_registry import STATEFUL_NAMESPACES
@@ -831,6 +1024,7 @@ async def _run_mcp_specialist_agent(
         }
         return envelope
 
+    agent: Any = None
     try:
         if stateful_client_holder is not None:
             agent = await asyncio.to_thread(
@@ -841,6 +1035,13 @@ async def _run_mcp_specialist_agent(
     except Exception as exc:
         log.exception("%s agent build failed for task %s", agent_name, task.task_id)
         raise RuntimeError(f"{agent_name} agent build failed: {exc}") from exc
+
+    if isinstance(agent, dict):
+        envelope["error"] = {
+            "type": "AgentDisabled",
+            "message": f"{agent_name} is disabled in its config.",
+        }
+        return envelope
 
     # ---- Open persistent client for stateful tools --------------------
     stateful_client_ctx = None
@@ -867,24 +1068,19 @@ async def _run_mcp_specialist_agent(
                 stateful_client_ctx = None
                 stateful_client_holder["client"] = None
 
-    # ---- Run multi-turn tool execution loop ---------------------------
+    # ---- Run one native agent turn ------------------------------------
     restored_web_ui, web_ui_snapshot = _restore_web_ui_caller(task, payload)
     try:
         reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
-            await run_multi_turn_tool_loop(
-                agent=agent,
-                messages=messages_for_llm,
-                max_tool_rounds=max_tool_rounds,
-                max_consecutive_repeats=max_consecutive_repeats,
-                polling_tools=polling_tools,
-                polling_max_consecutive_repeats=polling_max_consecutive_repeats,
-                context_limit=context_limit,
-                compaction_threshold=compaction_threshold,
-                compaction_preserve_recent=compaction_preserve_recent,
+            await _run_native_agent(
+                agent,
+                user_prompt=user_prompt,
+                secrets_hint=secrets_hint,
                 task_id=task.task_id,
                 common=common,
                 agent_name=agent_name,
-                task=task,
+                max_tool_rounds=harness_settings.max_tool_rounds,
+                context_budget=context_budget,
             )
         )
     except Exception as exc:
@@ -904,6 +1100,12 @@ async def _run_mcp_specialist_agent(
                 )
             if stateful_client_holder is not None:
                 stateful_client_holder["client"] = None
+        try:
+            from core.base_agent import aclose_agent
+
+            await aclose_agent(agent)
+        except Exception:
+            log.warning("Failed to close %s agent", agent_name, exc_info=True)
 
     await _broadcast(
         task.task_id,
@@ -993,7 +1195,7 @@ def _extract_comparison_id_from_tool_rounds(
 
     Args:
         tool_rounds: The per-round audit list produced by
-            ``run_multi_turn_tool_loop``. Each round carries
+            the native agent turn. Each round carries
             ``results: [{"tool", "ok", "snippet"}, ...]``.
 
     Returns:

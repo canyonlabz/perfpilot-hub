@@ -1,4 +1,4 @@
-"""PerfPilot Script Agent — AG2 ConversableAgent factory.
+"""PerfPilot Script Agent factory.
 
 The script-agent owns the JMeter-script lifecycle: convert
 HAR/Swagger/Playwright captures to JMX, edit and analyze scripts,
@@ -27,9 +27,8 @@ MCP collaboration (auto-discovered at build time):
    runs as a separate service and the script-agent connects directly
    to it (not through the gateway).
 
-Heavy imports (``autogen``, ``yaml``, ``fastmcp``) live inside the
-functions that need them so this module is cheap to import in smoke
-tests.
+Heavy imports live inside the functions that need them so this module
+is cheap to import in smoke tests.
 
 NOTE: This module deliberately does NOT use ``from __future__ import
 annotations``.
@@ -88,37 +87,30 @@ def build_script_agent(stateful_client_holder: dict | None = None):
             ``{"client": Client | None}`` for Playwright browser tools.
             When provided, ``browser_*`` tools use the shared persistent
             client instead of per-call connections, preserving browser
-            state across the multi-turn tool loop. When ``None``
-            (default), all tools use per-call connections (backward-
-            compatible with non-Playwright workflows).
+            state across turns. When ``None`` (default), all tools use
+            per-call connections.
 
-    Returns a ``ConversableAgent`` with:
-    - JMeter MCP tools auto-discovered from the gateway
-    - Playwright MCP tools auto-discovered from the Playwright container
+    Returns a native ``ag2.Agent`` with:
+    - JMeter, GitHub, and PerfMemory MCP tools from the gateway
+    - Playwright MCP tools from the Playwright container, when enabled
+
+    ``force_tool_choice`` remains in the agent config. Native model
+    configs keep tool choice on the provider object that
+    ``create_agent`` owns (present on the OpenAI config, absent on the
+    Anthropic config). The committed example leaves the flag false, so
+    this factory does not apply it.
     """
-    try:
-        from autogen import ConversableAgent
-    except ImportError:
-        from ag2 import ConversableAgent
+    from core.agent_harness import build_agent_harness
+    from core.base_agent import create_agent, load_agent_definition
 
-    instructions_path = _AGENT_DIR / "INSTRUCTIONS.md"
-    system_message = instructions_path.read_text(encoding="utf-8-sig")
+    definition = load_agent_definition(_AGENT_DIR)
+    harness = build_agent_harness(definition.name)
+    agent = create_agent(definition, **harness.agent_kwargs())
+    if isinstance(agent, dict):
+        logger.info("script-agent is disabled in its config")
+        return agent
 
-    from utils.config_loader import load_agent_config
-    from services.llm_provider import build_llm_config
-
-    agent_config = load_agent_config("script-agent")
-    llm_config = build_llm_config(agent_config.get("llm_provider"))
-
-    if agent_config.get("force_tool_choice", False):
-        llm_config["tool_choice"] = "required"
-
-    agent = ConversableAgent(
-        name="script-agent",
-        system_message=system_message,
-        llm_config=llm_config,
-        human_input_mode="NEVER",
-    )
+    agent_config = definition.config
 
     # Register JMeter tools (via gateway)
     jmeter_count = _register_gateway_tools(agent)

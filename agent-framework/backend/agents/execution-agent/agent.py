@@ -1,32 +1,23 @@
-"""PerfPilot Execution Agent -- AG2 ConversableAgent factory + agent tools.
+"""PerfPilot Execution Agent factory and agent tools.
 
-This module ships the four-file pattern's `agent.py` slot per V2 doc
-§7.1: construct and return the agent on demand, with all configuration
-loaded from the sibling `INSTRUCTIONS.md`, `agent_card.json`, and *one of*
-`config.yaml` / `config.example.yaml`. Callers (the A2A task executor in
-PBI 3.8.6, the orchestrator's `delegate_to_specialist` tool) import
-`build_execution_agent()` and wrap the result.
+Constructs a native ``ag2.Agent`` on demand from the sibling
+``INSTRUCTIONS.md``, ``agent_card.json``, and one of ``config.yaml`` /
+``config.example.yaml``. Callers (the task executor and the
+orchestrator's ``delegate_to_specialist`` tool) import
+``build_execution_agent()``.
 
-**What this module ships (state as of PBI 3.8.3):**
+The factory wires four composite tools plus the BlazeMeter and JMeter
+gateway catalog:
 
-- A working `ConversableAgent` factory with the real long-form system
-  prompt loaded from `INSTRUCTIONS.md`.
-- Per-agent `llm_provider` resolution via the framework's
-  `utils.base_agent.resolve_agent_config_path()` candidate walker.
-- **One agent tool wired:**
-    1. `start_performance_test(test_id)`               -- PBI 3.8.3 (this commit)
-- **Two tools still pending:**
-    2. `wait_for_completion(run_id, ...)`              -- PBI 3.8.4
-    3. `extract_test_run_artifacts(test_run_id, ...)`  -- PBI 3.8.5
-
-`_register_tools(agent)` is now lit up and called from
-`build_execution_agent()`, mirroring the orchestrator's PBI 3.7.3
-cadence. Each PBI in 3.8.3-3.8.5 adds another tool there.
+1. ``start_performance_test(test_id)``
+2. ``wait_for_completion(run_id, ...)``
+3. ``extract_test_run_artifacts(test_run_id, ...)``
+4. ``provision_performance_test(...)``
 
 **Tool design conventions (apply to every agent tool in this module):**
 
-- Module-level functions so smoke tests and PBI 3.8.6's task executor
-  can import and exercise them directly without spinning up an LLM.
+- Module-level functions so tests and the task executor can import
+  and exercise them directly without spinning up an LLM.
   The on-disk folder name is `execution-agent` (hyphenated), so callers
   load this module via `importlib.util.spec_from_file_location()` -- not
   Python's normal `from agents.execution-agent.agent import ...` (which
@@ -57,21 +48,14 @@ cadence. Each PBI in 3.8.3-3.8.5 adds another tool there.
   Success:  {"ok": True,  "vendor": "blazemeter", ...tool-specific fields..., "raw": <truncated MCP response>}
   Failure:  {"ok": False, "error": {"type": "<ExceptionClass>", "message": "<truncated>"}, ...echoed inputs...}
 
-**What this module still does NOT do (deferred):**
-
-- A2A `task_executor` dispatch (PBI 3.8.6 adds `_run_execution_agent`).
-- Card flip to `available` + populated `skills[]` (PBI 3.8.7).
-
-Heavy imports (`autogen`, `yaml`, `fastmcp` via `utils.mcp_client`) live
-inside the functions that need them so this module is cheap to import
-in tests / IDE indexing that do not exercise the agent.
+Heavy imports live inside the functions that need them so this module
+is cheap to import in tests that do not exercise the agent.
 
 NOTE: This module deliberately does NOT use `from __future__ import
-annotations`. AG2 0.13.3 introspects tool function signatures via
-pydantic's `TypeAdapter`, which cannot evaluate stringified `Annotated`
-annotations. Keeping annotations as live types makes tool registration
-work without per-call `.rebuild()` shenanigans (same constraint that
-applies to the orchestrator's `agent.py`).
+annotations`. Native tool registration introspects live annotations
+through ``fast_depends``. A bare string inside ``Annotated`` is treated
+as a forward reference, so parameter descriptions use
+``Annotated[T, Field(description=...)]``.
 """
 
 import asyncio
@@ -81,18 +65,14 @@ import time
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
-log = logging.getLogger(__name__)
+from pydantic import Field
 
-from utils.paths import get_framework_dir
+log = logging.getLogger(__name__)
 
 AGENT_DIR = Path(__file__).resolve().parent
 AGENT_NAME = "execution-agent"
-FRAMEWORK_DIR = get_framework_dir()  # agent-framework/backend/
 
 GATEWAY_MCP_NAMESPACES = ["blazemeter", "jmeter"]
-
-INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
-AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"
 
 
 # =============================================================================
@@ -100,57 +80,30 @@ AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"
 # =============================================================================
 
 def build_execution_agent() -> Any:
-    """Construct the PerfPilot Execution Agent AG2 ConversableAgent.
+    """Construct the PerfPilot Execution Agent as a native ``ag2.Agent``.
 
-    Resolution order for the LLM provider:
-      1. Per-agent `llm_provider` block in the first existing of
-         `config.yaml` (operator-side override, gitignored) or
-         `config.example.yaml` (committed default).
-      2. Global fallback `config/agents.yaml -> default_llm_provider`
-         via `utils.llm_provider.load_default_provider_config()`.
+    Instructions and the LLM provider come from the four-file definition.
+    The shared harness supplies the approval gate, round cap, repeat
+    throttle, and context budget. Composite tools and the gateway catalog
+    are attached after construction.
 
     Returns:
-        An `autogen.ConversableAgent` instance with the long-form
-        `INSTRUCTIONS.md` as `system_message` and
-        `human_input_mode="NEVER"` (this is a server agent).
-
-        No tools are registered in PBI 3.8.1 -- they land in PBIs
-        3.8.3 / 3.8.4 / 3.8.5 (each tool gets its own PBI per the
-        F3.8 plan, mirroring the orchestrator's 3.7.3-3.7.6 cadence).
+        A native ``ag2.Agent``, or the disabled-marker dict when the
+        agent's config sets ``enabled: false``.
 
     Raises:
-        FileNotFoundError: when one of the four sibling files is missing.
-        Anything `LLMProvider.to_ag2_config()` raises when credentials
-        are not configured.
+        FileNotFoundError: when one of the required sibling files is missing.
+        Anything the LLM provider raises when credentials are not configured.
     """
-    from autogen import ConversableAgent  # type: ignore
+    from core.agent_harness import build_agent_harness
+    from core.base_agent import create_agent, load_agent_definition
 
-    from services.llm_provider import LLMProvider
-
-    system_message = _load_system_message()
-    provider_config = _resolve_provider_config()
-    provider = LLMProvider(provider_config)
-
-    log.info(
-        "Building %s (provider=%s, model=%s)",
-        AGENT_NAME, provider.provider, provider.get_model_name(),
-    )
-
-    agent = ConversableAgent(
-        name=AGENT_NAME,
-        system_message=system_message,
-        llm_config=provider.to_ag2_config(),
-        # Server-side: never block on stdin.
-        human_input_mode="NEVER",
-        # Allow chain depth for future tool-call -> tool-result ->
-        # follow-up reply patterns. PBI 3.8.6's A2A executor dispatches
-        # to tool functions directly (bypassing the LLM loop), but the
-        # agent is also reachable via the orchestrator's
-        # `delegate_to_specialist` and via direct LLM interactions where
-        # chain depth matters. 5 is the headroom; deeper chains likely
-        # indicate a tool error loop and should terminate.
-        max_consecutive_auto_reply=5,
-    )
+    definition = load_agent_definition(AGENT_DIR)
+    harness = build_agent_harness(definition.name)
+    agent = create_agent(definition, **harness.agent_kwargs())
+    if isinstance(agent, dict):
+        log.info("%s is disabled in its config", AGENT_NAME)
+        return agent
 
     _register_tools(agent)
     gateway_tool_count = _register_gateway_tools(agent)
@@ -159,66 +112,6 @@ def build_execution_agent() -> Any:
         AGENT_NAME, 4, gateway_tool_count, GATEWAY_MCP_NAMESPACES,
     )
     return agent
-
-
-# =============================================================================
-# Internal helpers
-# =============================================================================
-
-def _load_system_message() -> str:
-    """Read `INSTRUCTIONS.md` as the AG2 `system_message`."""
-    if not INSTRUCTIONS_PATH.exists():
-        raise FileNotFoundError(
-            f"Execution-agent INSTRUCTIONS.md not found at {INSTRUCTIONS_PATH}."
-        )
-    return INSTRUCTIONS_PATH.read_text(encoding="utf-8-sig")
-
-
-def _resolve_provider_config() -> dict:
-    """Return the merged LLM-provider config for the execution-agent.
-
-    Per-agent overrides win over the global default in
-    `config/agents.yaml -> default_llm_provider:`. Env credentials are
-    merged in by `utils.llm_provider.merge_env_credentials` regardless
-    of which YAML block sourced the behavior keys.
-    """
-    from services.llm_provider import (
-        load_default_provider_config,
-        merge_env_credentials,
-    )
-
-    agent_block = _load_per_agent_llm_block()
-    if agent_block:
-        log.debug(
-            "Execution-agent using per-agent llm_provider override from %s",
-            _resolved_config_filename(),
-        )
-        return merge_env_credentials(agent_block)
-
-    log.debug("Execution-agent using default_llm_provider from agents.yaml")
-    return load_default_provider_config()
-
-
-def _load_per_agent_llm_block() -> Optional[dict]:
-    """Parse the resolved per-agent config and return its ``llm_provider:`` block.
-
-    Delegates YAML loading to ``config_loader.get_agent_config_section()``
-    Returns None when neither candidate config file exists,
-    the YAML is empty, or the ``llm_provider:`` key is absent / commented out.
-    """
-    from utils.config_loader import get_agent_config_section
-
-    block = get_agent_config_section("execution-agent", "llm_provider")
-    if not block or not isinstance(block, dict):
-        return None
-    return dict(block)
-
-
-def _resolved_config_filename() -> str:
-    from core.base_agent import resolve_agent_config_path
-
-    path = resolve_agent_config_path(AGENT_DIR)
-    return path.name if path else "<none>"
 
 
 # =============================================================================
@@ -273,26 +166,15 @@ def _register_gateway_tools(agent: Any) -> int:
 # =============================================================================
 
 def _register_tools(agent: Any) -> None:
-    """Wire the F3.8 agent tools onto the ConversableAgent.
+    """Register the four composite tools on the native agent.
 
-    Both decorators are required for each tool:
-      - `register_for_llm(...)` advertises the tool in the LLM's tool
-        catalog so the model can decide to call it during a generate_reply
-        loop (used for orchestrator -> execution-agent chains, future
-        LLM-driven flows).
-      - `register_for_execution()` tells AG2 that THIS agent is the one
-        that actually runs the function (vs. a separate executor agent).
-
-    AG2 0.13.3 uses `api_style='tool'` by default, which is what we want
-    (modern OpenAI tools API, not the deprecated function-calling API).
-    The same decoration pattern works for both sync and async tool
-    functions; AG2 awaits the coroutine when `register_for_execution()`
-    invokes it.
-
-    PBIs 3.8.3 / 3.8.4 / 3.8.5 wire `start_performance_test`,
-    `wait_for_completion`, and `extract_test_run_artifacts` respectively.
+    Each function is wrapped with ``ag2.tools.tool`` so the model sees
+    its name, description, and parameter schema, then attached with
+    ``agent.add_tool``.
     """
-    agent.register_for_llm(
+    from ag2.tools import tool
+
+    agent.add_tool(tool(
         name="start_performance_test",
         description=(
             "Kick off a performance test run against a test definition that "
@@ -306,10 +188,9 @@ def _register_tools(agent: Any) -> None:
             "dict ({ok: True, run_id, ...} on success or {ok: False, "
             "error: {...}} on failure); NEVER raises."
         ),
-    )(start_performance_test)
-    agent.register_for_execution()(start_performance_test)
+    )(start_performance_test))
 
-    agent.register_for_llm(
+    agent.add_tool(tool(
         name="wait_for_completion",
         description=(
             "Block until the given run_id reaches a terminal state in the "
@@ -324,10 +205,9 @@ def _register_tools(agent: Any) -> None:
             "Status polling is idempotent and safe to call repeatedly. NEVER "
             "raises."
         ),
-    )(wait_for_completion)
-    agent.register_for_execution()(wait_for_completion)
+    )(wait_for_completion))
 
-    agent.register_for_llm(
+    agent.add_tool(tool(
         name="extract_test_run_artifacts",
         description=(
             "Execute the 6-step BlazeMeter extractor recipe (see INSTRUCTIONS.md "
@@ -340,13 +220,13 @@ def _register_tools(agent: Any) -> None:
             "status='partial' if any IMPORTANT step failed. All BlazeMeter MCP "
             "tools retry up to 3x with back-off on transient errors; "
             "jmeter_analyze_jmeter_log is code-based and NEVER retries per "
-            "project rule. Filesystem is NEVER touched -- validation block is "
+            "project rule. "
+            "Filesystem is NEVER touched -- validation block is "
             "derived from MCP response payloads only. NEVER raises."
         ),
-    )(extract_test_run_artifacts)
-    agent.register_for_execution()(extract_test_run_artifacts)
+    )(extract_test_run_artifacts))
 
-    agent.register_for_llm(
+    agent.add_tool(tool(
         name="provision_performance_test",
         description=(
             "Provision a NEW BlazeMeter test for a freshly-generated JMX. "
@@ -359,8 +239,7 @@ def _register_tools(agent: Any) -> None:
             "surface a 'not recommended to run' message. Never uploads to "
             "shared folders (that is a separate tool). Never raises."
         ),
-    )(provision_performance_test)
-    agent.register_for_execution()(provision_performance_test)
+    )(provision_performance_test))
 
 
 # =============================================================================
@@ -379,10 +258,12 @@ _RUN_ID_PATTERN = re.compile(r"Run\s+ID\s*:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 async def start_performance_test(
     test_id: Annotated[
         str,
-        "Identifier of an EXISTING test definition in the load-testing tool "
-        "(BlazeMeter test ID, e.g. '12345678'). The test artifact "
-        "(JMX / .yaml / recorded scenario) must already be uploaded; this "
-        "agent does NOT upload JMX scripts.",
+        Field(description=(
+            "Identifier of an EXISTING test definition in the load-testing tool "
+            "(BlazeMeter test ID, e.g. '12345678'). The test artifact "
+            "(JMX / .yaml / recorded scenario) must already be uploaded; this "
+            "agent does NOT upload JMX scripts."
+        )),
     ],
 ) -> dict:
     """Kick off a performance test run for a pre-existing test definition.
@@ -604,22 +485,28 @@ _MAX_CONSECUTIVE_POLL_FAILURES = 3
 async def wait_for_completion(
     run_id: Annotated[
         str,
-        "BlazeMeter run_id minted by `start_performance_test` (also called "
-        "`master_id` in some BlazeMeter API endpoints). Same value carried "
-        "through the rest of the F3.8 pipeline as `test_run_id`.",
+        Field(description=(
+            "BlazeMeter run_id minted by `start_performance_test` (also called "
+            "`master_id` in some BlazeMeter API endpoints). Same value carried "
+            "through the rest of the F3.8 pipeline as `test_run_id`."
+        )),
     ],
     *,
     poll_interval_seconds: Annotated[
         float,
-        "Seconds between status polls. Default 60.0 to stay well under "
-        "BlazeMeter's API rate limits; status updates are not granular "
-        "enough to benefit from tighter polling.",
+        Field(description=(
+            "Seconds between status polls. Default 60.0 to stay well under "
+            "BlazeMeter's API rate limits; status updates are not granular "
+            "enough to benefit from tighter polling."
+        )),
     ] = 60.0,
     timeout_seconds: Annotated[
         float,
-        "Maximum seconds to wait for terminal state. Default 300.0 (5 "
-        "minutes) -- appropriate for short smoke tests; production "
-        "callers should raise this for longer real workloads.",
+        Field(description=(
+            "Maximum seconds to wait for terminal state. Default 300.0 (5 "
+            "minutes) -- appropriate for short smoke tests; production "
+            "callers should raise this for longer real workloads."
+        )),
     ] = 300.0,
     on_progress: Optional[Any] = None,
 ) -> dict:
@@ -901,15 +788,19 @@ _SESSION_ID_PATTERN = re.compile(r"^\s*Session ID:\s*(\[.*?\])\s*$", re.MULTILIN
 async def extract_test_run_artifacts(
     test_run_id: Annotated[
         str,
-        "PerfPilot artifact-folder key for the completed run. Equals the "
-        "BlazeMeter `run_id` minted by `start_performance_test`; the two "
-        "values are 1:1.",
+        Field(description=(
+            "PerfPilot artifact-folder key for the completed run. Equals the "
+            "BlazeMeter `run_id` minted by `start_performance_test`; the two "
+            "values are 1:1."
+        )),
     ],
     test_name: Annotated[
         Optional[str],
-        "Optional human-friendly label for the run. Logged in the return "
-        "JSON's `notes` field for downstream context; not part of the "
-        "canonical schema and may be None.",
+        Field(description=(
+            "Optional human-friendly label for the run. Logged in the return "
+            "JSON's `notes` field for downstream context; not part of the "
+            "canonical schema and may be None."
+        )),
     ] = None,
     on_progress: Optional[Any] = None,
 ) -> dict:
@@ -1598,45 +1489,61 @@ def _normalize_artifacts_base(raw: Any) -> Optional[str]:
 async def provision_performance_test(
     environment: Annotated[
         Optional[str],
-        "Environment name from A2A / Web UI metadata (e.g. 'QA', 'UAT'). "
-        "Resolved via the project load_testing block when `project` is set. May be "
-        "None when the caller supplies workspace_id / project_id explicitly.",
+        Field(description=(
+            "Environment name from A2A / Web UI metadata (e.g. 'QA', 'UAT'). "
+            "Resolved via the project load_testing block when `project` is set. May be "
+            "None when the caller supplies workspace_id / project_id explicitly."
+        )),
     ] = None,
     test_name: Annotated[
         Optional[str],
-        "Human-friendly test name to display in BlazeMeter. Required.",
+        Field(description=(
+            "Human-friendly test name to display in BlazeMeter. Required."
+        )),
     ] = None,
     jmx_path: Annotated[
         Optional[str],
-        "Local filesystem path to the JMX file to upload. Required. The "
-        "basename becomes BlazeMeter's `configuration.filename`.",
+        Field(description=(
+            "Local filesystem path to the JMX file to upload. Required. The "
+            "basename becomes BlazeMeter's `configuration.filename`."
+        )),
     ] = None,
     data_files: Annotated[
         Optional[list],
-        "Optional list of local file paths (CSV / JSON / other data assets) "
-        "to upload after the JMX. Order preserved.",
+        Field(description=(
+            "Optional list of local file paths (CSV / JSON / other data assets) "
+            "to upload after the JMX. Order preserved."
+        )),
     ] = None,
     smoke_status: Annotated[
         Optional[str],
-        "Outcome of the Script Agent's local JMeter smoke test: 'PASS' or "
-        "'FAIL'. Anything other than 'PASS' surfaces warning='smoke_failed' "
-        "on the return; provisioning still proceeds either way.",
+        Field(description=(
+            "Outcome of the Script Agent's local JMeter smoke test: 'PASS' or "
+            "'FAIL'. Anything other than 'PASS' surfaces warning='smoke_failed' "
+            "on the return; provisioning still proceeds either way."
+        )),
     ] = None,
     workspace_id: Annotated[
         Optional[str],
-        "Explicit BlazeMeter workspace id override (from A2A metadata). Wins "
-        "over the environments.yaml mapping.",
+        Field(description=(
+            "Explicit BlazeMeter workspace id override (from A2A metadata). Wins "
+            "over the environments.yaml mapping."
+        )),
     ] = None,
     project_id: Annotated[
         Optional[str],
-        "Explicit BlazeMeter project id override (from A2A metadata). Wins "
-        "over the environments.yaml mapping. When set the resolver skips "
-        "workspace/project lookup entirely.",
+        Field(description=(
+            "Explicit BlazeMeter project id override (from A2A metadata). Wins "
+            "over the environments.yaml mapping. When set the resolver skips "
+            "workspace/project lookup entirely."
+        )),
     ] = None,
     project: Annotated[
         Optional[str],
-        "Project key or alias from environments.yaml. Used to load the "
-        "load_testing block when workspace_id / project_id are not both set.",
+        Field(description=(
+            "Project key or alias from environments.yaml. Used to load the "
+            "load_testing block when workspace_id / project_id are not both set."
+        )),
     ] = None,
 ) -> dict:
     """Create a new BlazeMeter test and upload the JMX + data files.
@@ -1737,11 +1644,11 @@ async def provision_performance_test(
     resolved_project_name: Optional[str] = None
 
     if project and (resolved_project is None or resolved_workspace is None):
+        from services.resolvers.project_catalog import (
+            ProjectNotFoundError,
+            resolve_load_testing_config,
+        )
         try:
-            from services.resolvers.project_catalog import (
-                ProjectNotFoundError,
-                resolve_load_testing_config,
-            )
             load_block = resolve_load_testing_config(str(project).strip())
         except ProjectNotFoundError as exc:
             return _provision_error(
