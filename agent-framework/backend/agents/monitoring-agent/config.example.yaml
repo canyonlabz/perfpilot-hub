@@ -80,3 +80,19 @@ a2a:
     - metrics
     - apm
     - logs
+
+
+# =============================================================================
+# Context management overrides
+# =============================================================================
+# Optional. Uncomment to override the global `context_management` defaults in
+# `config/agents.yaml`. Omitted keys inherit the global values. Use this when
+# this agent runs a model with a different context window (e.g. a 1,000,000-
+# token model such as anthropic claude-haiku-5-5).
+#
+# context_management:
+#   context_limit: 400000
+#   reserved_completion_tokens: 8000
+#   overhead_reserve_tokens: 12000
+#   compaction_threshold: 0.80
+#   compaction_preserve_recent: 5

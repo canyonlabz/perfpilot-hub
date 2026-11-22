@@ -89,8 +89,9 @@ def _restore_web_ui_caller(
 
     # No live identity (post-SSE specialist task). Restore from payload.
     thread_id = None
-    if isinstance(getattr(task, "thread_id", None), str) and task.thread_id.strip():
-        thread_id = task.thread_id.strip()
+    raw_thread_id = getattr(task, "thread_id", None)
+    if isinstance(raw_thread_id, str) and raw_thread_id.strip():
+        thread_id = raw_thread_id.strip()
     else:
         for key in ("thread_id", "external_thread_id"):
             raw = payload.get(key)
@@ -413,7 +414,12 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         }
         return envelope
 
-    fn = getattr(module, tool, None)
+    # ``tool`` is guaranteed a non-empty str here: intent-based (non-str/empty)
+    # payloads return early above, and non-composite names are rejected, so only
+    # a known composite tool name reaches this point. Assert it so the static
+    # checker narrows ``tool`` to ``str`` for the ``getattr`` lookup.
+    assert isinstance(tool, str)
+    fn: Any = getattr(module, tool, None)
     if not callable(fn):
         # Defends against drift between EXECUTION_AGENT_TOOL_NAMES and the
         # actual module (e.g., someone renames a function but forgets the
@@ -457,7 +463,11 @@ async def _run_execution_agent(task: task_store.AgentTask, common: dict) -> dict
         args["on_progress"] = _on_progress
 
     try:
-        tool_result = await fn(**args)
+        # ``callable(fn)`` narrows ``fn`` to ``(...) -> object``, so the call
+        # result would be typed ``object`` (not awaitable). Tool functions are
+        # async coroutines, so hold the result as ``Any`` to keep it awaitable.
+        coro: Any = fn(**args)
+        tool_result = await coro
     except TypeError as exc:
         # `fn(**args)` raised TypeError -- argument mismatch. Surface as a
         # structured error rather than re-raising; the tool itself never
@@ -779,9 +789,15 @@ async def _run_mcp_specialist_agent(
     polling_max_consecutive_repeats = int(
         agent_config.get("polling_max_consecutive_repeats", 30)
     )
-    context_limit = int(agent_config.get("context_limit", 128000))
-    compaction_threshold = float(agent_config.get("compaction_threshold", 0.80))
-    compaction_preserve_recent = int(agent_config.get("compaction_preserve_recent", 5))
+    # Context budget now lives in the `context_management:` block (global
+    # default in config/agents.yaml, optional per-agent override), resolved
+    # (with global<-agent merge) by the shared helper.
+    from services.helpers.token_context_window import resolve_context_budget_for_agent
+
+    _budget = resolve_context_budget_for_agent(agent_name)
+    context_limit = _budget.context_limit
+    compaction_threshold = _budget.compaction_threshold
+    compaction_preserve_recent = _budget.compaction_preserve_recent
 
     # ---- Detect stateful namespaces -----------------------------------
     from .mcp_tool_registry import STATEFUL_NAMESPACES

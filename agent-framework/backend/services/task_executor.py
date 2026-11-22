@@ -153,15 +153,20 @@ async def _inject_completion_message(task: task_store.AgentTask) -> None:
     """
     from stores import conversation_store, thread_store
 
+    thread_id = task.thread_id
+    if thread_id is None:
+        # No conversation thread bound to this task — nothing to persist.
+        return
+
     summary = _build_completion_summary(task)
     try:
         await conversation_store.append_message(
-            task.thread_id,
+            thread_id,
             agent_name="orchestrator",
             role="assistant",
             content={"text": summary, "source": "task_executor_callback"},
         )
-        await thread_store.touch_thread(task.thread_id)
+        await thread_store.touch_thread(thread_id)
         log.info(
             "Injected completion message for task %s into thread %s",
             task.task_id, task.thread_id,
@@ -189,7 +194,7 @@ async def execute_task(task_id: UUID) -> None:
         log.info("execute_task: task %s already terminal (%s); nothing to do", task_id, task.status)
         return
 
-    common = dict(
+    common: dict[str, Any] = dict(
         task_id=str(task.task_id),
         session_id=str(task.session_id) if task.session_id else None,
         external_session_id=task.external_session_id,
@@ -683,9 +688,15 @@ async def _invoke_orchestrator_with_tool_loop(
     polling_max_consecutive_repeats = int(
         orch_config.get("polling_max_consecutive_repeats", 15)
     )
-    context_limit = int(orch_config.get("context_limit", 128000))
-    compaction_threshold = float(orch_config.get("compaction_threshold", 0.80))
-    compaction_preserve_recent = int(orch_config.get("compaction_preserve_recent", 5))
+    # Context budget now lives in the `context_management:` block (global
+    # default in config/agents.yaml, optional per-agent override), resolved
+    # (with global<-agent merge) by the shared helper.
+    from services.helpers.token_context_window import resolve_context_budget_for_agent
+
+    _budget = resolve_context_budget_for_agent("orchestrator")
+    context_limit = _budget.context_limit
+    compaction_threshold = _budget.compaction_threshold
+    compaction_preserve_recent = _budget.compaction_preserve_recent
 
     # ---- Track delegated specialist task IDs for streaming wait ----------
     delegated_task_ids: list[UUID] = []

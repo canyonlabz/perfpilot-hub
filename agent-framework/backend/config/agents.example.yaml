@@ -23,7 +23,7 @@
 # `provider` must be one of: openai | azure_openai | ollama
 default_llm_provider:
   provider: openai
-  openai_model: gpt-4o-mini
+  openai_model: gpt-5-mini
   # Set lower (≈0.1) for deterministic agents (analysis, reporting),
   # higher (≈0.4) for creative tasks. Per-agent overrides win.
   temperature: 0.2
@@ -48,6 +48,33 @@ default_llm_provider:
   # provider: ollama
   # ollama_model: llama3.1
   # temperature: 0.2
+
+# =============================================================================
+# Context management (global default budget)
+# =============================================================================
+# Token budget used for context-pressure tracking and history compaction.
+# These are the DEFAULTS every agent inherits; an agent may override any key
+# in its own `agents/<name>/config.yaml` under `context_management:` (useful
+# when that agent runs a model with a different context window).
+#
+# `context_limit` is the MODEL's context window (total tokens) — set it to
+# match `default_llm_provider` above. Known windows (max context / max output),
+# per vendor docs:
+#   - openai    gpt-5-mini        :   400000 / 128000
+#   - anthropic claude-haiku-5-5  : 1000000 / 128000
+#
+# `reserved_completion_tokens` and `overhead_reserve_tokens` hold back a small
+# buffer (for the in-flight completion and misc structural/tool overhead) so
+# compaction engages BEFORE the window is actually full:
+#   effective_prompt_budget = context_limit
+#                             - reserved_completion_tokens
+#                             - overhead_reserve_tokens
+context_management:
+  context_limit: 400000              # gpt-5-mini context window (see above)
+  reserved_completion_tokens: 8000   # buffer reserved for the running completion
+  overhead_reserve_tokens: 12000     # buffer for structural / tool-schema overhead
+  compaction_threshold: 0.80         # compact history at 80% utilization
+  compaction_preserve_recent: 5      # keep the 5 most recent tool results intact
 
 # =============================================================================
 # Agent enable/disable
