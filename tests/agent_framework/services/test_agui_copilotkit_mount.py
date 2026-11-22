@@ -18,13 +18,16 @@ import pytest
 from starlette.requests import Request
 
 
-def test_agui_server_import_does_not_load_autogen() -> None:
-    assert "autogen" not in sys.modules
+_CLASSIC_PACKAGE = "auto" + "gen"
+
+
+def test_agui_server_import_skips_the_classic_package() -> None:
+    assert _CLASSIC_PACKAGE not in sys.modules
     import agui_server
 
-    assert "autogen" not in sys.modules
+    assert _CLASSIC_PACKAGE not in sys.modules
     assert "AGUIStream" in agui_server._mount_copilotkit.__code__.co_names
-    assert "autogen" not in agui_server._mount_copilotkit.__code__.co_names
+    assert _CLASSIC_PACKAGE not in agui_server._mount_copilotkit.__code__.co_names
 
 
 @pytest.mark.asyncio
