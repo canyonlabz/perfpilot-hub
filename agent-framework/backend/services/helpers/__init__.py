@@ -8,8 +8,7 @@ helper can be reused across the A2A and Web-UI entry points.
 
 Current siblings include: INPUT_REQUIRED message composition,
 ``test_run_id`` resolution, Playwright test-spec persistence, MCP
-pass-through, token/context-window helpers, and the shared AG2
-multi-turn tool loop.
+pass-through, and token/context-window helpers.
 
 Dependency direction (strict):
 

@@ -782,6 +782,8 @@ async def _run_native_agent(
     agent_name: str,
     max_tool_rounds: int,
     context_budget: Any,
+    extra_prompt: tuple[str, ...] = (),
+    extra_observers: tuple[Any, ...] = (),
 ) -> tuple[str, str, list[dict[str, Any]], str, dict[str, Any]]:
     """Run one native ``agent.ask`` and shape the specialist envelope tuple.
 
@@ -791,11 +793,19 @@ async def _run_native_agent(
     turn so ``tool_round_N_of_M`` still reaches SSE subscribers.
 
     ``secrets_hint`` is a names-only briefing. It is passed as an extra
-    prompt string, separate from the user message.
+    prompt string, separate from the user message. ``extra_prompt`` holds
+    earlier thread rows for the orchestrator. ``extra_observers`` are added
+    to the harness observers for this turn only.
     """
     ask_kwargs: dict[str, Any] = {"variables": {"task_id": str(task_id)}}
+    prompt_parts: list[str] = []
     if secrets_hint:
-        ask_kwargs["prompt"] = (secrets_hint,)
+        prompt_parts.append(secrets_hint)
+    prompt_parts.extend(extra_prompt)
+    if prompt_parts:
+        ask_kwargs["prompt"] = tuple(prompt_parts)
+    if extra_observers:
+        ask_kwargs["observers"] = extra_observers
 
     reply = await agent.ask(user_prompt, **ask_kwargs)
     history = reply.context.stream.history

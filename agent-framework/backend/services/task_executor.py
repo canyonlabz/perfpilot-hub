@@ -17,13 +17,13 @@ implemented here:
 
   3. **Agent dispatch.** `_dispatch_agent()` picks the right runtime per
      `task.agent_name`:
-       - `"orchestrator"` (PBI 3.7.8): builds the real AG2 orchestrator
-         from `agents/orchestrator/agent.py::build_orchestrator()`, loads
+       - `"orchestrator"`: builds a native orchestrator from
+         `agents/orchestrator/agent.py::build_orchestrator()`, loads
          any prior `conversation_messages` rows tied to the task's
-         A2A thread (Decision 14), runs `generate_reply` with the full
-         history, then persists the new user + assistant turns. The
-         orchestrator's four registered tools (PBIs 3.7.3-3.7.6) are
-         available; specialist delegation is in-process via
+         A2A thread, runs one ``agent.ask`` (current user text as the
+         message, earlier rows as prompt strings), then persists the
+         new user + assistant turns. The orchestrator's four delegation
+         tools are available; specialist delegation is in-process via
          `task_store` + `task_executor` (no HTTP hop to the A2A surface).
        - `"execution-agent"` (PBI 3.8.6): runs `_run_execution_agent()`,
          which reads the task payload's `tool` field as an EXPLICIT
@@ -61,7 +61,6 @@ from services.subscriptions import (
     subscribe,
     unsubscribe,
 )
-from services.helpers.tool_loop import run_multi_turn_tool_loop
 from services.specialist_agents import (
     ANALYSIS_AGENT_NAME,
     EXECUTION_AGENT_NAME,
@@ -72,6 +71,7 @@ from services.specialist_agents import (
     _run_analysis_agent,
     _run_execution_agent,
     _run_monitoring_agent,
+    _run_native_agent,
     _run_reporting_agent,
     _run_script_agent,
     _run_stub_agent,
@@ -405,13 +405,13 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
          agent always receives a coherent prompt).
       3. Load prior conversation history for the thread (when known).
       4. Persist the new user message.
-      5. Run the multi-turn tool-execution loop via
-         ``_invoke_orchestrator_with_tool_loop()``. The orchestrator's
-         four tools (``delegate_to_specialist``, ``check_task_status``,
-         ``list_available_specialists``, ``request_human_approval``) are
-         executed within the loop. After each tool round, any specialist
-         tasks created by ``delegate_to_specialist`` are started
-         immediately so ``check_task_status`` sees them as running.
+      5. Run one native ``agent.ask`` via ``_invoke_orchestrator()``.
+         The orchestrator's four tools (``delegate_to_specialist``,
+         ``check_task_status``, ``list_available_specialists``,
+         ``request_human_approval``) run inside that turn. A per-turn
+         observer starts specialist tasks created by
+         ``delegate_to_specialist`` before the next model round so
+         ``check_task_status`` sees them as running.
       6. Persist the assistant reply.
       7. Return a structured result dict the A2A response wraps verbatim,
          including the tool rounds audit trail and exit reason.
@@ -552,7 +552,7 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
 
     try:
         assistant_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
-            await _invoke_orchestrator_with_tool_loop(
+            await _invoke_orchestrator(
                 messages_for_llm, task.task_id, common,
                 payload=task.payload,
             )
@@ -593,75 +593,142 @@ async def _run_orchestrator(task: task_store.AgentTask, common: dict) -> dict:
     return result
 
 
-def _invoke_orchestrator_sync(messages: list[dict]) -> tuple[str, Any]:
-    """Build a fresh orchestrator and produce a reply for the given messages.
+def _format_prior_message(message: dict) -> str:
+    """Render one stored thread row as a prompt line."""
+    role = message.get("role")
+    role_text = role if isinstance(role, str) and role else "user"
+    body = message.get("content")
+    body_text = body if isinstance(body, str) else str(body or "")
+    return f"{role_text}: {body_text}"
 
-    Synchronous so it can run inside `asyncio.to_thread`. The orchestrator
-    is rebuilt per call deliberately: AG2 `ConversableAgent` carries
-    per-conversation state in module-level dicts (`_oai_messages`,
-    `_function_map`, etc.) that we do not want bleeding across A2A tasks.
-    Build cost is dominated by the `LLMProvider.to_ag2_config()` call,
-    which is sub-millisecond. The agent factory itself caches nothing.
+
+def _orchestrator_turn_inputs(messages: list[dict]) -> tuple[str, tuple[str, ...]]:
+    """Split thread rows into the current user text and earlier prompt lines.
+
+    The last user-role row is the ``agent.ask`` message. Earlier rows, and
+    any rows after that user turn, become prompt strings. Full native event
+    history is a later change; this keeps the existing conversation rows.
     """
-    import sys
-    from pathlib import Path
+    last_user_index: int | None = None
+    for index, message in enumerate(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            last_user_index = index
+    if last_user_index is None:
+        prior = [
+            _format_prior_message(message)
+            for message in messages
+            if isinstance(message, dict)
+        ]
+        return "", tuple(prior)
 
-    # Make `agents.orchestrator.agent` importable when the executor runs
-    # from a context that did not put the framework dir on sys.path
-    # (e.g. unit tests invoking utils/task_executor.py directly).
-    from utils.paths import get_framework_dir
-    framework_dir = get_framework_dir()
-    if str(framework_dir) not in sys.path:
-        sys.path.insert(0, str(framework_dir))
-
-    from agents.orchestrator.agent import build_orchestrator
-
-    agent = build_orchestrator()
-    reply = agent.generate_reply(messages=messages)
-
-    if isinstance(reply, str):
-        return reply, reply
-    if isinstance(reply, dict):
-        content = reply.get("content")
-        if isinstance(content, str):
-            return content, reply
-        return str(content) if content is not None else "", reply
-    return str(reply) if reply is not None else "", reply
+    current = messages[last_user_index]
+    content = current.get("content") if isinstance(current, dict) else ""
+    user_prompt = content if isinstance(content, str) else str(content or "")
+    prior_messages = [
+        message
+        for index, message in enumerate(messages)
+        if index != last_user_index and isinstance(message, dict)
+    ]
+    return user_prompt, tuple(
+        _format_prior_message(message) for message in prior_messages
+    )
 
 
-async def _invoke_orchestrator_with_tool_loop(
+def _start_delegated_tasks(
+    pending: list[UUID],
+    *,
+    task_id: Any,
+    delegated_task_ids: list[UUID],
+    proxy_sse_enabled: bool,
+) -> None:
+    """Start specialist tasks queued by ``delegate_to_specialist``.
+
+    When ``proxy_specialist_sse`` is enabled, each child is registered so
+    specialist events are forwarded to the orchestrator's SSE subscribers.
+    """
+    for pending_task_id in pending:
+        log.info(
+            "Orchestrator task %s: starting delegated specialist task %s",
+            task_id, pending_task_id,
+        )
+        delegated_task_ids.append(pending_task_id)
+        if proxy_sse_enabled:
+            register_parent_task(pending_task_id, task_id)
+        asyncio.create_task(execute_task(pending_task_id))
+
+
+def _build_delegation_drain_observer(
+    *,
+    task_id: Any,
+    delegated_task_ids: list[UUID],
+    proxy_sse_enabled: bool,
+    drain_pending_executions: Any,
+) -> Any:
+    """Build a per-turn observer that starts delegated tasks mid-turn.
+
+    ``delegate_to_specialist`` appends child UUIDs to a module list. This
+    observer drains that list when the matching tool result is published,
+    before the next model round, so ``check_task_status`` sees the child
+    as running.
+    """
+    from typing import cast
+
+    from ag2.events import BaseEvent, Condition, ToolResultEvent
+    from ag2.observers import BaseObserver
+    from ag2.watch import EventWatch
+
+    # Class-level field comparison builds a Condition. The field is
+    # declared as its value type, so the checker sees a bool.
+    delegation_result = cast(
+        Condition,
+        ToolResultEvent.name == "delegate_to_specialist",
+    )
+
+    class _DelegationDrainObserver(BaseObserver):
+        def __init__(self) -> None:
+            super().__init__(
+                "orchestrator-delegation-drain",
+                watch=EventWatch(delegation_result),
+            )
+
+        async def process(self, events: list[BaseEvent], ctx: Any) -> None:
+            _start_delegated_tasks(
+                drain_pending_executions(),
+                task_id=task_id,
+                delegated_task_ids=delegated_task_ids,
+                proxy_sse_enabled=proxy_sse_enabled,
+            )
+            return None
+
+    return _DelegationDrainObserver()
+
+
+async def _invoke_orchestrator(
     messages: list[dict],
     task_id: Any,
     common: dict,
     *,
     payload: Optional[dict] = None,
 ) -> tuple[str, Any, list[dict], str, dict | None]:
-    """Build a fresh orchestrator and run a multi-turn tool-execution loop.
+    """Build a fresh orchestrator and run one native ``agent.ask``.
 
-    Replaces the single-shot ``_invoke_orchestrator_sync()`` for the A2A
-    path. The orchestrator's four tools (``list_available_specialists``,
-    ``delegate_to_specialist``, ``check_task_status``,
-    ``request_human_approval``) are executed within the loop so the LLM
-    can delegate to specialists and poll their status to completion.
-
-    An ``after_tool_round`` callback drains
-    ``agents.orchestrator.agent._pending_executions`` after each round
-    and immediately starts the specialist tasks via
-    ``asyncio.create_task(execute_task(...))``. This ensures specialist
-    tasks are *running* when the orchestrator's next LLM round calls
-    ``check_task_status``.
-
-    The orchestrator agent is rebuilt per call (same rationale as
-    ``_invoke_orchestrator_sync``).
+    One harness instance is built for this task and closed when the turn
+    ends. The current user text is the ask message. Earlier thread rows
+    are prompt strings. A delegation observer starts specialist tasks as
+    soon as ``delegate_to_specialist`` publishes its result, and a final
+    drain starts anything still queued after the turn.
 
     Args:
-        messages: AG2-shaped message list for the LLM.
+        messages: Role/content rows for this turn, including history.
         task_id: The orchestrator's own task UUID (for SSE broadcasts).
         common: SSE broadcast fields (task_id, session_id, etc.).
 
     Returns:
         Tuple of (reply_text, raw_reply, tool_rounds_audit, exit_reason,
         final_context_metrics).
+
+    Raises:
+        RuntimeError: when the orchestrator config disables the agent.
     """
     import sys
 
@@ -673,96 +740,63 @@ async def _invoke_orchestrator_with_tool_loop(
     from agents.orchestrator.agent import build_orchestrator, drain_pending_executions
 
     agent = await asyncio.to_thread(build_orchestrator)
+    if isinstance(agent, dict):
+        raise RuntimeError(
+            f"{ORCHESTRATOR_AGENT_NAME} is disabled in its config."
+        )
 
-    # ---- Load loop config from the orchestrator's config.yaml ----------
+    from core.agent_harness import load_harness_settings
+    from services.helpers.token_context_window import resolve_context_budget_for_agent
     from utils import config_loader
 
     orch_config = config_loader.load_agent_config("orchestrator")
-
-    max_tool_rounds = int(orch_config.get("max_tool_rounds", 10))
-    max_consecutive_repeats = int(orch_config.get("max_consecutive_repeats", 3))
-    raw_polling_tools = orch_config.get("polling_tools", [])
-    polling_tools = frozenset(
-        raw_polling_tools if isinstance(raw_polling_tools, list) else []
-    )
-    polling_max_consecutive_repeats = int(
-        orch_config.get("polling_max_consecutive_repeats", 15)
-    )
-    # Context budget now lives in the `context_management:` block (global
-    # default in config/agents.yaml, optional per-agent override), resolved
-    # (with global<-agent merge) by the shared helper.
-    from services.helpers.token_context_window import resolve_context_budget_for_agent
-
-    _budget = resolve_context_budget_for_agent("orchestrator")
-    context_limit = _budget.context_limit
-    compaction_threshold = _budget.compaction_threshold
-    compaction_preserve_recent = _budget.compaction_preserve_recent
-
-    # ---- Track delegated specialist task IDs for streaming wait ----------
-    delegated_task_ids: list[UUID] = []
-
+    # The harness enforces loop limits and the prompt budget. These reads
+    # only label SSE progress and fill the envelope's context fields.
+    harness_settings = load_harness_settings("orchestrator")
+    context_budget = resolve_context_budget_for_agent("orchestrator")
     proxy_sse_enabled = bool(orch_config.get("proxy_specialist_sse", True))
-
-    # ---- after_tool_round callback: start delegated specialist tasks ----
-    async def _drain_and_start_pending() -> None:
-        """Drain _pending_executions and fire specialist tasks immediately.
-
-        ``delegate_to_specialist()`` appends task UUIDs to the
-        module-level ``_pending_executions`` list. We drain them here
-        (between tool rounds) so they are *running* when the next LLM
-        round calls ``check_task_status``.
-
-        When ``proxy_specialist_sse`` is enabled, registers each child
-        task in ``_parent_task_cache`` so ``_broadcast()`` forwards
-        specialist events to the orchestrator's SSE subscribers
-        (ENH-003B).
-        """
-        pending = drain_pending_executions()
-        for pending_task_id in pending:
-            log.info(
-                "Orchestrator task %s: starting delegated specialist task %s",
-                task_id, pending_task_id,
-            )
-            delegated_task_ids.append(pending_task_id)
-            if proxy_sse_enabled:
-                register_parent_task(pending_task_id, task_id)
-            asyncio.create_task(execute_task(pending_task_id))
-
-    reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
-        await run_multi_turn_tool_loop(
-            agent=agent,
-            messages=messages,
-            max_tool_rounds=max_tool_rounds,
-            max_consecutive_repeats=max_consecutive_repeats,
-            polling_tools=polling_tools,
-            polling_max_consecutive_repeats=polling_max_consecutive_repeats,
-            context_limit=context_limit,
-            compaction_threshold=compaction_threshold,
-            compaction_preserve_recent=compaction_preserve_recent,
-            task_id=task_id,
-            common=common,
-            agent_name=ORCHESTRATOR_AGENT_NAME,
-            after_tool_round=_drain_and_start_pending,
-        )
+    delegated_task_ids: list[UUID] = []
+    observer = _build_delegation_drain_observer(
+        task_id=task_id,
+        delegated_task_ids=delegated_task_ids,
+        proxy_sse_enabled=proxy_sse_enabled,
+        drain_pending_executions=drain_pending_executions,
     )
+    user_prompt, prior_prompt = _orchestrator_turn_inputs(messages)
 
-    # Drain any remaining pending executions from the final round
-    final_pending = drain_pending_executions()
-    for pending_task_id in final_pending:
-        log.info(
-            "Orchestrator task %s: starting remaining delegated task %s",
-            task_id, pending_task_id,
+    try:
+        reply_text, raw_reply, tool_rounds, exit_reason, ctx_metrics = (
+            await _run_native_agent(
+                agent,
+                user_prompt=user_prompt,
+                secrets_hint=None,
+                extra_prompt=prior_prompt,
+                extra_observers=(observer,),
+                task_id=task_id,
+                common=common,
+                agent_name=ORCHESTRATOR_AGENT_NAME,
+                max_tool_rounds=harness_settings.max_tool_rounds,
+                context_budget=context_budget,
+            )
         )
-        delegated_task_ids.append(pending_task_id)
-        if proxy_sse_enabled:
-            register_parent_task(pending_task_id, task_id)
-        asyncio.create_task(execute_task(pending_task_id))
+    finally:
+        try:
+            from core.base_agent import aclose_agent
 
-    # ---- Streaming-aware task lifecycle ----------------------
+            await aclose_agent(agent)
+        except Exception:
+            log.warning("Failed to close orchestrator agent", exc_info=True)
+        _start_delegated_tasks(
+            drain_pending_executions(),
+            task_id=task_id,
+            delegated_task_ids=delegated_task_ids,
+            proxy_sse_enabled=proxy_sse_enabled,
+        )
+
     # When the request arrived via SendStreamingMessage and the config
-    # enables waiting, hold the orchestrator task in 'running' state until
-    # all delegated specialist tasks reach a terminal state. This keeps
-    # the A2A client's SSE stream open for the full lifecycle.
+    # enables waiting, hold the orchestrator task in 'running' until
+    # delegated specialist tasks reach a terminal state. This keeps the
+    # A2A client's SSE stream open for the full lifecycle.
     request_mode = (payload or {}).get("metadata", {}).get("request_mode")
     wait_enabled = bool(orch_config.get("streaming_wait_for_specialists", True))
     poll_interval = float(
@@ -809,11 +843,10 @@ async def _invoke_orchestrator_with_tool_loop(
 
 
 async def _load_thread_history_as_ag2_messages(thread_id: str) -> list[dict]:
-    """Load conversation_messages for `thread_id` shaped for AG2's `messages=`.
+    """Load conversation_messages for ``thread_id`` as role/content rows.
 
-    Each row's `content.text` becomes the message content; non-string
-    payloads (tool calls) are stringified to a sensible fallback so AG2
-    never sees None.
+    Each row's ``content.text`` becomes the message content. Non-string
+    payloads are stringified so the prompt never sees None.
     """
     from stores import conversation_store
 
@@ -821,8 +854,8 @@ async def _load_thread_history_as_ag2_messages(thread_id: str) -> list[dict]:
     shaped: list[dict] = []
     for row in rows:
         text = _coerce_message_text(row.content)
-        # AG2 expects `role` in {system, user, assistant, tool}; we already
-        # validated this on insert via conversation_store.VALID_ROLES.
+        # Stored roles are system, user, assistant, or tool.
+        # conversation_store.VALID_ROLES already checked them on insert.
         shaped.append({"role": row.role, "content": text})
     return shaped
 

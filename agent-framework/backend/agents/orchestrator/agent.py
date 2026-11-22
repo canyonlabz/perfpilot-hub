@@ -1,54 +1,31 @@
-"""PerfPilot Orchestrator — AG2 ConversableAgent factory + delegation tools.
+"""PerfPilot Orchestrator factory and delegation tools.
 
-This module ships the four-file pattern's `agent.py` slot per V2 doc §7.1:
-construct and return the agent on demand, with all configuration loaded
-from the sibling `INSTRUCTIONS.md`, `agent_card.json`, and *one of*
-`config.yaml` / `config.example.yaml`. Callers (the AG-UI bridge in PBI
-3.7.7, the A2A task executor in PBI 3.7.8) import `build_orchestrator()`
-and wrap the result.
+Constructs a native ``ag2.Agent`` on demand from the sibling
+``INSTRUCTIONS.md``, ``agent_card.json``, and one of ``config.yaml`` /
+``config.example.yaml``. Callers (the AG-UI bridge and the A2A task
+executor) import ``build_orchestrator()``.
 
-**What this module ships (PBIs 3.7.1, 3.7.2, 3.7.3, 3.7.4, 3.7.5, 3.7.6):**
+The factory wires four delegation tools:
 
-- A working `ConversableAgent` with the real long-form system prompt
-  loaded from `INSTRUCTIONS.md` (PBI 3.7.2).
-- All four delegation tools registered on the agent via AG2's
-  `register_for_llm` + `register_for_execution` decorator pair:
-    1. `list_available_specialists()`         (PBI 3.7.3)
-    2. `delegate_to_specialist(...)`          (PBI 3.7.4)
-    3. `check_task_status(...)`               (PBI 3.7.5)
-    4. `request_human_approval(...)`          (PBI 3.7.6)
-- Per-agent `llm_provider` resolution via the framework's
-  `utils.base_agent.resolve_agent_config_path()` candidate walker.
+1. ``list_available_specialists()``
+2. ``delegate_to_specialist(...)``
+3. ``check_task_status(...)``
+4. ``request_human_approval(...)``
 
-**Tool design notes:**
+Tools are module-level functions so tests can import and exercise them
+without spinning up a model. ``delegate_to_specialist`` and
+``check_task_status`` create and read specialist tasks in-process and
+return structured results rather than raising. ``request_human_approval``
+inserts a prompt and waits for a decision or timeout.
 
-- Tools are defined as module-level functions so the smoke test can
-  import and exercise them directly (`from agents.orchestrator.agent
-  import list_available_specialists`) without spinning up an LLM.
-- `delegate_to_specialist` and `check_task_status` create and read
-  specialist tasks in-process via `task_store` + `task_executor`.
-  They return structured dicts (success or error) rather than raising,
-  so the LLM can narrate failures to the user instead of the agent
-  loop crashing.
-- `request_human_approval` is `async` (AG2 0.13.3 supports async tools
-  natively): it inserts a row via `hitl_store.create_prompt`, polls
-  `hitl_store.get_approval` until terminal state or timeout.
+Heavy imports live inside the functions that need them so this module
+stays cheap to import in tests that do not exercise the agent.
 
-**What this module still does NOT do (deferred):**
-
-- MCP client wiring (deferred to F3.8 per Decision 12).
-- DB-loaded message history (PBI 3.7.7 + Decision 14).
-- A2A `task_executor` dispatch (PBI 3.7.8).
-
-Heavy imports (`autogen`, `httpx`, `yaml`) live inside the functions that
-need them so this module is cheap to import in tests / IDE indexing that
-do not exercise the agent.
-
-NOTE: This module deliberately does NOT use `from __future__ import
-annotations`. AG2 0.13.3 introspects tool function signatures via
-pydantic's `TypeAdapter`, which cannot evaluate stringified `Annotated`
-annotations. Keeping annotations as live types makes tool registration
-work without per-call `.rebuild()` shenanigans.
+NOTE: This module deliberately does NOT use ``from __future__ import
+annotations``. Native tool registration introspects live annotations
+through ``fast_depends``. A bare string inside ``Annotated`` is treated
+as a forward reference, so parameter descriptions use
+``Annotated[T, Field(description=...)]``.
 """
 
 import asyncio
@@ -60,6 +37,8 @@ from pathlib import Path
 from typing import Annotated, Any, Optional
 from uuid import UUID
 
+from pydantic import Field
+
 log = logging.getLogger(__name__)
 
 from utils.paths import get_framework_dir
@@ -68,9 +47,6 @@ AGENT_DIR = Path(__file__).resolve().parent
 AGENT_NAME = "orchestrator"
 FRAMEWORK_DIR = get_framework_dir()  # agent-framework/backend/
 AGENTS_ROOT = FRAMEWORK_DIR / "agents"  # agent-framework/backend/agents/
-
-INSTRUCTIONS_PATH = AGENT_DIR / "INSTRUCTIONS.md"
-AGENT_CARD_PATH = AGENT_DIR / "agent_card.json"
 
 # AG-UI base URL for Web UI delegation. Resolution order:
 #   1. PERFPILOT_AGUI_BASE_URL  (full URL override)
@@ -172,7 +148,12 @@ _pending_executions: list[UUID] = []
 
 
 def drain_pending_executions() -> list[UUID]:
-    """Pop all queued task IDs. Called by agui_server after dispatch."""
+    """Pop all queued specialist task IDs.
+
+    Called when a delegation result is published, again after the turn,
+    and by the AG-UI stream after each chunk. The caller starts those
+    tasks so a later status check sees them running.
+    """
     result = list(_pending_executions)
     _pending_executions.clear()
     return result
@@ -416,69 +397,46 @@ async def _standalone_get_task(task_id: UUID) -> Optional[dict]:
 # =============================================================================
 
 def build_orchestrator() -> Any:
-    """Construct the PerfPilot Orchestrator AG2 ConversableAgent with all 4 tools.
+    """Construct the PerfPilot Orchestrator as a native ``ag2.Agent``.
 
-    Resolution order for the LLM provider:
-      1. Per-agent `llm_provider` block in the first existing of
-         `config.yaml` (operator-side override, gitignored) or
-         `config.example.yaml` (committed default).
-      2. Global fallback `config/agents.yaml -> default_llm_provider`
-         via `utils.llm_provider.load_default_provider_config()`.
+    Instructions and the LLM provider come from the four-file definition.
+    The shared harness supplies the approval gate, round cap, repeat
+    throttle, and context budget. The four delegation tools are attached
+    after construction.
 
     Returns:
-        An `autogen.ConversableAgent` instance with the long-form
-        `INSTRUCTIONS.md` as `system_message`, the four delegation tools
-        registered for both LLM-visibility and local execution, and
-        `human_input_mode="NEVER"` (this is a server agent).
+        A native ``ag2.Agent``, or the disabled-marker dict when the
+        agent's config sets ``enabled: false``.
 
     Raises:
-        FileNotFoundError: when one of the four sibling files is missing.
-        Anything `LLMProvider.to_ag2_config()` raises when credentials
-        are not configured.
+        FileNotFoundError: when one of the required sibling files is missing.
+        Anything the LLM provider raises when credentials are not configured.
     """
-    from autogen import ConversableAgent  # type: ignore
+    from core.agent_harness import build_agent_harness
+    from core.base_agent import create_agent, load_agent_definition
 
-    from services.llm_provider import LLMProvider
-
-    system_message = _load_system_message()
-    provider_config = _resolve_provider_config()
-    provider = LLMProvider(provider_config)
-
-    log.info(
-        "Building %s (provider=%s, model=%s)",
-        AGENT_NAME, provider.provider, provider.get_model_name(),
-    )
-
-    agent = ConversableAgent(
-        name=AGENT_NAME,
-        system_message=system_message,
-        llm_config=provider.to_ag2_config(),
-        # Server-side: never block on stdin.
-        human_input_mode="NEVER",
-        # Allow the LLM to chain tool-call -> tool-result -> follow-up reply.
-        # Typical: list_available_specialists -> delegate_to_specialist ->
-        # check_task_status -> final reply. 5 is the headroom; deeper
-        # chains likely indicate a tool error loop and should terminate.
-        max_consecutive_auto_reply=5,
-    )
+    definition = load_agent_definition(AGENT_DIR)
+    harness = build_agent_harness(definition.name)
+    agent = create_agent(definition, **harness.agent_kwargs())
+    if isinstance(agent, dict):
+        log.info("%s is disabled in its config", AGENT_NAME)
+        return agent
 
     _register_tools(agent)
+    log.info("%s built — 4 delegation tools", AGENT_NAME)
     return agent
 
 
 def _register_tools(agent: Any) -> None:
-    """Wire the four delegation tools onto the ConversableAgent.
+    """Register the four delegation tools on the native agent.
 
-    Both decorators are required for each tool:
-      - `register_for_llm(...)` advertises the tool in the LLM's tool catalog
-        so the model can decide to call it.
-      - `register_for_execution()` tells AG2 that THIS agent is the one that
-        actually runs the function (vs. a separate executor agent).
-
-    AG2 0.13.3 uses `api_style='tool'` by default, which is what we want
-    (the OpenAI-style `tools=` parameter, not legacy `functions=`).
+    Each function is wrapped with ``ag2.tools.tool`` so the model sees
+    its name, description, and parameter schema, then attached with
+    ``agent.add_tool``.
     """
-    agent.register_for_llm(
+    from ag2.tools import tool
+
+    agent.add_tool(tool(
         name="list_available_specialists",
         description=(
             "List PerfPilot specialist agents currently enabled in agents.yaml. "
@@ -486,10 +444,9 @@ def _register_tools(agent: Any) -> None:
             "objects. Excludes the orchestrator itself. Use before delegate_to_specialist "
             "to confirm the target is enabled, or to answer 'what can you do?' user questions."
         ),
-    )(list_available_specialists)
-    agent.register_for_execution()(list_available_specialists)
+    )(list_available_specialists))
 
-    agent.register_for_llm(
+    agent.add_tool(tool(
         name="delegate_to_specialist",
         description=(
             "Route a task payload to a specific specialist agent in-process. Returns "
@@ -498,10 +455,9 @@ def _register_tools(agent: Any) -> None:
             "downstream agents correlate. Use after list_available_specialists confirms "
             "the target is enabled."
         ),
-    )(delegate_to_specialist)
-    agent.register_for_execution()(delegate_to_specialist)
+    )(delegate_to_specialist))
 
-    agent.register_for_llm(
+    agent.add_tool(tool(
         name="check_task_status",
         description=(
             "Poll the current status of a previously-delegated task. Returns "
@@ -510,10 +466,9 @@ def _register_tools(agent: Any) -> None:
             "the orchestrator needs a specialist's terminal result before advancing the "
             "pipeline to the next stage. Do not spin-loop; the underlying client throttles."
         ),
-    )(check_task_status)
-    agent.register_for_execution()(check_task_status)
+    )(check_task_status))
 
-    agent.register_for_llm(
+    agent.add_tool(tool(
         name="request_human_approval",
         description=(
             "Open a Human-in-the-Loop approval prompt and BLOCK until the human "
@@ -526,8 +481,7 @@ def _register_tools(agent: Any) -> None:
             "as task_id. You must delegate first to obtain a task_id before "
             "calling this tool."
         ),
-    )(request_human_approval)
-    agent.register_for_execution()(request_human_approval)
+    )(request_human_approval))
 
 
 # =============================================================================
@@ -696,20 +650,26 @@ def _stamp_resolved_project_context(body: dict) -> None:
 
 
 async def delegate_to_specialist(
-    agent_name: Annotated[str, "Specialist agent name (e.g. 'execution-agent')."],
-    payload: Annotated[dict, "JSON-serializable task payload (the body POSTed to A2A)."],
+    agent_name: Annotated[
+        str,
+        Field(description="Specialist agent name (e.g. 'execution-agent')."),
+    ],
+    payload: Annotated[
+        dict,
+        Field(description="JSON-serializable task payload (the body POSTed to A2A)."),
+    ],
     test_run_id: Annotated[
         Optional[str],
-        "Optional test_run_id for correlation across the PTLC pipeline.",
+        Field(description="Optional test_run_id for correlation across the PTLC pipeline."),
     ] = None,
     source_type: Annotated[
         Optional[str],
-        (
+        Field(description=(
             "For script-agent delegations only: one of 'playwright', 'har', "
             "or 'openapi'. Signals the script-source classifier so the "
             "framework can mint a test_run_id for the new script-creation "
             "run. Silently ignored for any other agent_name."
-        ),
+        )),
     ] = None,
 ) -> str:
     """Create and dispatch work on a specialist agent.
@@ -1008,8 +968,14 @@ def _adopt_test_run_id_from_start_result(result: Any) -> Optional[str]:
 
 
 async def check_task_status(
-    agent_name: Annotated[str, "Specialist agent that owns the task."],
-    task_id: Annotated[str, "UUID of a previously-delegated task."],
+    agent_name: Annotated[
+        str,
+        Field(description="Specialist agent that owns the task."),
+    ],
+    task_id: Annotated[
+        str,
+        Field(description="UUID of a previously-delegated task."),
+    ],
 ) -> str:
     """GET the current status of a previously-delegated task.
 
@@ -1096,19 +1062,19 @@ async def _check_task_status_agui(task_id: str) -> str:
 async def request_human_approval(
     prompt_payload: Annotated[
         dict,
-        "Structured prompt for the UI: {title, summary, artifact, ...}.",
+        Field(description="Structured prompt for the UI: {title, summary, artifact, ...}."),
     ],
     task_id: Annotated[
         str,
-        "UUID of the agent_tasks row this approval is associated with.",
+        Field(description="UUID of the agent_tasks row this approval is associated with."),
     ],
     poll_interval_seconds: Annotated[
         Optional[float],
-        "Seconds between hitl_approvals polls. Defaults to framework hitl.yaml.",
+        Field(description="Seconds between hitl_approvals polls. Defaults to framework hitl.yaml."),
     ] = None,
     timeout_seconds: Annotated[
         Optional[float],
-        "Maximum seconds to wait for a decision. Defaults to framework hitl.yaml.",
+        Field(description="Maximum seconds to wait for a decision. Defaults to framework hitl.yaml."),
     ] = None,
 ) -> str:
     """Open a HITL approval prompt and block until the human decides.
@@ -1238,62 +1204,6 @@ async def request_human_approval(
 # =============================================================================
 # Internal helpers
 # =============================================================================
-
-def _load_system_message() -> str:
-    """Read `INSTRUCTIONS.md` as the AG2 `system_message`."""
-    if not INSTRUCTIONS_PATH.exists():
-        raise FileNotFoundError(
-            f"Orchestrator INSTRUCTIONS.md not found at {INSTRUCTIONS_PATH}."
-        )
-    return INSTRUCTIONS_PATH.read_text(encoding="utf-8-sig")
-
-
-def _resolve_provider_config() -> dict:
-    """Return the merged LLM-provider config for the orchestrator.
-
-    Per-agent overrides win over the global default in
-    `config/agents.yaml -> default_llm_provider:`. Env credentials are
-    merged in by `utils.llm_provider.merge_env_credentials` regardless
-    of which YAML block sourced the behavior keys.
-    """
-    from services.llm_provider import (
-        load_default_provider_config,
-        merge_env_credentials,
-    )
-
-    agent_block = _load_per_agent_llm_block()
-    if agent_block:
-        log.debug(
-            "Orchestrator using per-agent llm_provider override from %s",
-            _resolved_config_filename(),
-        )
-        return merge_env_credentials(agent_block)
-
-    log.debug("Orchestrator using default_llm_provider from agents.yaml")
-    return load_default_provider_config()
-
-
-def _load_per_agent_llm_block() -> Optional[dict]:
-    """Parse the resolved per-agent config and return its ``llm_provider:`` block.
-
-    Delegates YAML loading to ``config_loader.get_agent_config_section()``
-    Returns None when neither candidate config file exists,
-    the YAML is empty, or the ``llm_provider:`` key is absent / commented out.
-    """
-    from utils.config_loader import get_agent_config_section
-
-    block = get_agent_config_section("orchestrator", "llm_provider")
-    if not block or not isinstance(block, dict):
-        return None
-    return dict(block)
-
-
-def _resolved_config_filename() -> str:
-    from core.base_agent import resolve_agent_config_path
-
-    path = resolve_agent_config_path(AGENT_DIR)
-    return path.name if path else "<none>"
-
 
 def _agui_base_url() -> str:
     """Return the local AG-UI surface base URL for Web UI delegation.
