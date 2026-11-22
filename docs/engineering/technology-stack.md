@@ -1,6 +1,6 @@
 # 🧰 PerfPilot Technology Stack
 
-Last updated: November 2, 2026
+Last updated: November 22, 2026
 
 ## 🎯 Purpose
 
@@ -8,11 +8,15 @@ This document records PerfPilot's technology baseline and the official reference
 to consult when changing an integration. See [Development workflow](development-workflow.md)
 for coding, testing, logging, and documentation conventions.
 
-Installed versions below come from maintainer-supplied local command output on
-October 25, 2026, except `fastmcp`, which was observed as `3.4.11` in Aspire
-startup logs on November 1, 2026. They describe the inspected local
-environment, not independently verified image contents. Dependency constraints
-describe allowed versions; they are not exact installation pins.
+Declared requirements below were read from
+`agent-framework/backend/requirements.txt` and `pyproject.toml` on
+November 22, 2026. Installed versions in the backend table were read the same
+day with `importlib.metadata` on the global Python 3.12.4 install. They
+describe that local environment, not independently verified image contents.
+`fastmcp` was `3.4.2` in that local check. An Aspire startup log on
+November 1, 2026 reported `3.4.11`; that container observation was not
+repeated. Dependency constraints describe allowed versions; they are not
+exact installation pins.
 
 ## 🧩 Components and locations
 
@@ -45,9 +49,13 @@ Do not infer the Node.js runtime from `@types/node`.
 
 | Package | Declared requirement | Installed version |
 | --- | --- | --- |
-| `ag2[ag-ui]` | `>=0.13.3,<0.14` | `ag2==0.13.3` |
-| `ag-ui-protocol` | No separate direct requirement supplied | `0.1.19` |
-| `fastmcp` | `>=3.4.2,<4` | `3.4.11` |
+| `ag2[ag-ui,openai,anthropic,ollama]` | `==1.3.2` | `1.3.2` |
+| `ag-ui-protocol` | `==1.0.0` | `1.0.0` |
+| `openai` | `>=3.45.0,<4` | `3.57.0` |
+| `anthropic` | `>=2.12.0,<3` | `2.12.0` |
+| `ollama` | `>=0.5.2,<1` | `0.6.1` |
+| `httpx2` | `>=2.16.2,<3` | `2.16.2` |
+| `fastmcp` | `>=3.4.2,<4` | `3.4.2` locally; Aspire log `3.4.11` on November 1 was not rechecked |
 | `fastapi` | `>=0.115.0` | `0.136.3` |
 | `starlette` | `>=1.2.1` | `1.2.1` |
 | `structlog` | `>=24.0.0` | `26.1.0` |
@@ -61,7 +69,6 @@ Other supplied backend requirements:
 | `asyncpg` | `>=0.30.0` |
 | `pydantic` | `>=2.10.0` |
 | `httpx` | `>=0.28.1` |
-| `openai` | `>=2.30.0` |
 | `pyyaml` | `>=6.0.2` |
 | `python-dotenv` | `>=1.2.1` |
 | `tiktoken` | `>=0.12.0` |
@@ -71,7 +78,11 @@ Other supplied backend requirements:
 `cryptography` and `PyJWT` are also declared on the GitHub, BlazeMeter,
 Datadog, and Confluence MCP requirement files (`>=43.0.0` and `>=2.9.0`).
 Those four MCPs also declare `asyncpg>=0.30.0` for Web-UI secret reads.
-Installed versions were not re-checked in this update.
+Those MCP installs were not re-checked on November 22, 2026.
+
+`docker/agent-backend/requirements.txt` still declares `ag2[ag-ui]>=0.13.3,<0.14`
+and `openai>=2.30.0`. It was not updated with the backend pin. A container
+built from that file does not match the versions in the table above.
 
 No A2A SDK package is installed according to the maintainer. Follow the existing
 server implementation; do not assume SDK-specific classes or install an SDK as
@@ -148,10 +159,12 @@ an authoritative source for v1 method names.
 
 ### AG2 and AG-UI
 
-Match AG2 APIs to installed `0.13.3` behavior and preserve the existing
-orchestrator/specialist design. The Python `ag-ui-protocol` package and JavaScript
-`@ag-ui/client` are distinct dependencies: verify their event contract rather
-than assuming their version numbers should match.
+Match AG2 APIs to installed `1.3.2` behavior. Agents are native `ag2.Agent`
+instances built with `create_agent` and the shared harness. The Python
+`ag-ui-protocol` package is pinned at `1.0.0`. The browser client is still
+`@ag-ui/client` `^0.0.57` with CopilotKit `^1.60.1`. Those are distinct
+dependencies: verify their event contract rather than assuming their version
+numbers should match.
 
 ### Next.js, React, and CopilotKit
 
@@ -162,8 +175,10 @@ code. Preserve the AG-UI event contract and keep credentials out of browser code
 ### FastMCP
 
 Target the approved version-3 implementation and `>=3.4.2,<4` requirement.
-Observed local Aspire runtime as of November 1, 2026 is FastMCP `3.4.11`
+The Aspire startup log on November 1, 2026 reported FastMCP `3.4.11`
 ([release notes](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.11)).
+The global Python install checked on November 22, 2026 reported `3.4.2`.
+That container log was not repeated.
 Use version-3 documentation or the matching 3.4.x release source, not examples
 from another major release. Preserve existing gateway, namespace, tool, and
 transport contracts. Future readiness does not authorize a v4 migration or
@@ -190,7 +205,7 @@ non-trivial implementation plans.
 | Technology | Reference | Version context |
 | --- | --- | --- |
 | A2A | https://a2a-protocol.org/latest/specification/ | Verify against approved v1.0.0 |
-| AG2 | https://docs.ag2.ai/ | Match installed 0.13.3 |
+| AG2 | https://docs.ag2.ai/ | Match installed 1.3.2 |
 | AG2 AG-UI integration | https://docs.ag2.ai/docs/user-guide/ag-ui/ | Verify examples against installed AG2 |
 | AG-UI | https://docs.ag-ui.com/introduction | Check relevant Python/JavaScript release contracts |
 | CopilotKit | https://docs.copilotkit.ai/ | Match installed 1.60.1 packages |

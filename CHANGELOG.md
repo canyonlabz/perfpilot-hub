@@ -12,6 +12,7 @@ This document summarizes the enhancements added to PerfPilot-Hub during November
 - [📊 3. Structured task results injection](#3-structured-task-results-injection)
 - [🔌 4. Execution-agent gateway MCP tool registration](#4-execution-agent-gateway-mcp-tool-registration)
 - [📝 5. Specialist agent instructions accuracy](#5-specialist-agent-instructions-accuracy)
+- [🤖 8. AG2 1.3.2 and AG-UI 1.0](#8-ag2-132-and-ag-ui-10)
 - [✨ 6. Files created](#6-files-created)
 - [🔧 7. Files modified](#7-files-modified)
 - [📚 Previous Changelogs](#previous-changelogs)
@@ -217,6 +218,33 @@ overshadowing the intent-based delegation added in §5.1.
 
 ---
 
+## 🤖 8. AG2 1.3.2 and AG-UI 1.0
+
+**Branch:** `upgrade/ag2-1.3.2-agui-1.0.0`
+
+Agent turns now run on AG2 1.3.2 and AG-UI 1.0. Specialists and the
+orchestrator are native `ag2.Agent` instances. Each factory loads its own
+`INSTRUCTIONS.md` through `load_agent_definition()` and builds the agent
+with `create_agent` and the shared harness. The harness supplies the round
+cap, repeat throttle, context budget, and per-tool approval gate.
+
+`/copilotkit` imports `AGUIStream` from `ag2.ag_ui` and builds a fresh
+orchestrator for each request, then closes it when the response finishes.
+Earlier thread rows are still loaded from `conversation_messages`. Durable
+native event history is not part of this change.
+
+The Classic multi-turn tool loop (`services/helpers/tool_loop.py`) and the
+`autogen` package import are removed. Delegation tools use
+`Annotated[T, Field(description=...)]` so the installed tool decorator can
+read their parameter descriptions.
+
+`agent-framework/backend/requirements.txt` and `pyproject.toml` pin
+`ag2[ag-ui,openai,anthropic,ollama]==1.3.2` and `ag-ui-protocol==1.0.0`.
+`docker/agent-backend/requirements.txt` still declares the previous
+`ag2[ag-ui]>=0.13.3,<0.14` range.
+
+---
+
 ## ✨ 6. Files created
 
 | File | Purpose |
@@ -264,4 +292,4 @@ overshadowing the intent-based delegation added in §5.1.
 
 ---
 
-*Last Updated: November 12, 2026*
+*Last Updated: November 22, 2026*
