@@ -90,7 +90,7 @@ a2a:
     - hitl
 
 # =============================================================================
-# 6. HITL gates — MOVED
+# 6. HITL gates
 # =============================================================================
 # Controls which actions require Human-in-the-Loop approval before proceeding.
 # When a gate is disabled (false), the orchestrator delegates immediately
