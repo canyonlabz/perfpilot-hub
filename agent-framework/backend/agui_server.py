@@ -133,9 +133,8 @@ SERVER_TITLE = "PerfPilot Agents - AG-UI Bridge"
 # whitelisted fields (no large payloads).
 MAX_TASK_RESULTS_INJECTION = 20
 
-# Load .env at module scope so environment variables (LLM credentials, ports,
-# TLS paths) are available when create_app() → build_orchestrator() runs at
-# import time — before main() has a chance to call load_dotenv().
+# Load .env at module scope so LLM credentials, ports, and TLS paths are
+# available before the first /copilotkit request builds an orchestrator.
 try:
     from dotenv import load_dotenv as _load_dotenv
     _load_dotenv(FRAMEWORK_DIR / ".env", override=False)
@@ -238,61 +237,70 @@ def create_app() -> FastAPI:
 
 
 def _mount_copilotkit(app: FastAPI) -> None:
-    """Mount the AG-UI / CopilotKit endpoint at /copilotkit (PBI 3.6.3, 3.7.7).
+    """Mount the AG-UI / CopilotKit endpoint at /copilotkit.
 
-    Uses AG2's built-in `AGUIStream(agent).dispatch()` so CopilotKit React
-    can talk to us directly via the AG-UI protocol. No CopilotKit Python
-    SDK is involved -- AG2 ships AG-UI support natively.
+    Each request builds its own orchestrator and closes it when the
+    response finishes. The endpoint loads ``conversation_messages`` for
+    the thread and replaces ``RunAgentInput.messages`` with that
+    transcript. New user and assistant turns are persisted around the
+    dispatch. A thread that belongs to another user is refused.
 
-    PBI 3.7.7 upgrades:
-      - Stub orchestrator replaced with the real one
-        (`agents.orchestrator.agent.build_orchestrator`).
-      - DB-as-source-of-truth message history (Decision 14): the endpoint
-        loads `conversation_messages WHERE thread_id = ?` and overrides
-        `RunAgentInput.messages` so AG2 sees the full transcript rather
-        than relying on whatever the browser sent. New user + assistant
-        turns are persisted around the dispatch so a refreshed browser
-        (or a new device) resumes the conversation seamlessly.
-      - Owner-checked thread auto-creation: if the thread does not yet
-        exist, the endpoint creates it for the current user; if it
-        exists but belongs to another user, the endpoint refuses (403).
-
-    Mount is best-effort: if the agent or AG2 import fails, the rest of
-    the server still boots and the other endpoints keep working. A
-    subsequent boot attempt with a valid LLM config will mount cleanly.
+    Mount is best-effort: if ``AGUIStream`` cannot be imported, the rest
+    of the server still boots and the other endpoints keep working.
     """
     try:
-        from autogen.ag_ui import AGUIStream  # noqa: WPS433
-        from agents.orchestrator.agent import build_orchestrator  # noqa: WPS433
+        from ag2.ag_ui import AGUIStream  # noqa: WPS433
     except Exception:
         log.exception(
-            "Could not import AG2 / AGUIStream / orchestrator; /copilotkit will be "
-            "unavailable. Install with: pip install \"ag2[ag-ui]==0.13.3\""
+            "Could not import AGUIStream; /copilotkit will be unavailable."
         )
         return
 
     try:
-        agent = build_orchestrator()
-    except Exception:
-        log.exception(
-            "Failed to build the stub orchestrator (likely missing/invalid LLM "
-            "credentials in backend/.env); /copilotkit will be unavailable."
-        )
-        return
-
-    try:
-        stream = AGUIStream(agent)
-        endpoint_cls = _build_history_aware_copilotkit_endpoint(stream)
+        endpoint_cls = _build_history_aware_copilotkit_endpoint(AGUIStream)
         app.mount("/copilotkit", endpoint_cls)
         log.info(
-            "Mounted AG-UI endpoint at /copilotkit (real orchestrator, "
-            "DB-loaded history per Decision 14)"
+            "Mounted AG-UI endpoint at /copilotkit "
+            "(orchestrator built per request, DB-loaded history)"
         )
     except Exception:
         log.exception("Could not mount /copilotkit; AG-UI endpoint will be unavailable")
 
 
-def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
+def _copilotkit_delegation_observer(drain: Any) -> Any:
+    """Watch ``delegate_to_specialist`` results and start those tasks.
+
+    The watch matches the A2A delegation observer. The drain callable is
+    the Web UI starter, which keeps a reference to each background task.
+    """
+    from typing import cast
+
+    from ag2.events import BaseEvent, Condition, ToolResultEvent
+    from ag2.observers import BaseObserver
+    from ag2.watch import EventWatch
+
+    # Class-level field comparison builds a Condition. The field is
+    # declared as its value type, so the checker sees a bool.
+    delegation_result = cast(
+        Condition,
+        ToolResultEvent.name == "delegate_to_specialist",
+    )
+
+    class _DelegationDrainObserver(BaseObserver):
+        def __init__(self) -> None:
+            super().__init__(
+                "orchestrator-delegation-drain",
+                watch=EventWatch(delegation_result),
+            )
+
+        async def process(self, events: list[BaseEvent], ctx: Any) -> None:
+            drain()
+            return None
+
+    return _DelegationDrainObserver()
+
+
+def _build_history_aware_copilotkit_endpoint(stream_cls: Any) -> Any:
     """Return an ASGI HTTPEndpoint that wraps AGUIStream.dispatch() with DB history.
 
     The endpoint reproduces the shape of AG2's
@@ -563,6 +571,36 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
 
             modified = incoming.model_copy(update={"messages": combined_messages})
 
+            from agents.orchestrator.agent import build_orchestrator
+            from core.base_agent import aclose_agent
+
+            try:
+                agent = await asyncio.to_thread(build_orchestrator)
+            except Exception as exc:
+                clear_caller_identity()
+                log.exception("/copilotkit: failed to build orchestrator")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Orchestrator is unavailable.",
+                ) from exc
+            if isinstance(agent, dict):
+                clear_caller_identity()
+                raise HTTPException(
+                    status_code=503,
+                    detail="Orchestrator is disabled.",
+                )
+
+            try:
+                stream = stream_cls(agent)
+            except Exception as exc:
+                clear_caller_identity()
+                await aclose_agent(agent)
+                log.exception("/copilotkit: failed to open AG-UI stream")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Orchestrator is unavailable.",
+                ) from exc
+
             async def _streaming_with_persistence():
                 accumulated_text: list[str] = []
 
@@ -570,14 +608,12 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                     drain_pending_executions,
                     _background_tasks,
                 )
-                from services import task_executor
 
-                def _drain_inline():
+                def _drain_inline() -> None:
                     """Start background execution for tasks queued by tools
-                    during this dispatch. Called after each SSE chunk so
-                    delegated tasks begin immediately — not deferred until
-                    the full dispatch completes (which would deadlock if the
-                    orchestrator polls check_task_status in the same turn).
+                    during this dispatch. Called when a delegation result is
+                    published and again after each SSE chunk, so delegated
+                    tasks begin before the orchestrator polls their status.
                     """
                     for pending_task_id in drain_pending_executions():
                         log.debug("Inline-drain: starting task %s", pending_task_id)
@@ -585,57 +621,68 @@ def _build_history_aware_copilotkit_endpoint(stream: Any) -> Any:
                         _background_tasks.add(bg)
                         bg.add_done_callback(_background_tasks.discard)
 
-                # AG2's dispatch yields SSE-encoded strings already (one
-                # `event: ...\ndata: ...\n\n` block per chunk). We pass each
-                # through to the client AND parse the data line to capture
-                # assistant text on the side.
-                async for chunk in stream.dispatch(
-                    modified,
-                    accept=request.headers.get("accept"),
-                ):
-                    if isinstance(chunk, bytes):
-                        chunk = chunk.decode("utf-8", errors="ignore")
-                    yield chunk
-                    # DEBUG: log event types from AG2 stream
-                    for _dbg_line in chunk.splitlines():
-                        _dbg_stripped = _dbg_line.strip()
-                        if _dbg_stripped.startswith("data:"):
-                            try:
-                                _dbg_data = json.loads(_dbg_stripped[5:].strip())
-                                if isinstance(_dbg_data, dict) and "type" in _dbg_data:
-                                    log.debug("AG2 SSE event type: %s", _dbg_data["type"])
-                            except Exception:
-                                pass
-                    _capture_assistant_text_from_sse_chunk(chunk, accumulated_text)
+                observer = _copilotkit_delegation_observer(_drain_inline)
 
-                    # Inline drain: start delegated tasks as soon as the
-                    # TOOL_CALL_END event is yielded — prevents the deadlock
-                    # where the orchestrator polls check_task_status for a
-                    # task that can't start until dispatch completes.
-                    _drain_inline()
+                # dispatch reads incoming.messages as the transcript: system
+                # rows become prompt strings, earlier turns become history,
+                # and the trailing user messages are the current ask.
+                # Replacing messages from conversation_messages is still what
+                # this turn sees. Observers passed here are added to the
+                # harness observers.
+                try:
+                    async for chunk in stream.dispatch(
+                        modified,
+                        accept=request.headers.get("accept"),
+                        observers=(observer,),
+                    ):
+                        if isinstance(chunk, bytes):
+                            chunk = chunk.decode("utf-8", errors="ignore")
+                        yield chunk
+                        # DEBUG: log event types from the AG-UI stream
+                        for _dbg_line in chunk.splitlines():
+                            _dbg_stripped = _dbg_line.strip()
+                            if _dbg_stripped.startswith("data:"):
+                                try:
+                                    _dbg_data = json.loads(_dbg_stripped[5:].strip())
+                                    if isinstance(_dbg_data, dict) and "type" in _dbg_data:
+                                        log.debug("AG-UI SSE event type: %s", _dbg_data["type"])
+                                except Exception:
+                                    pass
+                        _capture_assistant_text_from_sse_chunk(chunk, accumulated_text)
 
-                if existing_thread is not None and accumulated_text:
-                    full_text = "".join(accumulated_text)
+                        # Chunk drain: start any delegation the observer has
+                        # not already taken, including a result whose event
+                        # was yielded before the watch ran.
+                        _drain_inline()
+
+                    if existing_thread is not None and accumulated_text:
+                        full_text = "".join(accumulated_text)
+                        try:
+                            await conversation_store.append_message(
+                                thread_id,
+                                agent_name="orchestrator",
+                                role="assistant",
+                                content={"text": full_text, "source": "copilotkit"},
+                            )
+                            await thread_store.touch_thread(thread_id)
+                        except Exception:
+                            log.exception(
+                                "/copilotkit: failed to persist assistant reply for thread %s",
+                                thread_id,
+                            )
+                finally:
                     try:
-                        await conversation_store.append_message(
-                            thread_id,
-                            agent_name="orchestrator",
-                            role="assistant",
-                            content={"text": full_text, "source": "copilotkit"},
-                        )
-                        await thread_store.touch_thread(thread_id)
+                        await stream.aclose()
                     except Exception:
-                        log.exception(
-                            "/copilotkit: failed to persist assistant reply for thread %s",
-                            thread_id,
-                        )
-
-                clear_caller_identity()
-
-                # Safety-net drain: catch any tasks queued in the final
-                # tool call whose TOOL_CALL_END event wasn't yielded before
-                # the stream closed.
-                _drain_inline()
+                        log.warning("/copilotkit: failed to close AG-UI stream", exc_info=True)
+                    try:
+                        await aclose_agent(agent)
+                    except Exception:
+                        log.warning("/copilotkit: failed to close orchestrator", exc_info=True)
+                    clear_caller_identity()
+                    # Safety-net drain: catch any tasks queued by the final
+                    # tool call after the stream has closed.
+                    _drain_inline()
 
             return StreamingResponse(
                 _streaming_with_persistence(),
