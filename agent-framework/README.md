@@ -240,13 +240,16 @@ and multiple concurrent AI frameworks calling the same backend safely:
   back tomorrow, pick up the conversation exactly where you left it —
   on the same device or a different one. State lives in
   `perfagent_state.conversation_messages`, not in browser memory.
-- **A2A conversation resumption.** Upstream callers must send a
-  validated `message` (`messageId`, `ROLE_USER`, non-empty `parts`,
-  `contextId`) on every turn. Flat `text` / `prompt` bodies are
-  rejected. Optional `X-External-Thread-Id` must match `contextId`
-  when present. The server returns `X-Thread-Id` (internal thread
-  row) and echoes `contextId` on the Task and SSE events. It never
-  mints a conversation id for the client.
+- **A2A conversation resumption.** Upstream callers send a validated
+  `message` (`messageId`, `ROLE_USER`, non-empty `parts`) on every turn;
+  flat `text` / `prompt` bodies are rejected. `message.contextId` is
+  optional and **is** the internal `thread_id`: present → a stateful,
+  user-scoped, persisted conversation; absent → a stateless one-shot
+  (answered, but no thread and no stored history). The conversation id
+  travels only in `contextId` — the pre-v1.x `X-Thread-Id` /
+  `X-External-Thread-Id` headers are removed, and the server echoes
+  `contextId` on the Task and SSE events. It never mints a conversation
+  id for the client, and a `contextId` owned by another user is rejected.
 - **Forward-compatible with cloud auth.** The identity resolver is a
   four-step chain (upstream-auth placeholder → `X-PerfPilot-Token` header →
   `perfpilot_token` cookie → freshly minted token). Adding an OIDC/JWT

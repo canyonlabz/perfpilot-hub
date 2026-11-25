@@ -1231,9 +1231,11 @@ def _agent_outbound_headers() -> dict:
       2. ContextVar (set by A2A task executor in same thread)
       3. Environment variable (headless / CLI fallback)
 
-    Headers are source-aware. Web UI uses ``X-Thread-Id`` /
-    ``X-Session-Id``; A2A uses ``X-External-Thread-Id`` /
-    ``X-External-Session-Id`` for OpenTelemetry traceability.
+    The thread identifier is unified: ``X-Thread-Id`` always carries the
+    single internal ``thread_id`` regardless of source (Web UI, A2A, CLI).
+    For A2A that same value is the client ``contextId``. Session headers
+    remain source-aware (Web UI uses ``X-Session-Id``; A2A uses
+    ``X-External-Session-Id``) for OpenTelemetry traceability.
 
     ``X-PerfPilot-Token`` is always sent regardless of source.
     """
@@ -1257,17 +1259,19 @@ def _agent_outbound_headers() -> dict:
     if user_id:
         headers["X-PerfPilot-Token"] = user_id
 
+    # Unified thread identity: a single X-Thread-Id for every source. This
+    # also fixes A2A-sourced delegated child tasks, which previously lost
+    # their thread_id because the downstream only reads X-Thread-Id.
+    if thread_id:
+        headers["X-Thread-Id"] = thread_id
+
     # Default to web_ui when source is None (AG2 thread isolation)
     effective_source = source if source else ("web_ui" if session_id else None)
 
     if effective_source == "web_ui":
-        if thread_id:
-            headers["X-Thread-Id"] = thread_id
         if session_id:
             headers["X-Session-Id"] = session_id
     else:
-        if thread_id:
-            headers["X-External-Thread-Id"] = thread_id
         external_session_id = (
             agent_external_session_id_var.get()
             or os.environ.get("PERFPILOT_AGENT_EXTERNAL_SESSION_ID")

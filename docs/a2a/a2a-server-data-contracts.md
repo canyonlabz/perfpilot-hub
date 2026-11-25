@@ -81,10 +81,13 @@ preference; the data contract is identical.
 
 - `message.role` is always `ROLE_USER` on inbound (the server replies
   with `ROLE_AGENT` on streamed `TaskStatusUpdateEvent.status.message`).
-- `message.contextId` is **required** on every `SendMessage` /
-  `SendStreamingMessage` (see §2). The server never mints one.
-  First-turn clients that have no conversation id yet should mint one
-  themselves (any opaque string) and reuse it for subsequent turns.
+- `message.contextId` is **optional** (see §2). The server never mints
+  one. When present it identifies a stateful, persistent conversation
+  and *is* the internal `thread_id`. When absent the request is a
+  stateless one-shot: no thread row, no stored history — but the request
+  is still answered (the server does not reject a missing `contextId`).
+  First-turn clients that want continuity should mint their own opaque
+  `contextId` and reuse it for subsequent turns.
 - `message.messageId` and a non-empty `message.parts[]` are required.
 - `message.parts[]` is the primary data channel; see §3.
 - Top-level envelope `metadata` is the official A2A optional field on
@@ -94,28 +97,37 @@ preference; the data contract is identical.
 The server **rejects** flat legacy payloads (top-level `message` string,
 `text`, or `prompt`) with `InvalidParams` / `INVALID_ARGUMENT`. Clients
 must send the A2A v1 `message` object with `messageId`, `role`
-(`ROLE_USER`), non-empty `parts`, and `contextId`.
+(`ROLE_USER`), and non-empty `parts`. `contextId` is optional.
 
 ---
 
 ## 🧵 2. Context, thread, session, and task hierarchy
 
-The server tracks four correlation IDs. Clients **must** supply
-`message.contextId` on every `SendMessage` / `SendStreamingMessage`.
-The server never mints a conversation id. Everything else is minted
-and persisted server-side.
+The server tracks three correlation IDs. The client **optionally**
+supplies `message.contextId`; the server never mints a conversation id.
+When a `contextId` is present it **is** the internal `thread_id` — there
+is no separate external label. `session_id` and `taskId` are always
+minted and persisted server-side.
 
 | ID | Who sets it | Scope | Purpose |
 |----|-------------|-------|---------|
-| `contextId` | **Client** (on `message.contextId`) | Conversation / thread | Links related turns across a multi-turn exchange; required. Missing = `InvalidParams` |
-| `X-External-Thread-Id` | Client (optional HTTP header) | Conversation / thread | Must equal `contextId` when present; not a substitute for `contextId` |
-| `X-Thread-Id` | Server (response header) | Internal thread row | Long-lived `agent_threads` id; always returned on task-creating responses |
+| `contextId` | **Client** (on `message.contextId`), optional | Conversation / thread | Equals the internal `thread_id`. Present → stateful, user-scoped, persisted conversation. Absent → stateless one-shot (no thread, no history). The server never mints it and never rejects a missing one. |
 | `session_id` | Server | Caller session | Internal session row; derived from the authenticated caller |
 | `taskId` | Server | One request | Issued on the SendMessage response; the client echoes it in the `Task.id` field and on resume (§6) |
 
-Task objects and SSE events always echo the client `contextId` (never
-an empty string). The internal thread is looked up or created from
-that conversation id.
+A stateful `contextId` is **user-scoped**: the thread is owned by the
+resolved caller, and a `contextId` already owned by another user is
+rejected (`InvalidParams`) — threads never cross users.
+
+Task objects and SSE events echo the client `contextId` when present.
+Non-streaming `Task` responses for a stateless request simply omit
+`contextId`. Streaming events (which require a `contextId` on the wire)
+fall back to the ephemeral `taskId` for a stateless stream — this does
+not create a thread or persist any history.
+
+The pre-v1.x `X-Thread-Id` / `X-External-Thread-Id` HTTP headers are
+**removed**. The conversation id travels only in `message.contextId`
+(request) and the echoed `contextId` on Task / event bodies (response).
 
 ### 2.1 `contextId` matching rule (A2A §3.4.3)
 
@@ -810,7 +822,7 @@ Standard A2A error codes used by PerfPilot:
 | `-32001`| `TaskNotFoundError`             | Resume targeted a `taskId` that does not exist     |
 | `-32003`| `PushNotificationNotSupportedError` | Any A2A push-config method                     |
 | `-32004`| `UnsupportedOperationError`     | Resume targeted a non-paused task, or `contextId` mismatch; `GET /tasks` list |
-| `-32602`| `InvalidParams` (JSON-RPC std.) | Missing `contextId` / `messageId` / `parts`, flat legacy body, or header mismatch |
+| `-32602`| `InvalidParams` (JSON-RPC std.) | Missing `messageId` / `parts`, flat legacy body, or a `contextId` owned by another user. (A missing `contextId` is **not** an error — it is a stateless request.) |
 
 ---
 

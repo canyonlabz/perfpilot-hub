@@ -56,16 +56,21 @@ def test_normalize_rejects_missing_message_id() -> None:
     assert exc.value.metadata["field"] == "message.messageId"
 
 
-def test_normalize_rejects_missing_context_id() -> None:
-    with pytest.raises(IngressValidationError) as exc:
-        _normalize_a2a_v1_body({
-            "message": {
-                "messageId": "msg-001",
-                "role": "ROLE_USER",
-                "parts": [{"text": "hello"}],
-            },
-        })
-    assert exc.value.metadata["field"] == "message.contextId"
+def test_normalize_allows_missing_context_id_as_stateless() -> None:
+    """``contextId`` is optional: a missing one is a stateless request.
+
+    The server neither mints nor rejects a conversation id — the
+    normalized body simply omits ``_a2a_v1_context_id``.
+    """
+    normalized = _normalize_a2a_v1_body({
+        "message": {
+            "messageId": "msg-001",
+            "role": "ROLE_USER",
+            "parts": [{"text": "hello"}],
+        },
+    })
+    assert "_a2a_v1_context_id" not in normalized
+    assert normalized["message"] == "hello"
 
 
 def test_normalize_rejects_empty_parts() -> None:

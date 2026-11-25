@@ -142,7 +142,6 @@ def create_app() -> FastAPI:
         "read_json_body": _read_json_body,
         "resolve_a2a_thread": context._resolve_a2a_thread,
         "extract_subscriber_endpoints": _extract_subscriber_endpoints,
-        "thread_response_headers": context._thread_response_headers,
     }
     register_a2a_v1_routes(app, _a2a_v1_ctx)
     register_a2a_v1_jsonrpc_route(app, _a2a_v1_ctx)

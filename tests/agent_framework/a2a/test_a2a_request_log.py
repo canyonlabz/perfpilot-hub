@@ -29,7 +29,7 @@ def request_log_caplog(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFix
     return caplog
 
 
-def test_missing_context_id_reject_is_warning(
+def test_ingress_reject_is_warning(
     request_log_caplog: pytest.LogCaptureFixture,
 ) -> None:
     envelope = jsonrpc_error(
@@ -39,8 +39,8 @@ def test_missing_context_id_reject_is_warning(
         a2a_error_data(
             "INVALID_PARAMS",
             metadata={
-                "detail": "message.contextId is required",
-                "field": "message.contextId",
+                "detail": "message.parts must be a non-empty array",
+                "field": "message.parts",
             },
         ),
     )
@@ -55,8 +55,8 @@ def test_missing_context_id_reject_is_warning(
     assert attrs["rpc_method"] == "SendMessage"
     assert attrs["rpc_id"] == "yaak-1"
     assert attrs["error_reason"] == "INVALID_PARAMS"
-    assert attrs["error_field"] == "message.contextId"
-    assert "contextId" in attrs["error_detail"]
+    assert attrs["error_field"] == "message.parts"
+    assert "parts" in attrs["error_detail"]
     assert rec.trace_id == ""
     assert rec.span_id == ""
 
@@ -123,8 +123,8 @@ def test_direct_reject_and_accept_helpers(
         method="SendMessage",
         rpc_id="x",
         reason="INVALID_PARAMS",
-        field="message.contextId",
-        detail="message.contextId is required",
+        field="message.parts",
+        detail="message.parts must be a non-empty array",
     )
     log_a2a_accept(method="GetAgentCard")
     messages = [r.getMessage() for r in request_log_caplog.records if r.name == "a2a.server.request"]

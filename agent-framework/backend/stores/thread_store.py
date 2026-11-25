@@ -4,19 +4,17 @@ Threads are the persistent conversation containers. A thread survives across
 sessions, devices, and days. See ``backend/sql/008_create_agent_threads.sql``
 for the full DDL rationale.
 
-Ownership is one of two flavours, enforced by the table's CHECK constraint:
+Every thread is owned by a `user_id` (the caller principal) and scoped to that
+user — threads never cross users. The A2A `contextId` *is* the internal
+`thread_id`; both A2A and Web UI / IDE / CLI threads carry a `user_id`.
 
-  * Web UI / IDE / CLI threads -> `user_id` is set (caller principal)
-  * A2A-originated threads     -> `external_thread_id` is set (upstream label)
-
-Authorization filters live in this module's helpers (`list_for_user`,
-`get_by_external_thread_id`) and on the route handlers that call them.
+Authorization filters live in this module's helpers (`list_for_user`) and on
+the route handlers that call them.
 
 Status: minimal-but-real for PBI 3.7.0. Helpers added here:
 
-    create                      - insert or upsert by external_thread_id
+    create                      - insert a thread (caller may supply thread_id)
     get                         - fetch by internal `thread_id`
-    get_by_external_thread_id   - fetch by upstream label
     list_for_user               - sidebar list for a Web UI / IDE user
     touch                       - bump `last_message_at` after appending a message
     set_title                   - rename a thread
@@ -56,7 +54,6 @@ class AgentThread:
     created_at: datetime
     updated_at: datetime
     user_id: Optional[str] = None
-    external_thread_id: Optional[str] = None
     title: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     last_message_at: Optional[datetime] = None
@@ -65,7 +62,7 @@ class AgentThread:
 # All SELECT statements use this column list verbatim so `_row_to_thread`
 # never goes out of sync with the queries.
 _SELECT_COLS = (
-    "thread_id, user_id, external_thread_id, source, title, status, metadata, "
+    "thread_id, user_id, source, title, status, metadata, "
     "created_at, updated_at, last_message_at"
 )
 
@@ -78,7 +75,6 @@ def _row_to_thread(row: Any) -> AgentThread:
     return AgentThread(
         thread_id=row["thread_id"],
         user_id=row["user_id"],
-        external_thread_id=row["external_thread_id"],
         source=row["source"],
         title=row["title"],
         status=row["status"],
@@ -94,7 +90,6 @@ async def create_thread(
     *,
     thread_id: Optional[str] = None,
     user_id: Optional[str] = None,
-    external_thread_id: Optional[str] = None,
     title: Optional[str] = None,
     metadata: Optional[dict] = None,
 ) -> AgentThread:
@@ -104,12 +99,10 @@ async def create_thread(
         source: Origin tag, ideally one of `VALID_SOURCES`. Free-text is
             allowed but a warning is logged when an unknown value is used.
         thread_id: Optional caller-supplied stable ID. For Web UI threads
-            this is the CopilotKit `threadId`. If omitted the server-side
-            DEFAULT mints a fresh UUID hex.
-        user_id: Web UI / IDE / CLI owner. Required when
-            `external_thread_id` is None (CHECK constraint).
-        external_thread_id: A2A persistent thread label. Required when
-            `user_id` is None.
+            this is the CopilotKit `threadId`; for A2A it is the client
+            `contextId`. If omitted the server-side DEFAULT mints a fresh
+            UUID hex (Web UI / IDE / CLI only — A2A always supplies one).
+        user_id: Owner principal. Required — every thread is user-scoped.
         title: Optional initial display title for the sidebar.
         metadata: Free-form JSONB payload.
 
@@ -117,14 +110,12 @@ async def create_thread(
         The new `AgentThread`. Status defaults to `'active'`.
 
     Raises:
-        ValueError: If neither `user_id` nor `external_thread_id` is set
-            (caught here rather than letting the DB CHECK constraint fire,
-            so callers get a clearer error message).
+        ValueError: If `user_id` is not set (caught here rather than letting
+            the DB CHECK constraint fire, so callers get a clearer error).
     """
-    if user_id is None and external_thread_id is None:
+    if user_id is None:
         raise ValueError(
-            "create_thread requires either user_id (Web UI / IDE / CLI) or "
-            "external_thread_id (A2A); both were None."
+            "create_thread requires user_id; every thread is user-scoped."
         )
     if source not in VALID_SOURCES:
         log.warning(
@@ -142,12 +133,11 @@ async def create_thread(
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO agent_threads
-                    (user_id, external_thread_id, source, title, metadata)
-                VALUES ($1, $2, $3, $4, $5::jsonb)
+                    (user_id, source, title, metadata)
+                VALUES ($1, $2, $3, $4::jsonb)
                 RETURNING {_SELECT_COLS}
                 """,
                 user_id,
-                external_thread_id,
                 source,
                 title,
                 json.dumps(metadata or {}),
@@ -156,13 +146,12 @@ async def create_thread(
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO agent_threads
-                    (thread_id, user_id, external_thread_id, source, title, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                    (thread_id, user_id, source, title, metadata)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
                 RETURNING {_SELECT_COLS}
                 """,
                 thread_id,
                 user_id,
-                external_thread_id,
                 source,
                 title,
                 json.dumps(metadata or {}),
@@ -174,31 +163,13 @@ async def get_thread(thread_id: str) -> Optional[AgentThread]:
     """Fetch a single thread by internal `thread_id`. Returns None when not found.
 
     No authorization check is applied here. Route handlers MUST filter on
-    `user_id` (Web UI / IDE / CLI) or `external_thread_id` (A2A) before
-    returning the row to the caller.
+    `user_id` before returning the row to the caller.
     """
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             f"SELECT {_SELECT_COLS} FROM agent_threads WHERE thread_id = $1",
             thread_id,
-        )
-    return _row_to_thread(row) if row is not None else None
-
-
-async def get_by_external_thread_id(external_thread_id: str) -> Optional[AgentThread]:
-    """Fetch a thread by the A2A `external_thread_id` label.
-
-    This is the lookup the A2A executor performs when an upstream caller
-    presents `X-External-Thread-Id`. Returns None when no thread carries
-    that label yet (executor then creates one and returns its
-    `external_thread_id` in the response).
-    """
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"SELECT {_SELECT_COLS} FROM agent_threads WHERE external_thread_id = $1",
-            external_thread_id,
         )
     return _row_to_thread(row) if row is not None else None
 

@@ -1,7 +1,6 @@
 export interface Thread {
   thread_id: string;
   user_id: string;
-  external_thread_id: string | null;
   source: string;
   title: string | null;
   status: "active" | "archived" | "deleted";

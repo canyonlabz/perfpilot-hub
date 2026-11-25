@@ -92,11 +92,9 @@ def _restore_web_ui_caller(
     if isinstance(raw_thread_id, str) and raw_thread_id.strip():
         thread_id = raw_thread_id.strip()
     else:
-        for key in ("thread_id", "external_thread_id"):
-            raw = payload.get(key)
-            if isinstance(raw, str) and raw.strip():
-                thread_id = raw.strip()
-                break
+        raw = payload.get("thread_id")
+        if isinstance(raw, str) and raw.strip():
+            thread_id = raw.strip()
     set_caller_identity(
         user_id=user_id.strip(),
         thread_id=thread_id,

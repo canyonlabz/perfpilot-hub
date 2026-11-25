@@ -66,11 +66,9 @@ def requires_owner(
     """Raise `HTTPException(403)` when `requesting_user` does not own the resource.
 
     Args:
-        resource_owner: The `user_id` recorded on the resource (Web UI /
-            IDE / CLI owner). Pure A2A resources where ownership is by
-            `external_thread_id` should not go through this helper -- they
-            use the `external_thread_id` proof-of-knowledge check instead
-            (see PBI 3.7.8).
+        resource_owner: The `user_id` recorded on the resource. Every
+            thread is user-scoped (the A2A `contextId` is the same internal
+            `thread_id`), so A2A and Web UI resources both authorize here.
         requesting_user: The `user_id` resolved by the middleware for the
             current request. Should never be None in normal operation
             (the resolver always produces something); None here means the

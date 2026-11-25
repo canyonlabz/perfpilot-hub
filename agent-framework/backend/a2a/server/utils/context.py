@@ -1,19 +1,25 @@
-"""A2A conversation resolution: required ``contextId``, optional header match.
+"""A2A conversation resolution: ``contextId`` is the internal ``thread_id``.
 
-The client owns ``message.contextId``. The server never mints one.
-``X-External-Thread-Id`` is optional; when present it must equal
-``contextId``. Internal ``X-Thread-Id`` is always returned.
+The client owns ``message.contextId``. The server never mints, fabricates, or
+defaults one. ``contextId`` is optional:
+
+  * absent  -> stateless one-shot (no thread row, no history, no persistence);
+               the request is still answered.
+  * present -> stateful conversation whose internal ``thread_id`` *equals* the
+               ``contextId``. The thread is user-scoped (owned by the resolved
+               caller ``user_id``) and owner-checked, uniform with the Web UI.
+
+The pre-v1.x ``X-Thread-Id`` / ``X-External-Thread-Id`` headers and the separate
+``external_thread_id`` label are removed.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import Request
 
 from stores import thread_store
-
-_REQUEST_THREAD_ATTR = "a2a_resolved_thread"
 
 
 class ContextResolutionError(Exception):
@@ -40,123 +46,60 @@ def context_id_from_payload(body: dict) -> Optional[str]:
     return None
 
 
-def require_context_id(body: dict) -> str:
-    """Require ``message.contextId`` and persist it on the payload.
+async def _resolve_a2a_thread(
+    request: Request, agent_name: str, body: dict,
+) -> Optional[thread_store.AgentThread]:
+    """Resolve the internal thread from the client ``contextId``.
 
-    Raises:
-        ContextResolutionError: when the client omitted ``contextId``.
+    The internal ``thread_id`` *is* the ``contextId``; the server never mints
+    one. Returns ``None`` when the client omitted ``contextId`` (stateless
+    request — no thread, no history). When present, looks up or creates the
+    user-owned ``agent_threads`` row whose ``thread_id`` equals the
+    ``contextId`` and rejects a ``contextId`` already owned by another user.
     """
     context_id = context_id_from_payload(body)
     if context_id is None:
-        raise ContextResolutionError(
-            "message.contextId is required",
-            {"field": "message.contextId"},
-        )
+        return None
     body["_a2a_v1_context_id"] = context_id
-    return context_id
-
-
-def external_thread_header(request: Request) -> Optional[str]:
-    """Return the optional ``X-External-Thread-Id`` value, or ``None``."""
-    raw = request.headers.get("X-External-Thread-Id") or request.headers.get(
-        "x-external-thread-id"
-    )
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    return raw.strip()
-
-
-def require_matching_external_thread_header(
-    request: Request, context_id: str,
-) -> Optional[str]:
-    """Reject a present ``X-External-Thread-Id`` that differs from ``contextId``."""
-    header = external_thread_header(request)
-    if header is None:
-        return None
-    if header != context_id:
-        raise ContextResolutionError(
-            "X-External-Thread-Id must match message.contextId",
-            {
-                "field": "X-External-Thread-Id",
-                "contextId": context_id,
-                "externalThreadId": header,
-            },
-        )
-    return header
-
-
-async def _resolve_a2a_thread(
-    request: Request, agent_name: str, body: dict,
-) -> thread_store.AgentThread:
-    """Resolve the internal thread from the client ``contextId``.
-
-    Looks up or creates ``agent_threads`` keyed by ``contextId`` as
-    ``external_thread_id``. Does not mint a conversation id.
-    """
-    context_id = require_context_id(body)
-    require_matching_external_thread_header(request, context_id)
+    user_id = getattr(request.state, "user_id", None)
     return await _lookup_or_create_a2a_thread(
-        external_thread_id=context_id,
+        thread_id=context_id,
         agent_name=agent_name,
-        external_session_id=getattr(request.state, "external_session_id", None),
+        user_id=user_id,
     )
 
 
 async def _lookup_or_create_a2a_thread(
     *,
-    external_thread_id: str,
+    thread_id: str,
     agent_name: str,
-    external_session_id: Optional[str],
+    user_id: Optional[str],
 ) -> thread_store.AgentThread:
-    """Fetch the thread for ``external_thread_id``, creating it if absent."""
-    existing = await thread_store.get_by_external_thread_id(external_thread_id)
+    """Fetch the thread whose id equals ``thread_id``, creating it if absent.
+
+    The thread is owned by ``user_id``. A ``contextId`` that already belongs to
+    a different user is rejected — threads never cross users. (Protect ya neck:
+    one user's conversation never crosses over to another's.)
+    """
+    existing = await thread_store.get_thread(thread_id)
     if existing is not None:
+        if (
+            existing.user_id is not None
+            and user_id is not None
+            and existing.user_id != user_id
+        ):
+            raise ContextResolutionError(
+                "message.contextId belongs to another user",
+                {"field": "message.contextId", "contextId": thread_id},
+            )
         return existing
     return await thread_store.create_thread(
         source="a2a_external",
-        external_thread_id=external_thread_id,
+        thread_id=thread_id,
+        user_id=user_id,
         title=f"A2A thread for {agent_name}",
         metadata={
             "created_by": "a2a.server.utils.context._resolve_a2a_thread",
             "agent_name": agent_name,
-            "external_session_id": external_session_id,
-            "contextId": external_thread_id,
         },
     )
-
-
-def _thread_response_headers(thread: thread_store.AgentThread) -> dict:
-    """Headers on every task-creating A2A response.
-
-    ``X-Thread-Id`` is always the internal long-lived thread row id.
-    ``X-External-Thread-Id`` echoes the conversation id (``contextId``)
-    stored on the thread when present.
-    """
-    headers: dict = {"X-Thread-Id": thread.thread_id}
-    if thread.external_thread_id:
-        headers["X-External-Thread-Id"] = thread.external_thread_id
-    return headers
-
-
-def bind_resolved_thread(
-    request: Request, thread: Optional[thread_store.AgentThread],
-) -> None:
-    """Stash a resolved thread on ``request.state`` for the response headers."""
-    if thread is None:
-        return
-    setattr(request.state, _REQUEST_THREAD_ATTR, thread)
-
-
-def resolved_thread_from_request(
-    request: Request,
-) -> Optional[thread_store.AgentThread]:
-    """Return the thread bound by ``bind_resolved_thread``, if any."""
-    return getattr(request.state, _REQUEST_THREAD_ATTR, None)
-
-
-async def load_thread_for_task(task: Any) -> Optional[thread_store.AgentThread]:
-    """Load the stored thread for a task row, or ``None`` when absent."""
-    thread_id = getattr(task, "thread_id", None)
-    if not isinstance(thread_id, str) or not thread_id.strip():
-        return None
-    return await thread_store.get_thread(thread_id.strip())

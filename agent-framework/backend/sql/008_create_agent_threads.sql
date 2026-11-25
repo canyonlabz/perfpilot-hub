@@ -15,25 +15,23 @@
 --     devices, and days. A user opens the Web UI tomorrow with the same
 --     CopilotKit `threadId` and resumes where they left off.
 --
--- Ownership has exactly two flavours, enforced by the CHECK constraint at
--- the bottom of this table:
+-- Every thread is user-scoped: `user_id` is always set and threads never
+-- cross users (enforced by the CHECK constraint at the bottom of this
+-- table). The conversation identifier is unified across surfaces:
 --
---   * Web UI / IDE / CLI threads  -> `user_id` is set
---       (Epic 3: resolved from X-User-Id header or server-issued cookie.
---        Epic 4: EntraID oid claim.)
---   * A2A-originated threads      -> `external_thread_id` is set
---       (The persistent label the upstream agent framework sends in
---        X-External-Thread-Id to reconnect across upstream sessions.)
+--   * Web UI / IDE / CLI -> `thread_id` is the CopilotKit `threadId`.
+--   * A2A                 -> `thread_id` is the client `contextId`.
+--       (Protect ya neck: one user's conversation never crosses over to
+--        another's.)
 --
--- Authorization filters always run server-side on those two columns. The
--- worlds are intentionally disjoint - a Web UI user cannot enumerate A2A
--- threads and vice versa unless an Epic 4 admin role is later added.
+-- There is no separate external label. Authorization filters always run
+-- server-side on `user_id`.
 --
 -- `thread_id` is TEXT (not UUID) to match `conversation_messages.thread_id`
 -- and `agent_checkpoints.thread_id`, which were laid down in F3.3 with TEXT
--- so callers (CopilotKit, AG2 checkpointer) could supply whatever stable
--- identifier they liked. The server-side DEFAULT generates a UUID hex when
--- the caller does not provide one (typical for A2A-minted threads).
+-- so callers (CopilotKit, AG2 checkpointer, A2A `contextId`) could supply
+-- whatever stable identifier they liked. The server-side DEFAULT generates
+-- a UUID hex only when the caller does not supply one (Web UI / CLI).
 --
 -- Run from the `perfagent_state` database context.
 -- Depends on: 002_create_agent_sessions.sql (vocabulary alignment only;
@@ -43,24 +41,16 @@
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS agent_threads (
-    -- Internal stable identifier. For Web UI threads this is the value the
-    -- CopilotKit React provider sends as `threadId` on every `RunAgentInput`.
-    -- The DEFAULT lets A2A-side callers omit the value and have the server
-    -- mint one (returned to the caller as the `X-Thread-Id` response header).
+    -- Internal stable identifier, unified across surfaces. For Web UI
+    -- threads this is the CopilotKit `threadId`; for A2A it is the client
+    -- `contextId`. The DEFAULT mints a UUID hex only when the caller does
+    -- not supply one (Web UI / CLI). A2A always supplies its `contextId`.
     thread_id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
 
-    -- Web UI / IDE / CLI owner principal.
-    -- Epic 3: resolved from `X-User-Id` header or a server-issued cookie.
-    -- Epic 4: EntraID oid claim (set by the EntraID middleware).
-    -- NULL for pure-A2A threads.
-    user_id              TEXT,
-
-    -- Persistent thread label sent by an upstream A2A caller as the
-    -- `X-External-Thread-Id` request header. This is the column that
-    -- connects an upstream's Monday session with their Tuesday session
-    -- for the same continuing investigation. NULL for Web UI / IDE / CLI
-    -- threads. UNIQUE so the A2A executor can do idempotent lookup-or-create.
-    external_thread_id   TEXT,
+    -- Owner principal (required -- every thread is user-scoped).
+    -- Epic 3: resolved from `X-PerfPilot-Token` header or a server-issued
+    -- cookie. Epic 4: EntraID oid claim (set by the EntraID middleware).
+    user_id              TEXT NOT NULL,
 
     -- Origin of the thread. Free-text but expected to mirror the
     -- agent_sessions.source vocabulary:
@@ -91,19 +81,13 @@ CREATE TABLE IF NOT EXISTS agent_threads (
     -- first message lands.
     last_message_at      TIMESTAMPTZ,
 
-    -- Every thread must be owned by either a user (Web UI / IDE / CLI) or
-    -- by an external thread label (A2A). Never both NULL.
-    CONSTRAINT chk_agent_threads_owner
-        CHECK (user_id IS NOT NULL OR external_thread_id IS NOT NULL),
-
-    -- External thread labels are unique across the system. Two different
-    -- upstream callers presenting the same label is treated as the same
-    -- thread; this is by design and is the documented A2A resumption rule.
-    CONSTRAINT uq_agent_threads_external_thread_id
-        UNIQUE (external_thread_id)
+    -- Every thread is user-scoped; threads never cross users. The column
+    -- is already NOT NULL, but the named CHECK documents the invariant.
+    CONSTRAINT chk_agent_threads_user_scoped
+        CHECK (user_id IS NOT NULL)
 );
 
-COMMENT ON TABLE  agent_threads IS 'Persistent conversation container. Survives across sessions, devices, days. See F3.7 plan in docs/plans/Epic-3-Implementation-Status.md.';
+COMMENT ON TABLE  agent_threads IS 'Persistent conversation container. Survives across sessions, devices, days.';
 COMMENT ON COLUMN agent_threads.thread_id          IS 'Internal stable thread ID. Equals CopilotKit threadId for Web UI; server-minted UUID for A2A.';
 COMMENT ON COLUMN agent_threads.user_id            IS 'Web UI / IDE / CLI owner. Epic 3: X-User-Id or cookie. Epic 4: EntraID oid.';
 COMMENT ON COLUMN agent_threads.external_thread_id IS 'A2A persistent thread label from X-External-Thread-Id header. Connects upstream sessions across time.';
@@ -114,12 +98,8 @@ COMMENT ON COLUMN agent_threads.metadata           IS 'Free-form JSONB; agents o
 COMMENT ON COLUMN agent_threads.last_message_at    IS 'Bumped on each new conversation_messages append; orders the sidebar list.';
 
 -- Sidebar list query: WHERE user_id = $1 AND status = $2 ORDER BY last_message_at DESC.
--- Partial index keeps the A2A-only threads out of the user-side B-tree.
 CREATE INDEX IF NOT EXISTS idx_agent_threads_user
-    ON agent_threads (user_id, status, last_message_at DESC NULLS LAST)
-    WHERE user_id IS NOT NULL;
+    ON agent_threads (user_id, status, last_message_at DESC NULLS LAST);
 
--- A2A resumption query: WHERE external_thread_id = $1. The UNIQUE constraint
--- already provides an index, but list the intent explicitly for the next
--- maintainer reading this file.
--- (UNIQUE constraint above creates `agent_threads_external_thread_id_key`.)
+-- A2A resumption and Web UI resume both look up by thread_id, which is the
+-- PRIMARY KEY -- no additional index is needed.

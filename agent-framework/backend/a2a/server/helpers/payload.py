@@ -18,9 +18,10 @@ def extract_thread_id_from_payload(payload: Any) -> Optional[str]:
     """Return the resolved A2A thread_id stamped by `a2a_server` at request time.
 
     The A2A server stamps `payload["_perfpilot_thread"] = {"thread_id":
-    "<internal>", "external_thread_id": "<label>"}` after resolving
-    Decision 17 thread lookup-or-create. Older callers / smoke clients
-    that bypass the resolver get `None` and the orchestrator runs single-
+    "<contextId>"}` after resolving the thread lookup-or-create (the
+    internal `thread_id` equals the client `contextId`). Stateless
+    requests that omit `contextId`, and older callers / smoke clients
+    that bypass the resolver, get `None` and the orchestrator runs single-
     turn (no history load, no history persist).
     """
     if not isinstance(payload, dict):

@@ -818,9 +818,8 @@ class HitlDecision(BaseModel):
 
 # -- PBI 3.7.6b: thread-management request shapes --
 # Threads on this surface are always Web UI threads (`source='web_ui'`,
-# `user_id` set, `external_thread_id` left NULL). A2A threads are
-# created by the A2A executor (PBI 3.7.8) and are never visible here
-# per Decision 16 (two ownership flavours, never both NULL).
+# `user_id` set). A2A threads are user-scoped too, but are created by the
+# A2A executor and filtered to the owning user on their own surface.
 
 class ThreadCreate(BaseModel):
     """Body for POST /api/threads."""
@@ -1515,9 +1514,9 @@ def _register_routes(app: FastAPI) -> None:
 
     # -- Threads (PBI 3.7.6b) -----------------------------------------------------
     # ChatGPT-style persistent conversation containers. Each thread is owned
-    # by one Web UI / IDE / CLI user; an A2A-originated thread (`user_id`
-    # NULL, `external_thread_id` set) is never visible on this surface --
-    # the two ownership worlds are intentionally disjoint per Decision 16.
+    # by one user; this surface lists only the current user's threads.
+    # A2A-originated threads are user-scoped too (the A2A `contextId` is the
+    # same internal `thread_id`) and are filtered to their owner.
     #
     # Endpoints:
     #   POST   /api/threads                 - create owned by current user
@@ -1743,15 +1742,12 @@ def _run_summary_to_dict(run: task_store.RunSummary) -> dict:
 def _thread_to_dict(thread: thread_store.AgentThread) -> dict:
     """Browser-friendly view of an `agent_threads` row (PBI 3.7.6b).
 
-    The `external_thread_id` is always None on this surface (Web UI
-    threads never carry one per Decision 16) -- it is included in the
-    payload for shape symmetry with the A2A executor's response in PBI
-    3.7.8, where the same field will be populated.
+    Every thread is user-scoped. The A2A `contextId` is the same internal
+    `thread_id`, so no separate external label is exposed.
     """
     return {
         "thread_id": thread.thread_id,
         "user_id": thread.user_id,
-        "external_thread_id": thread.external_thread_id,
         "source": thread.source,
         "title": thread.title,
         "status": thread.status,
@@ -1781,14 +1777,13 @@ def _require_thread_owner(
 ) -> None:
     """403 / 404 unless `request.state.user_id` owns `thread`.
 
-    A Web UI thread carries `user_id` and `external_thread_id IS NULL`.
-    The check is straightforward `auth.requires_owner` on `user_id`.
+    Every thread carries a `user_id`; the check is a straightforward
+    `auth.requires_owner` on that owner.
 
-    If a thread arrives without a `user_id` (A2A-originated -- the
-    `user_id` column is NULL and `external_thread_id` is set), this
-    surface refuses to expose it: return 404 rather than 403 so probing
-    other-world thread_ids does not leak existence. This matches the
-    `/api/runs` pattern.
+    If a thread somehow arrives without a `user_id`, this surface refuses
+    to expose it: return 404 rather than 403 so probing other-world
+    thread_ids does not leak existence. This matches the `/api/runs`
+    pattern.
     """
     if thread.user_id is None:
         raise HTTPException(status_code=404, detail=f"{resource_kind.capitalize()} not found")

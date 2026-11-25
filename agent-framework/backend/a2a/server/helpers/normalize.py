@@ -56,7 +56,10 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
     """Validate an A2A v1 ``SendMessageRequest`` and flatten it for executors.
 
     Required inbound ``message`` fields: ``messageId``, ``role``
-    (``ROLE_USER``), ``parts`` (non-empty), ``contextId``.
+    (``ROLE_USER``), ``parts`` (non-empty). ``contextId`` is OPTIONAL per
+    A2A: when present it identifies a stateful conversation (and equals the
+    internal ``thread_id``); when absent the request is a stateless
+    one-shot and the server neither mints nor rejects an id.
 
     Flat PerfPilot bodies (top-level ``message`` string, ``text``, or
     ``prompt``) are rejected.
@@ -69,7 +72,7 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
           "metadata": {...},
           "test_run_id": "...",          # from message/parts metadata
           "_a2a_v1_envelope": {...},
-          "_a2a_v1_context_id": "ctx-001",
+          "_a2a_v1_context_id": "ctx-001",   # omitted when stateless
           "_a2a_v1_resume_task_id": "existing-task-uuid"
         }
     """
@@ -78,7 +81,7 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
     if _is_flat_legacy_body(body):
         raise IngressValidationError(
             "A2A SendMessage requires a message object with messageId, "
-            "role, parts, and contextId",
+            "role, and parts",
             {"field": "message"},
         )
 
@@ -99,11 +102,6 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
             "message.parts must be a non-empty array",
             {"field": "message.parts"},
         )
-    if not _first_nonempty_str(msg_raw.get("contextId"), msg_raw.get("context_id")):
-        raise IngressValidationError(
-            "message.contextId is required",
-            {"field": "message.contextId"},
-        )
 
     try:
         request = SendMessageRequest.model_validate(body)
@@ -120,11 +118,6 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
             {"field": "message.role"},
         )
     context_id = _first_nonempty_str(msg.context_id)
-    if context_id is None:
-        raise IngressValidationError(
-            "message.contextId is required",
-            {"field": "message.contextId"},
-        )
 
     normalized_parts: list[dict] = [
         part.model_dump(by_alias=True, exclude_none=True) for part in msg.parts
@@ -136,8 +129,9 @@ def _normalize_a2a_v1_body(body: dict) -> dict:
 
     result: dict = {
         "_a2a_v1_envelope": body,
-        "_a2a_v1_context_id": context_id,
     }
+    if context_id is not None:
+        result["_a2a_v1_context_id"] = context_id
     if first_text:
         result["message"] = first_text
     if normalized_parts:
