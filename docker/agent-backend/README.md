@@ -110,9 +110,15 @@ endpoints**, and **PostgreSQL** connection.
 
 ### 🧠 LLM provider
 
-Choose one of three providers via `LLM_PROVIDER`. This is the chat model
+Choose one of four providers via `LLM_PROVIDER`. This is the chat model
 used by the agent for reasoning — separate from the embedding model used by
 PerfMemory.
+
+The chat model is selected in the agent config YAML via a single `llm_model`
+key (for `azure_openai` that value is the deployment name). The `*_MODEL` /
+`*_DEPLOYMENT` variables below are **provider-scoped fallbacks**, used only when
+the active provider's YAML block omits `llm_model` — they are not the same thing
+as the YAML `llm_model` key.
 
 #### `openai`
 
@@ -129,6 +135,17 @@ PerfMemory.
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint, e.g. `https://your-resource.openai.azure.com/` |
 | `AZURE_OPENAI_DEPLOYMENT` | Deployment name for the chat model |
 | `AZURE_OPENAI_API_VERSION` | API version, e.g. `2024-02-15-preview` |
+
+#### `anthropic` (Claude)
+
+Needs the `ag2[anthropic]` extra (already in the image).
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key *(sensitive — must not be shared or committed)* |
+| `ANTHROPIC_MODEL` | Chat model name (e.g. `claude-haiku-5-5`) |
+| `ANTHROPIC_BASE_URL` | Optional; blank uses Anthropic's default endpoint |
+| `ANTHROPIC_MAX_TOKENS` | Required by the Messages API (e.g. `4096`) |
 
 #### `ollama` (local, no cloud dependency)
 
