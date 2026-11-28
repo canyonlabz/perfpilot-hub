@@ -38,7 +38,7 @@ def _build_kwargs(config: dict, http_client: Any) -> dict[str, Any]:
         DEFAULT_ANTHROPIC_MODEL,
     )
 
-    model = config.get("anthropic_model") or DEFAULT_ANTHROPIC_MODEL
+    model = config.get("llm_model") or DEFAULT_ANTHROPIC_MODEL
     api_key = config.get("anthropic_api_key", "")
     base_url = (config.get("anthropic_base_url") or "").strip() or None
 

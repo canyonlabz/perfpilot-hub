@@ -18,12 +18,12 @@
 # =============================================================================
 # Per-agent overrides live in each agent's `config.yaml` under `llm_provider:`.
 # Credentials (api keys, endpoints) are NEVER stored here — they come from
-# `.env` and are merged in at runtime by `utils/llm_provider.py`.
+# `.env` and are merged in at runtime by `services/llm_provider.py`.
 #
-# `provider` must be one of: openai | azure_openai | ollama
+# `provider` must be one of: openai | azure_openai | ollama | anthropic
 default_llm_provider:
   provider: openai
-  openai_model: gpt-5-mini
+  llm_model: gpt-5-mini
   # Set lower (≈0.1) for deterministic agents (analysis, reporting),
   # higher (≈0.4) for creative tasks. Per-agent overrides win.
   temperature: 0.2
@@ -39,14 +39,20 @@ default_llm_provider:
   #               useful only for transient lab debugging.
   ssl_verification: ca_bundle
 
-  # Uncomment to switch the global default to Azure OpenAI:
+  # Uncomment to switch the global default to Azure OpenAI
+  # (`llm_model` is the Azure *deployment* name here):
   # provider: azure_openai
-  # azure_deployment: gpt-4o
+  # llm_model: gpt-4o
   # temperature: 0.2
 
   # Uncomment to switch the global default to a local Ollama instance:
   # provider: ollama
-  # ollama_model: llama3.1
+  # llm_model: llama3.1
+  # temperature: 0.2
+
+  # Uncomment to switch the global default to Anthropic:
+  # provider: anthropic
+  # llm_model: claude-haiku-5-5
   # temperature: 0.2
 
 # =============================================================================

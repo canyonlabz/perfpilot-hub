@@ -5,7 +5,7 @@
 # under this repo already use (and that `agent-framework/config/agents.yaml`
 # uses for the global-fallback LLM block). The agent factory in
 # `agents/orchestrator/agent.py` (and the framework-level loader in
-# `utils/base_agent.py`) walk the candidates in priority order:
+# `core/base_agent.py`) walk the candidates in priority order:
 #
 #   1. `agents/orchestrator/config.yaml`         (gitignored, operator override)
 #   2. `agents/orchestrator/config.example.yaml` (this file — committed default)
@@ -35,14 +35,14 @@
 # =============================================================================
 # Leaving this block commented out means the orchestrator uses
 # `agents.yaml -> default_llm_provider` (in `agents.example.yaml` today
-# that is `openai / gpt-4o-mini / temperature 0.2`). Operators can
+# that is `openai / gpt-5-mini / temperature 0.2`). Operators can
 # uncomment + customize without code changes.
 #
 # Example (mirrors V2 doc Section 11.2):
 #
 # llm_provider:
 #   provider: openai
-#   azure_deployment:gpt-5-mini
+#   llm_model: gpt-5-mini     # for azure_openai this is the deployment name
 #   temperature: 0.2          # 0.1 for deterministic routing, 0.3+ for chatty conversational style
 
 # =============================================================================

@@ -58,12 +58,13 @@ class OpenAICompatibleAdapter:
 
         provider = config.get("provider", "openai")
 
+        # One generic `llm_model` for both; for Azure it is the deployment name.
         if provider == "azure_openai":
-            model = config.get("azure_deployment", DEFAULT_AZURE_DEPLOYMENT)
+            model = config.get("llm_model") or DEFAULT_AZURE_DEPLOYMENT
             api_key = config.get("azure_api_key", "")
             base_url = (config.get("azure_endpoint") or "").strip() or None
         else:  # "openai" (default)
-            model = config.get("openai_model", DEFAULT_OPENAI_CHAT_MODEL)
+            model = config.get("llm_model") or DEFAULT_OPENAI_CHAT_MODEL
             api_key = config.get("openai_api_key", "")
             # base_url left unset: the OpenAI SDK applies its own default endpoint.
             base_url = None

@@ -43,8 +43,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 VALID_PROVIDERS = ("openai", "azure_openai", "ollama", "anthropic")
-DEFAULT_OPENAI_CHAT_MODEL = "gpt-4o-mini"
-DEFAULT_AZURE_DEPLOYMENT = "gpt-4o"
+DEFAULT_OPENAI_CHAT_MODEL = "gpt-5-mini"
+DEFAULT_AZURE_DEPLOYMENT = "gpt-5-mini"
 DEFAULT_OLLAMA_MODEL = "llama3.1"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_AZURE_API_VERSION = "2024-02-15-preview"
@@ -53,6 +53,75 @@ DEFAULT_AZURE_API_VERSION = "2024-02-15-preview"
 DEFAULT_ANTHROPIC_MODEL = "claude-3-5-sonnet-latest"
 DEFAULT_ANTHROPIC_MAX_TOKENS = 4096
 DEFAULT_TEMPERATURE = 1.0
+
+# Single source of the per-provider default model. Adding a vendor is one entry
+# here (plus its adapter) rather than a new constant + setdefault + adapter key.
+DEFAULT_MODELS = {
+    "openai": DEFAULT_OPENAI_CHAT_MODEL,
+    "azure_openai": DEFAULT_AZURE_DEPLOYMENT,
+    "ollama": DEFAULT_OLLAMA_MODEL,
+    "anthropic": DEFAULT_ANTHROPIC_MODEL,
+}
+
+# Provider-scoped env var that supplies the model when the YAML block omits
+# `llm_model`. (For Azure the "model" is the deployment name.)
+PROVIDER_MODEL_ENV = {
+    "openai": "OPENAI_MODEL",
+    "azure_openai": "AZURE_OPENAI_DEPLOYMENT",
+    "ollama": "OLLAMA_MODEL",
+    "anthropic": "ANTHROPIC_MODEL",
+}
+
+# Legacy provider-specific model keys. These are no longer accepted in a
+# provider block: the single generic `llm_model` replaces all of them. They are
+# listed so the resolver can raise a clear, actionable error if an old config is
+# loaded (this also catches a key that does not match the active provider).
+LEGACY_MODEL_KEYS = ("openai_model", "azure_deployment", "ollama_model", "anthropic_model")
+
+
+def _resolve_llm_model(
+    config: Mapping[str, Any],
+    provider: str,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Resolve the single generic model identifier (``llm_model``).
+
+    Precedence:
+        1. ``config["llm_model"]`` (the YAML block's generic key)
+        2. the provider-scoped env var in :data:`PROVIDER_MODEL_ENV`
+           (only consulted when ``env`` is provided)
+        3. the provider default in :data:`DEFAULT_MODELS`
+
+    The legacy provider-specific model keys (``openai_model`` /
+    ``azure_deployment`` / ``ollama_model`` / ``anthropic_model``) are no longer
+    supported. If any of them appears in ``config`` this raises ``ValueError``
+    naming ``llm_model`` - which also covers a legacy key that does not match the
+    active provider (the old "silent wrong model" hazard).
+
+    For ``azure_openai`` the resolved value is the deployment name.
+    """
+    present_legacy = [k for k in LEGACY_MODEL_KEYS if k in config]
+    if present_legacy:
+        raise ValueError(
+            "Legacy model key(s) {} are no longer supported. Use a single "
+            "'llm_model' in the llm_provider block instead (for azure_openai "
+            "this is the deployment name).".format(
+                ", ".join(repr(k) for k in present_legacy)
+            )
+        )
+
+    model = config.get("llm_model")
+    if model not in (None, ""):
+        return str(model)
+
+    if env:
+        env_key = PROVIDER_MODEL_ENV.get(provider)
+        if env_key:
+            env_val = env.get(env_key, "").strip()
+            if env_val:
+                return env_val
+
+    return DEFAULT_MODELS.get(provider, DEFAULT_OPENAI_CHAT_MODEL)
 
 # SSL verification modes - mirrors the pattern used by blazemeter-mcp,
 # datadog-mcp, and confluence-mcp so operators have one mental model
@@ -94,14 +163,20 @@ def merge_env_credentials(provider_config: dict, env: Optional[Mapping[str, str]
 
     Recognized env vars:
         LLM_PROVIDER  (fallback for the `provider` field if YAML is silent)
-        OPENAI_API_KEY, OPENAI_MODEL
-        AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT,
-        AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENT
-        OLLAMA_BASE_URL, OLLAMA_MODEL
-        ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_BASE_URL,
-            ANTHROPIC_MAX_TOKENS
+        OPENAI_API_KEY
+        AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION
+        OLLAMA_BASE_URL
+        ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ANTHROPIC_MAX_TOKENS
+        OPENAI_MODEL / AZURE_OPENAI_DEPLOYMENT / OLLAMA_MODEL / ANTHROPIC_MODEL
+            (provider-scoped model fallbacks, used ONLY when the YAML block
+            omits `llm_model`; see `_resolve_llm_model`)
         REQUESTS_CA_BUNDLE / SSL_CERT_FILE  (corporate CA bundle path; same
             convention as blazemeter-mcp, datadog-mcp, confluence-mcp)
+
+    The model is normalized into a single generic `llm_model` key by
+    `_resolve_llm_model`. The legacy provider-specific model keys
+    (`openai_model` / `azure_deployment` / `ollama_model` / `anthropic_model`)
+    are no longer accepted and raise `ValueError`.
 
     YAML values win over env values when both are present (so per-agent
     overrides are honored). The precedence chain for `provider` itself is:
@@ -115,23 +190,25 @@ def merge_env_credentials(provider_config: dict, env: Optional[Mapping[str, str]
         enriched.setdefault("provider", env_provider)
 
     enriched.setdefault("openai_api_key", env.get("OPENAI_API_KEY", ""))
-    enriched.setdefault("openai_model", env.get("OPENAI_MODEL", DEFAULT_OPENAI_CHAT_MODEL))
 
     enriched.setdefault("azure_api_key", env.get("AZURE_OPENAI_API_KEY", ""))
     enriched.setdefault("azure_endpoint", env.get("AZURE_OPENAI_ENDPOINT", ""))
     enriched.setdefault("azure_api_version", env.get("AZURE_OPENAI_API_VERSION", DEFAULT_AZURE_API_VERSION))
-    enriched.setdefault("azure_deployment", env.get("AZURE_OPENAI_DEPLOYMENT", DEFAULT_AZURE_DEPLOYMENT))
 
     enriched.setdefault("ollama_base_url", env.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL))
-    enriched.setdefault("ollama_model", env.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL))
 
     enriched.setdefault("anthropic_api_key", env.get("ANTHROPIC_API_KEY", ""))
-    enriched.setdefault("anthropic_model", env.get("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL))
     enriched.setdefault("anthropic_base_url", env.get("ANTHROPIC_BASE_URL", ""))
     enriched.setdefault(
         "anthropic_max_tokens",
         env.get("ANTHROPIC_MAX_TOKENS", DEFAULT_ANTHROPIC_MAX_TOKENS),
     )
+
+    # Normalize the model into a single generic `llm_model` (raises on any
+    # legacy provider-specific model key). Resolved after `provider` so the
+    # right env fallback / default is chosen.
+    provider = enriched.get("provider") or "openai"
+    enriched["llm_model"] = _resolve_llm_model(enriched, provider, env=env)
 
     enriched.setdefault("temperature", DEFAULT_TEMPERATURE)
 
@@ -209,9 +286,10 @@ def build_llm_provider(agent_llm_block: dict | None = None) -> "LLMProvider":
 class LLMProvider:
     """Abstraction layer for chat-completion LLM providers.
 
-    Supports OpenAI, Azure OpenAI, and Ollama. The provider is selected via
-    the `provider` field of the config dict at initialization. All providers
-    expose the same async interface: `chat(messages, **kwargs) -> dict`.
+    Supports OpenAI, Azure OpenAI, Ollama, and Anthropic. The provider is
+    selected via the `provider` field of the config dict at initialization.
+    All providers expose the same async interface: `chat(messages, **kwargs)
+    -> dict` (the direct `chat()` path covers the OpenAI-standard providers).
 
     HTTP / SDK clients are created lazily on first use and reused across
     calls to avoid spinning up a new connection pool / SSL context every time.
@@ -234,6 +312,11 @@ class LLMProvider:
         # per-vendor adapter (which reads config["provider"]) sees the same
         # value even when the caller omitted it and relied on the default.
         self.config.setdefault("provider", self.provider)
+        # Normalize the model to a single generic `llm_model`. Runs on every
+        # construction path (including direct `LLMProvider({...})` that bypasses
+        # `merge_env_credentials`). Env is not consulted here; the env fallback
+        # belongs to `merge_env_credentials`. Raises on any legacy model key.
+        self.config["llm_model"] = _resolve_llm_model(self.config, self.provider, env=None)
         self._openai_client = None
         self._azure_client = None
         self._ollama_client = None
@@ -324,16 +407,12 @@ class LLMProvider:
         return self._agent_http_client
 
     def get_model_name(self) -> str:
-        """Return the model identifier for the current provider."""
-        if self.provider == "openai":
-            return self.config.get("openai_model", DEFAULT_OPENAI_CHAT_MODEL)
-        if self.provider == "azure_openai":
-            return self.config.get("azure_deployment", DEFAULT_AZURE_DEPLOYMENT)
-        if self.provider == "ollama":
-            return self.config.get("ollama_model", DEFAULT_OLLAMA_MODEL)
-        if self.provider == "anthropic":
-            return self.config.get("anthropic_model", DEFAULT_ANTHROPIC_MODEL)
-        return "unknown"
+        """Return the model identifier for the current provider.
+
+        After construction the generic `llm_model` is always resolved, so this
+        reads it directly (for `azure_openai` it is the deployment name).
+        """
+        return self.config.get("llm_model") or DEFAULT_MODELS.get(self.provider, "unknown")
 
     async def close(self) -> None:
         """Release HTTP / SDK resources held by cached clients.
@@ -444,7 +523,7 @@ class LLMProvider:
         extra: dict,
     ) -> dict:
         client = self._get_openai_client()
-        model = self.config.get("openai_model", DEFAULT_OPENAI_CHAT_MODEL)
+        model = self.config.get("llm_model") or DEFAULT_OPENAI_CHAT_MODEL
         kwargs: dict = {"model": model, "messages": messages, **extra}
         # `max_tokens` is deprecated for OpenAI's reasoning-class models
         # (o1 / o3 / gpt-5 series) which require `max_completion_tokens`.
@@ -482,7 +561,7 @@ class LLMProvider:
         extra: dict,
     ) -> dict:
         client = self._get_azure_client()
-        deployment = self.config.get("azure_deployment", DEFAULT_AZURE_DEPLOYMENT)
+        deployment = self.config.get("llm_model") or DEFAULT_AZURE_DEPLOYMENT
         kwargs: dict = {"model": deployment, "messages": messages, **extra}
         if max_tokens is not None:
             kwargs["max_completion_tokens"] = max_tokens
@@ -512,7 +591,7 @@ class LLMProvider:
         """Hit Ollama's OpenAI-compatible `/v1/chat/completions` endpoint."""
         client = self._get_ollama_client()
         base_url = self.config.get("ollama_base_url", DEFAULT_OLLAMA_BASE_URL).rstrip("/")
-        model = self.config.get("ollama_model", DEFAULT_OLLAMA_MODEL)
+        model = self.config.get("llm_model") or DEFAULT_OLLAMA_MODEL
 
         body = {
             "model": model,

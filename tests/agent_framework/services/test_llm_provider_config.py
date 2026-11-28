@@ -22,7 +22,12 @@ from __future__ import annotations
 
 import pytest
 
-from services.llm_provider import LLMProvider, build_llm_provider
+from services.llm_provider import (
+    DEFAULT_MODELS,
+    LLMProvider,
+    build_llm_provider,
+    merge_env_credentials,
+)
 from services.model_adapters.openai import is_reasoning_model
 
 # Skip the whole module if AG2's typed-config package is not importable in this
@@ -61,7 +66,7 @@ def test_openai_returns_typed_config_with_http_client():
     provider = LLMProvider(
         {
             "provider": "openai",
-            "openai_model": "gpt-4o",
+            "llm_model": "gpt-4o",
             "openai_api_key": "sk-test-not-a-real-key",
             "temperature": 0.3,
         }
@@ -80,7 +85,7 @@ def test_openai_omits_temperature_for_reasoning_model():
     provider = LLMProvider(
         {
             "provider": "openai",
-            "openai_model": "o3-mini",
+            "llm_model": "o3-mini",
             "openai_api_key": "sk-test-not-a-real-key",
             "temperature": 0.7,
         }
@@ -105,7 +110,7 @@ def test_azure_openai_maps_deployment_and_endpoint():
     provider = LLMProvider(
         {
             "provider": "azure_openai",
-            "azure_deployment": "my-deployment",
+            "llm_model": "my-deployment",
             "azure_api_key": "azure-test-not-a-real-key",
             "azure_endpoint": "https://example.openai.azure.com/",
             "temperature": 0.2,
@@ -124,7 +129,7 @@ def test_azure_openai_blank_endpoint_leaves_base_url_unset():
     provider = LLMProvider(
         {
             "provider": "azure_openai",
-            "azure_deployment": "my-deployment",
+            "llm_model": "my-deployment",
             "azure_api_key": "azure-test-not-a-real-key",
             "azure_endpoint": "   ",
         }
@@ -165,7 +170,7 @@ def test_ollama_builds_native_ollama_config():
     provider = LLMProvider(
         {
             "provider": "ollama",
-            "ollama_model": "llama3.1",
+            "llm_model": "llama3.1",
             "ollama_base_url": "http://localhost:11434/",
             "temperature": 0.4,
         }
@@ -189,7 +194,7 @@ def test_agent_http_client_is_cached():
     provider = LLMProvider(
         {
             "provider": "openai",
-            "openai_model": "gpt-4o",
+            "llm_model": "gpt-4o",
             "openai_api_key": "sk-test-not-a-real-key",
         }
     )
@@ -205,7 +210,7 @@ def test_build_llm_provider_returns_retained_instance():
     provider = build_llm_provider(
         {
             "provider": "openai",
-            "openai_model": "gpt-4o",
+            "llm_model": "gpt-4o",
             "openai_api_key": "sk-test-not-a-real-key",
         }
     )
@@ -245,7 +250,7 @@ def test_anthropic_build_kwargs_maps_fields_and_omits_temperature():
     kwargs = _build_kwargs(
         {
             "provider": "anthropic",
-            "anthropic_model": "claude-x",
+            "llm_model": "claude-x",
             "anthropic_api_key": "anthropic-test-not-a-real-key",
             "anthropic_base_url": "https://example.anthropic.test",
             "anthropic_max_tokens": 1024,
@@ -317,7 +322,7 @@ def test_anthropic_live_construction_real_config():
     provider = LLMProvider(
         {
             "provider": "anthropic",
-            "anthropic_model": "claude-sonnet-4-5",
+            "llm_model": "claude-sonnet-4-5",
             "anthropic_api_key": "sk-ant-not-a-real-key",
             "anthropic_base_url": "https://example.anthropic.test",
             "anthropic_max_tokens": 2048,
@@ -356,7 +361,7 @@ def test_anthropic_to_ag2_config_constructs_without_temperature(monkeypatch):
     provider = LLMProvider(
         {
             "provider": "anthropic",
-            "anthropic_model": "claude-x",
+            "llm_model": "claude-x",
             "anthropic_api_key": "anthropic-test-not-a-real-key",
             "anthropic_max_tokens": 4096,
             "temperature": 0.7,
@@ -368,3 +373,67 @@ def test_anthropic_to_ag2_config_constructs_without_temperature(monkeypatch):
     assert captured["model"] == "claude-x"
     assert captured["http_client"] is not None
     assert "temperature" not in captured
+
+
+# ---------------------------------------------------------------------------
+# Generic `llm_model` resolution + legacy-key hard cut
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "provider, legacy_key",
+    [
+        ("openai", "openai_model"),
+        ("azure_openai", "azure_deployment"),
+        ("ollama", "ollama_model"),
+        ("anthropic", "anthropic_model"),
+    ],
+)
+def test_legacy_model_key_rejected_on_construction(provider, legacy_key):
+    """Each legacy provider-specific model key is a hard error naming llm_model."""
+    with pytest.raises(ValueError, match="llm_model"):
+        LLMProvider({"provider": provider, legacy_key: "some-model"})
+
+
+def test_mismatched_legacy_key_rejected():
+    """A legacy key that does not match the active provider also raises.
+
+    This is the old "silent wrong model" hazard turned into a loud failure.
+    """
+    with pytest.raises(ValueError, match="llm_model"):
+        LLMProvider({"provider": "openai", "anthropic_model": "claude-x"})
+
+
+def test_merge_env_credentials_rejects_legacy_model_key():
+    with pytest.raises(ValueError, match="llm_model"):
+        merge_env_credentials({"provider": "openai", "openai_model": "gpt-4o"}, env={})
+
+
+@pytest.mark.parametrize(
+    "provider, env_key, env_val",
+    [
+        ("openai", "OPENAI_MODEL", "gpt-env"),
+        ("azure_openai", "AZURE_OPENAI_DEPLOYMENT", "deploy-env"),
+        ("ollama", "OLLAMA_MODEL", "llama-env"),
+        ("anthropic", "ANTHROPIC_MODEL", "claude-env"),
+    ],
+)
+def test_env_supplies_llm_model_when_yaml_omits_it(provider, env_key, env_val):
+    """Provider-scoped env var is the fallback when the YAML omits llm_model."""
+    merged = merge_env_credentials({"provider": provider}, env={env_key: env_val})
+    assert merged["llm_model"] == env_val
+
+
+def test_yaml_llm_model_beats_env():
+    merged = merge_env_credentials(
+        {"provider": "openai", "llm_model": "gpt-yaml"},
+        env={"OPENAI_MODEL": "gpt-env"},
+    )
+    assert merged["llm_model"] == "gpt-yaml"
+
+
+@pytest.mark.parametrize("provider", ["openai", "azure_openai", "ollama", "anthropic"])
+def test_provider_default_when_model_absent(provider):
+    """With neither llm_model nor an env var, the provider default is used."""
+    merged = merge_env_credentials({"provider": provider}, env={})
+    assert merged["llm_model"] == DEFAULT_MODELS[provider]

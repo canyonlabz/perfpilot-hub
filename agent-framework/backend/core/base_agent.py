@@ -48,7 +48,7 @@ REQUIRED_AGENT_FILES = ("agent.py", "agent_card.json", "INSTRUCTIONS.md")
 # exists on disk is used. Mirrors the same pattern that the MCP servers
 # in this repo follow (`config.yaml` -> `config.example.yaml`) and that
 # the global ``backend/config/agents.yaml`` / ``agents.example.yaml``
-# pair uses in ``utils/llm_provider.py::load_agents_yaml``.
+# pair uses in ``services/llm_provider.py::load_agents_yaml``.
 CANDIDATE_CONFIG_FILES = ("config.yaml", "config.example.yaml")
 
 

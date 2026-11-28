@@ -36,7 +36,7 @@ class OllamaAdapter:
             DEFAULT_TEMPERATURE,
         )
 
-        model = config.get("ollama_model", DEFAULT_OLLAMA_MODEL)
+        model = config.get("llm_model") or DEFAULT_OLLAMA_MODEL
         # OllamaConfig uses ``host`` (the server base URL), not an OpenAI
         # ``base_url`` - there is no ``/v1`` suffix on the native path.
         host = (config.get("ollama_base_url") or DEFAULT_OLLAMA_BASE_URL).rstrip("/")

@@ -4,7 +4,7 @@
 # same `config.yaml` / `config.example.yaml` split that the MCP servers
 # under this repo already use. The agent factory in
 # `agents/script-agent/agent.py` (and the framework-level loader in
-# `utils/base_agent.py`) walk the candidates in priority order:
+# `core/base_agent.py`) walk the candidates in priority order:
 #
 #   1. `agents/script-agent/config.yaml`         (gitignored, operator override)
 #   2. `agents/script-agent/config.example.yaml` (this file - committed default)
@@ -35,7 +35,7 @@
 #
 # llm_provider:
 #   provider: openai
-#   openai_model: gpt-4o-mini
+#   llm_model: gpt-5-mini
 #   temperature: 0.2
 
 # =============================================================================
