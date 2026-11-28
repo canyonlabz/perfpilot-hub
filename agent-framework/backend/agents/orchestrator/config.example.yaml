@@ -127,11 +127,11 @@ pipeline:
 #
 # The Web UI path (port 8102) is unaffected — CopilotKit manages its own
 # loop independently.
-max_tool_rounds: 10              # Max LLM round-trips before forced exit
-max_consecutive_repeats: 3       # Exit if same non-polling tool called N times identically
+max_tool_rounds: 20              # Max LLM round-trips before forced exit
+max_consecutive_repeats: 5       # Exit if same non-polling tool called N times identically
 polling_tools:                   # Tools exempt from the tight consecutive-repeat limit
   - check_task_status
-polling_max_consecutive_repeats: 15   # Higher threshold for polling tools
+polling_max_consecutive_repeats: 25   # Higher threshold for polling tools
 # NOTE: context budget (context_limit / compaction_*) moved to the
 # `context_management:` section at the bottom of this file.
 

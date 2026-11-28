@@ -142,8 +142,8 @@ timeout_seconds: 120
 #   compaction_preserve_recent) has moved to the `context_management:`
 #   section at the bottom of this file (global default in
 #   `config/agents.yaml`, per-agent override here).
-max_tool_rounds: 25
-max_consecutive_repeats: 3
+max_tool_rounds: 50
+max_consecutive_repeats: 5
 
 # Polling tool exemptions
 # Tools listed here use a higher consecutive-repeat threshold because
